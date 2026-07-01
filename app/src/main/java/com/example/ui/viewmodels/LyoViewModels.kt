@@ -1,0 +1,3463 @@
+package com.example.ui.viewmodels
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.example.data.database.*
+import com.example.data.repository.LyoRepository
+import com.example.data.repository.LyoFirebaseHelper
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import android.util.Log
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import android.content.pm.PackageManager
+
+private val sharedHttpClient = okhttp3.OkHttpClient.Builder()
+    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .build()
+
+fun hashPassword(password: String): String {
+    return try {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(password.toByteArray(Charsets.UTF_8))
+        hashBytes.joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        password
+    }
+}
+
+fun resolveSmartGeocodeTamilNadu(address: String, currentLat: Double, currentLng: Double): Pair<Double, Double> {
+    val addrText = address.lowercase()
+    
+    // Smart Bilingual Geocoding Fallback for Tamil Nadu Cities & Districts
+    return if (addrText.contains("dharmapuri") || addrText.contains("தருமபுரி") || addrText.contains("தர்மபுரி")) {
+        Pair(12.1275, 78.1582)
+    } else if (addrText.contains("salem") || addrText.contains("சேலம்")) {
+        // If specific to Idappadi, keep Idappadi coordinates
+        if (addrText.contains("idappadi") || addrText.contains("எடப்பாடி")) {
+            Pair(11.5812, 77.8465)
+        } else {
+            Pair(11.6643, 78.1460)
+        }
+    } else if (addrText.contains("chennai") || addrText.contains("சென்னை")) {
+        Pair(13.0827, 80.2707)
+    } else if (addrText.contains("coimbatore") || addrText.contains("கோயம்புத்தூர்") || addrText.contains("கோவை")) {
+        Pair(11.0168, 76.9558)
+    } else if (addrText.contains("erode") || addrText.contains("ஈரோடு")) {
+        Pair(11.3410, 77.7172)
+    } else if (addrText.contains("namakkal") || addrText.contains("நாமக்கல்")) {
+        Pair(11.2189, 78.1672)
+    } else if (addrText.contains("tiruchengode") || addrText.contains("திருச்செங்கோடு")) {
+        Pair(11.3794, 77.8944)
+    } else {
+        Pair(currentLat, currentLng)
+    }
+}
+
+fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6371.0 // Radius of the earth in km
+    val latDistance = Math.toRadians(lat2 - lat1)
+    val lonDistance = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2)
+    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return r * c
+}
+
+enum class LyoConvStage {
+    IDLE,
+    ITEM_CONFIRM,
+    RESTAURANT_SELECT,
+    ITEM_SELECT,
+    CART_CONFIRM,
+    CART_CONFLICT
+}
+
+data class LyoConvState(
+    val stage: LyoConvStage = LyoConvStage.IDLE,
+    val pendingItem: String? = null,
+    val pendingCategory: String? = null,
+    val selectedRestaurant: com.example.data.database.Vendor? = null,
+    val matchedRestaurants: List<Pair<com.example.data.database.Vendor, List<com.example.data.database.MenuItem>>> = emptyList(),
+    val matchedItems: List<com.example.data.database.MenuItem> = emptyList(),
+    val pendingMenuItem: com.example.data.database.MenuItem? = null
+)
+
+data class LyoMessage(
+    val text: String,
+    val isUser: Boolean,
+    val timestamp: Long = System.currentTimeMillis(),
+    val itemsSummary: List<String>? = null,
+    val totalAmount: Double? = null,
+    val shopName: String? = null,
+    val recommendedItems: List<Pair<com.example.data.database.MenuItem, com.example.data.database.Vendor>>? = null,
+    val isConflictNotice: Boolean = false,
+    val conflictItem: Pair<com.example.data.database.MenuItem, com.example.data.database.Vendor>? = null
+)
+
+// ==========================================
+// 1. AUTHENTICATION PORTAL VIEWMODEL
+// ==========================================
+class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
+
+    val currentUser = repository.currentUser
+
+    private val _loginError = MutableStateFlow<String?>(null)
+    val loginError: StateFlow<String?> = _loginError
+
+    private val _rememberMe = MutableStateFlow(true)
+    val rememberMe: StateFlow<Boolean> = _rememberMe
+
+    // Registration Address picker states
+    val regName = MutableStateFlow("")
+    val regPhone = MutableStateFlow("")
+    val regEmail = MutableStateFlow("")
+    val regPassword = MutableStateFlow("")
+    val regConfirmPassword = MutableStateFlow("")
+    val regAddress = MutableStateFlow("")
+    val regLat = MutableStateFlow(11.5812) // Default Salem Idappadi
+    val regLng = MutableStateFlow(77.8465)
+    val regWhatsAppOptIn = MutableStateFlow(true)
+    val regRole = MutableStateFlow("CUSTOMER") // "CUSTOMER" or "DELIVERY"
+    val regVehicleNo = MutableStateFlow("")
+    val hasUserSetLocation = MutableStateFlow(false)
+
+    init {
+        // Auto-seed database when launching for first time
+        viewModelScope.launch {
+            repository.seedDatabaseIfNeeded()
+        }
+    }
+
+    fun setRememberMe(value: Boolean) {
+        _rememberMe.value = value
+    }
+
+    fun clearError() {
+        _loginError.value = null
+    }
+
+    fun clearRegistrationFields() {
+        regName.value = ""
+        regPhone.value = ""
+        regEmail.value = ""
+        regPassword.value = ""
+        regConfirmPassword.value = ""
+        regAddress.value = ""
+        regLat.value = 11.5812
+        regLng.value = 77.8465
+        regWhatsAppOptIn.value = true
+        regRole.value = "CUSTOMER"
+        regVehicleNo.value = ""
+        hasUserSetLocation.value = false
+        _loginError.value = null
+    }
+
+    fun loginWithPhoneAndPassword(phone: String, pass: String, onSuccess: (String) -> Unit) {
+        viewModelScope.launch {
+            _loginError.value = null
+            val trimPhone = phone.trim()
+            val trimPass = pass.trim()
+            if (trimPhone.isEmpty()) {
+                _loginError.value = "Please enter your mobile number. (தயவுசெய்து உங்கள் மொபைல் எண்ணை உள்ளிடவும்.)"
+                return@launch
+            }
+            if (trimPass.isEmpty()) {
+                _loginError.value = "Please enter your password. (தயவுசெய்து உங்கள் கடவுச்சொல்லை உள்ளிடவும்.)"
+                return@launch
+            }
+
+            // Normalize phone/username if it is a phone number with country code/spaces
+            val cleanPhone = if (trimPhone.startsWith("+91")) {
+                trimPhone.replace("+91", "").replace(" ", "").trim()
+            } else {
+                trimPhone.replace(" ", "").trim()
+            }
+            val stripped = cleanPhone
+
+            // 1. ONLINE-FIRST: Attempt login via Firebase Authentication
+            var onlineUser: User? = null
+            if (com.example.data.repository.LyoFirebaseHelper.isInitialized) {
+                try {
+                    // Try with normalized cleanPhone first, then fall back to trimPhone
+                    onlineUser = com.example.data.repository.LyoFirebaseHelper.loginInFirebase(cleanPhone, trimPass)
+                    if (onlineUser == null && cleanPhone != trimPhone) {
+                        onlineUser = com.example.data.repository.LyoFirebaseHelper.loginInFirebase(trimPhone, trimPass)
+                    }
+                    if (onlineUser != null) {
+                        // Keep our offline Room database synchronized with freshest cloud records
+                        repository.registerUser(onlineUser, trimPass)
+                    }
+                } catch (e: Exception) {
+                    Log.e("LyoViewModels", "Firebase login failed: ${e.message}")
+                }
+            }
+
+            // 2. OFFLINE FALLBACK: If offline or online login failed, fall back to locally cached profile
+            val finalUser = onlineUser ?: run {
+                var localUser: User? = null
+                val phoneVariants = listOf(cleanPhone, stripped, trimPhone, "+91$stripped", "+91 $stripped")
+                for (variant in phoneVariants) {
+                    if (variant.isNotEmpty()) {
+                        val localFound = repository.findUserLocallyOnly(variant)
+                        if (localFound != null) {
+                            localUser = localFound
+                            break
+                        }
+                    }
+                }
+                localUser
+            }
+
+            if (finalUser != null) {
+                if (finalUser.role == "DELIVERY" && !finalUser.isActiveRider) {
+                    _loginError.value = "Sorry, your delivery partner account has been deactivated by the administrator. (மன்னிக்கவும், உங்கள் கணக்கு நிர்வாகியால் முடக்கப்பட்டுள்ளது.)"
+                    return@launch
+                }
+                repository.currentUser.value = finalUser
+                onSuccess(finalUser.role)
+                return@launch
+            } else {
+                _loginError.value = "Incorrect mobile number or password. (தவறான கைபேசி எண் அல்லது கடவுச்சொல்.)"
+            }
+        }
+    }
+
+    fun loginWithGoogle(
+        idToken: String,
+        overrideRole: String? = null,
+        vehicleNo: String? = null,
+        address: String? = null,
+        lat: Double? = null,
+        lng: Double? = null,
+        onSuccess: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            _loginError.value = null
+            try {
+                val user = com.example.data.repository.LyoFirebaseHelper.loginWithGoogleInFirebase(
+                    idToken = idToken,
+                    overrideRole = overrideRole,
+                    vehicleNo = vehicleNo,
+                    address = address,
+                    lat = lat,
+                    lng = lng
+                )
+                if (user != null) {
+                    // Save/update locally
+                    repository.registerUser(user)
+                    repository.currentUser.value = user
+                    onSuccess(user.role)
+                } else {
+                    _loginError.value = "Google Authentication was not successful."
+                }
+            } catch (e: Exception) {
+                _loginError.value = "Google authentication failed: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun createAccount(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _loginError.value = null
+            val phoneVal = regPhone.value.trim()
+            val cleanPass = regPassword.value.trim()
+            val cleanConfirmPass = regConfirmPassword.value.trim()
+
+            if (phoneVal.length != 10 || !phoneVal.all { it.isDigit() }) {
+                _loginError.value = "Please enter a valid 10-digit mobile number. (தயவுசெய்து சரியான 10 இலக்க மொபைல் எண்ணை உள்ளிடவும்.)"
+                return@launch
+            }
+            if (regName.value.isBlank()) {
+                _loginError.value = "Please enter your full name. (தயவுசெய்து உங்கள் முழு பெயரை உள்ளிடவும்.)"
+                return@launch
+            }
+            if (regAddress.value.isBlank()) {
+                _loginError.value = "Please select/pin an address. (தயவுசெய்து முகவரியைத் தேர்வு செய்யவும்.)"
+                return@launch
+            }
+            if (!hasUserSetLocation.value) {
+                _loginError.value = "தயவுசெய்து உங்கள் வீட்டு இருப்பிடத்தை Map-ல் select பண்ணவும் அல்லது GPS Auto-detect பயன்படுத்தவும் — இது இல்லாமல் டெலிவரி நபர் உங்கள் வீட்டைக் கண்டுபிடிக்க முடியாது!"
+                return@launch
+            }
+            if (cleanPass.isBlank()) {
+                _loginError.value = "Please create a secure login password. (தயவுசெய்து கடவுச்சொல்லை உருவாக்கவும்.)"
+                return@launch
+            }
+            if (cleanPass != cleanConfirmPass) {
+                _loginError.value = "Passwords do not match! Please verify. (கடவுச்சொல் பொருந்தவில்லை! மீண்டும் சரிபார்க்கவும்.)"
+                return@launch
+            }
+
+            val selectedRole = regRole.value
+            val vNo = regVehicleNo.value.trim()
+            if (selectedRole == "DELIVERY" && vNo.isBlank()) {
+                _loginError.value = "Please enter your Vehicle Registration Number. (வண்டி எண்ணை உள்ளிடவும்.)"
+                return@launch
+            }
+
+            val existingUser = repository.findUser(phoneVal)
+            if (existingUser != null) {
+                if (existingUser.role == "CUSTOMER") {
+                    _loginError.value = "This mobile number is already registered as a Customer! Please use the Login Screen to Log In. (இந்த மொபைல் எண் ஏற்கனவே வாடிக்கையாளராக பதிவு செய்யப்பட்டுள்ளது! தயவுசெய்து லாகின் செய்யவும்.)"
+                    return@launch
+                } else if (existingUser.role == "DELIVERY") {
+                    _loginError.value = "This mobile number is already registered as a Delivery Rider! Please use the Login Screen to Log In. (இந்த மொபைல் எண் ஏற்கனவே டெலிவரி பார்ட்னராக பதிவு செய்யப்பட்டுள்ளது! லாகின் செய்யவும்.)"
+                    return@launch
+                } else if (existingUser.role == "ADMIN") {
+                    _loginError.value = "This mobile number is registered as an Admin! Please use the Login Screen or use another mobile number. (இந்த மொபைல் எண் நிர்வாகியாகப் பதிவு செய்யப்பட்டுள்ளது!)"
+                    return@launch
+                }
+            }
+
+            val resolvedLoc = resolveSmartGeocodeTamilNadu(regAddress.value, regLat.value, regLng.value)
+            val newUser = User(
+                phone = phoneVal,
+                name = regName.value.trim(),
+                email = regEmail.value.trim(),
+                address = regAddress.value.trim(),
+                lat = resolvedLoc.first,
+                lng = resolvedLoc.second,
+                isWhatsAppOptIn = regWhatsAppOptIn.value,
+                role = selectedRole,
+                vehicleNo = if (selectedRole == "DELIVERY") vNo else "",
+                isActiveRider = true // Self-registered riders are approved and active immediately
+            )
+            repository.registerUser(newUser, cleanPass)
+            repository.currentUser.value = newUser
+
+            // Trigger beautiful registration welcome notification!
+            LyoFirebaseHelper.appContext?.let { ctx ->
+                val welcomeTitle = if (newUser.role == "DELIVERY") {
+                    "Lyo Partner • புதிய டெலிவரி பார்ட்னர்! 🏍️"
+                } else {
+                    "Lyo Foods • வருக வருக! 🥳"
+                }
+                val welcomeBody = if (newUser.role == "DELIVERY") {
+                    "மதிப்பிற்குரிய ${newUser.name}, லைஃப்ரெஷ் குடும்பத்தில் இணைந்ததற்கு நன்றி! உங்கள் கணக்கு இப்போது புதிய ஆர்டர்களைப் பெறத் தயாராக உள்ளது."
+                } else {
+                    "அன்பான ${newUser.name}, எடப்பாடி & சேலத்தின் சிறந்த உணவுகளைத் தேடி ஆர்டர் செய்ய உங்களை அன்போடு வரவேற்கிறோம்! 🍛✨"
+                }
+                try {
+                    com.example.ui.screens.LyoNotificationHelper.showPushNotification(ctx, welcomeTitle, welcomeBody)
+                } catch (e: Exception) {
+                    Log.e("LyoViewModels", "Failed to send registration notification: ${e.message}")
+                }
+            }
+
+            onSuccess()
+        }
+    }
+
+    // Single-click GPS Auto Geocoding Simulation
+    fun triggerAutoGPS() {
+        // Simulate grabbing precise mobile location in Salem/Idappadi, Tamil Nadu
+        regAddress.value = "Idappadi Bus Stand Ring Road, Salem, Tamil Nadu (GPS Locked)"
+        regLat.value = 11.5812
+        regLng.value = 77.8465
+        hasUserSetLocation.value = true
+    }
+
+    // Manual slide geofence/Map pin selector simulation
+    fun setManualCoordinates(address: String, lat: Double, lng: Double) {
+        regAddress.value = "$address (Map Pinned)"
+        regLat.value = lat
+        regLng.value = lng
+        hasUserSetLocation.value = true
+    }
+
+    fun resetPassword(phone: String, newPass: String, onFinished: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val trimPhone = phone.trim()
+            val stripped = trimPhone.replace("+91", "").replace(" ", "").trim()
+            
+            // Search exact first
+            var user = repository.findUser(trimPhone)
+            
+            // Search stripped version if user is null
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser(stripped)
+            }
+            // Search with +91 prefix
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser("+91$stripped")
+            }
+            // Search with spaced +91 prefix
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser("+91 $stripped")
+            }
+            
+            if (user != null) {
+                repository.registerUser(user, newPass)
+                onFinished(true)
+            } else {
+                onFinished(false)
+            }
+        }
+    }
+
+    fun sendFirebasePasswordReset(email: String, onFinished: (Boolean, String?) -> Unit) {
+        val authInstance = com.example.data.repository.LyoFirebaseHelper.auth
+        if (authInstance != null) {
+            authInstance.sendPasswordResetEmail(email)
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        onFinished(true, null)
+                    } else {
+                        onFinished(false, task.exception?.localizedMessage ?: "Password reset failed.")
+                    }
+                }
+        } else {
+            // Offline/Local database fallback
+            viewModelScope.launch {
+                val user = repository.findUser(email)
+                if (user != null) {
+                    onFinished(true, "Local bypass: Password reset linkage simulated for $email")
+                } else {
+                    onFinished(false, "This email is not registered under our systems.")
+                }
+            }
+        }
+    }
+
+    fun logout() {
+        repository.currentUser.value = null
+        repository.clearCart()
+        repository.activeLiveOrder.value = null
+        clearRegistrationFields()
+    }
+}
+
+
+// ==========================================
+// 2. STOREFRONT VIEWMODEL (CUSTOMER INTERFACES)
+// ==========================================
+class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
+    private val GEMINI_MODEL = "gemini-2.0-flash"
+
+
+    val allVendors: StateFlow<List<Vendor>> = repository.allVendors
+        .map { list -> list.distinctBy { it.name.trim().lowercase() } }
+        .combine(repository.currentUser) { vendors, user ->
+            if (user != null) {
+                val mapped = vendors.map { vendor ->
+                    val dist = calculateDistance(user.lat, user.lng, vendor.lat, vendor.lng)
+                    vendor.copy(distance = dist)
+                }
+                val filtered = mapped.filter { it.distance <= it.visibilityRadiusKm }
+                if (filtered.isNotEmpty()) {
+                    filtered.sortedBy { it.distance }
+                } else {
+                    // Fallback: If no vendors are within strict visibility radius (e.g. mock coords), show all vendors
+                    mapped.sortedBy { it.distance }
+                }
+            } else {
+                vendors.map { it.copy(distance = 0.0) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allPromoBanners: StateFlow<List<PromoBanner>> = repository.allPromoBanners
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val searchQueries = MutableStateFlow("")
+    val selectedCategoryFilter = MutableStateFlow("All") // All, Restaurants, Cafes, Hotels, Bakeries, Small Snack Shops
+    val invoiceDownloadStates = androidx.compose.runtime.mutableStateMapOf<Long, String>()
+
+    val activeCart = repository.cart
+    val activeVendor = repository.currentVendor
+    val activeLiveOrder = repository.activeLiveOrder
+    val currentUser = repository.currentUser
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val activeVendorReviews: StateFlow<List<Review>> = activeVendor
+        .flatMapLatest { vendor ->
+            if (vendor != null) {
+                repository.getReviewsForVendor(vendor.id)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun submitReview(rating: Int, comment: String) {
+        val vendorId = activeVendor.value?.id ?: return
+        submitReviewForVendor(vendorId, rating, comment)
+    }
+
+    fun submitReviewForVendor(vendorId: Long, rating: Int, comment: String) {
+        val name = currentUser.value?.name?.ifBlank { null } ?: "Customer"
+        viewModelScope.launch {
+            repository.addReview(Review(
+                vendorId = vendorId,
+                userName = name,
+                rating = rating,
+                comment = comment
+            ))
+        }
+    }
+
+    val selectedTabState = MutableStateFlow("HOME")
+    val navigationTrigger = MutableStateFlow<String?>(null)
+    val aiRecommendBasketOptions = MutableStateFlow<List<Pair<MenuItem, Vendor>>>(emptyList())
+    val pendingItemToAdd = MutableStateFlow<Pair<MenuItem, Vendor>?>(null)
+    val pendingItemQuantity = MutableStateFlow(1)
+    val showCartConflictDialog = MutableStateFlow(false)
+    val showOrderSuccessDialog = MutableStateFlow(false)
+    val orderSuccessDialogTitle = MutableStateFlow("ஆர்டர் வெற்றிகரமாக பதிவு செய்யப்பட்டது! 🎉")
+    val orderSuccessDialogText = MutableStateFlow("ஓகே உங்கள் ஆர்டர் வெற்றிகரமாக வந்துவிட்டது!")
+    val showDeliverySuccessDialog = MutableStateFlow(false)
+
+    fun confirmDeliveryReceived(orderId: Long) {
+        viewModelScope.launch {
+            repository.updateOrderStatus(orderId, "DELIVERED")
+            val ride = repository.getRideForOrder(orderId)
+            if (ride != null) {
+                repository.updateRide(ride.copy(status = "COMPLETED", otpVerified = true))
+            }
+            showDeliverySuccessDialog.value = true
+        }
+    }
+
+    // Ultra-Fast Redundancy-Free Memory Caching Engine
+    private val menuItemsCache = java.util.concurrent.ConcurrentHashMap<Long, Flow<List<MenuItem>>>()
+    private val categoriesCache = java.util.concurrent.ConcurrentHashMap<Long, Flow<List<Category>>>()
+    private val userOrdersCache = java.util.concurrent.ConcurrentHashMap<String, Flow<List<Order>>>()
+    private val vendorCache = java.util.concurrent.ConcurrentHashMap<Long, Vendor?>()
+    private val orderItemsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.example.data.database.OrderItem>>()
+
+    fun selectRecommendedOption(item: MenuItem, vendor: Vendor) {
+        pendingItemToAdd.value = Pair(item, vendor)
+        pendingItemQuantity.value = 1
+    }
+
+    fun confirmPendingAddToCart(clearOnConflict: Boolean) {
+        val pending = pendingItemToAdd.value ?: return
+        val item = pending.first
+        val vendor = pending.second
+        val qty = pendingItemQuantity.value
+        val activeVendorVal = repository.currentVendor.value
+        val cartIsEmpty = repository.cart.value.isEmpty()
+        
+        if (!cartIsEmpty && activeVendorVal != null && activeVendorVal.id != vendor.id) {
+            if (clearOnConflict) {
+                viewModelScope.launch {
+                    repository.clearCart()
+                    repository.addToCartWithQuantity(item, vendor, qty)
+                    pendingItemToAdd.value = null
+                    showCartConflictDialog.value = false
+                }
+            } else {
+                showCartConflictDialog.value = true
+            }
+        } else {
+            viewModelScope.launch {
+                repository.addToCartWithQuantity(item, vendor, qty)
+                pendingItemToAdd.value = null
+                showCartConflictDialog.value = false
+            }
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val savedAddresses: StateFlow<List<SavedAddress>> = repository.currentUser
+        .flatMapLatest { user ->
+            if (user != null) {
+                repository.getSavedAddressesForUser(user.phone)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val savedPaymentMethods: StateFlow<List<SavedPaymentMethod>> = repository.currentUser
+        .flatMapLatest { user ->
+            if (user != null) {
+                repository.getSavedPaymentMethodsForUser(user.phone)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addSavedAddress(name: String, addressLine: String, isDefault: Boolean) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            repository.saveAddress(SavedAddress(
+                userId = user.phone,
+                name = name,
+                addressLine = addressLine,
+                isDefault = isDefault
+            ))
+        }
+    }
+
+    fun updateUserPrimaryAddress(addressLine: String, lat: Double, lng: Double) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val updated = user.copy(address = addressLine, lat = lat, lng = lng)
+            repository.registerUser(updated)
+            repository.currentUser.value = updated
+        }
+    }
+
+    fun deleteSavedAddress(address: SavedAddress) {
+        viewModelScope.launch {
+            repository.deleteAddress(address)
+        }
+    }
+
+    fun addSavedPaymentMethod(cardType: String, displayName: String, expiryDate: String, holderName: String) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            repository.savePaymentMethod(SavedPaymentMethod(
+                userId = user.phone,
+                cardType = cardType,
+                displayName = displayName,
+                expiryDate = expiryDate,
+                holderName = holderName
+            ))
+        }
+    }
+
+    fun deleteSavedPaymentMethod(paymentMethod: SavedPaymentMethod) {
+        viewModelScope.launch {
+            repository.deletePaymentMethod(paymentMethod)
+        }
+    }
+
+    // Lyo AI Bot custom states
+    val lyoConvState = MutableStateFlow(LyoConvState())
+
+    fun resetLyoConvState() {
+        lyoConvState.value = LyoConvState()
+    }
+
+    fun getLyoRestaurantList(): List<Vendor> {
+        return allVendors.value.filter { it.isCurrentlyOpen }
+    }
+
+    suspend fun searchMenuAcrossRestaurants(searchTerm: String): List<Pair<Vendor, List<MenuItem>>> {
+        val vendors = getLyoRestaurantList()
+        val results = mutableListOf<Pair<Vendor, List<MenuItem>>>()
+        val term = searchTerm.lowercase(java.util.Locale.ROOT).trim()
+        if (term.isEmpty()) return emptyList()
+
+        try {
+            val list = repository.menuItemDao.getAllMenuItemsList()
+            val vendorMap = vendors.associateBy { it.id }
+            
+            val vendorGroupedItems = list.filter { item ->
+                item.isCurrentlyAvailable && (
+                    item.nameEn.lowercase(java.util.Locale.ROOT).contains(term) ||
+                    item.nameTa.lowercase(java.util.Locale.ROOT).contains(term)
+                )
+            }.groupBy { it.vendorId }
+
+            for ((vendorId, items) in vendorGroupedItems) {
+                val v = vendorMap[vendorId]
+                if (v != null) {
+                    results.add(Pair(v, items))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("LyoAI", "Error searching menu items locally", e)
+        }
+        return results
+    }
+
+    suspend fun handleLyoConvStage(userText: String): String? {
+        val text = userText.trim().lowercase(java.util.Locale.ROOT)
+        val state = lyoConvState.value
+
+        // ── INTELLIGENT TAMIL ORDER TRACKING INTERCEPT ────────────────
+        val isTrackingQuery = listOf(
+            "enga", "engae", "engu", "engu", "எங்க", "எங்கே", "இருக்", "iruk", "irukku", "iruku",
+            "order", "ஆர்டர்", "ஆடர்", "aadar", "ardar", "status", "ஸ்டேட்டஸ்", "ஸ்டேடஸ்",
+            "track", "ட்ராக்", "eppo", "eppa", "எப்போ", "எப்ப", "வரும்", "varum", "varu", "வருது",
+            "varuthu", "varudu", "delivery", "டெலிவரி", "டெலிவிரி", "enoda", "ennoda", "என்னோட"
+        ).any { text.contains(it) }
+
+        if (isTrackingQuery) {
+            val liveOrderVal = repository.activeLiveOrder.value
+            if (liveOrderVal != null) {
+                val statusTextTa = when (liveOrderVal.status) {
+                    "PENDING" -> "ஹோட்டலின் ஒப்புதலுக்காக காத்திருக்கிறது (Waiting for Hotel approval) ⏳"
+                    "ACCEPTED" -> "ஹோட்டலால் ஒப்புக்கொள்ளப்பட்டு சமையல் தொடங்க தயார் நிலையில் உள்ளது (Approved & Preparing) 🍳"
+                    "PREPARING" -> "தற்போது ஹோட்டலில் சுடச்சுட சமைக்கப்பட்டு கொண்டிருக்கிறது (Sizzling in the kitchen) 🍜🔥"
+                    "READY_FOR_PICKUP" -> "சமையல் முடிந்து டெலிவரி நபர் பார்சல் வாங்க தயாராக உள்ளது (Packed & Ready for Pickup) 🎒"
+                    "OUT_FOR_DELIVERY" -> "நமது அதிவேக டெலிவரி நபர் பார்சலை பெற்றுக்கொண்டு உங்கள் முகவரியை நோக்கி பறந்து கொண்டிருக்கிறார்! (On the Way / Out for Delivery) 🛵⚡"
+                    "DELIVERED" -> "ஆர்டர் வெற்றிகரமாக உங்களிடம் டெலிவரி செய்யப்பட்டுவிட்டது! (Delivered) 🎉"
+                    else -> liveOrderVal.status
+                }
+                
+                val otpSuffix = if (liveOrderVal.status != "DELIVERED") "\n🔑 டெலிவரி பாதுகாப்பு OTP: **${liveOrderVal.otpCode}**" else ""
+                
+                val trackingLinkSuffix = "\n\nஉடனே மேப்பில் லைவ் லொகேஷன் பார்க்க நமது ஆப்பில் கீழே உள்ள **\"TRACKING / ட்ராக்கிங்\"** பகுதிக்குச் செல்லவும்! 🗺️"
+
+                return "🔍 **லியோ ஏ ஐ நுண்ணறிவுத் தேடல் (Lyo AI Smart Tracking):** \n\n" +
+                        "அன்பார்ந்த எடப்பாடி மக்களே! 🌾 தங்களின் தற்போதைய ஆர்டர் விபரம் இதோ:\n\n" +
+                        "📦 **ஆர்டர் எண்:** #${liveOrderVal.id}\n" +
+                        "🏪 **ஹோட்டல்:** ${liveOrderVal.vendorName}\n" +
+                        "💰 **மொத்த தொகை:** ₹${liveOrderVal.totalAmount.toInt()}\n" +
+                        "🚦 **தற்போதைய நிலை:** $statusTextTa$otpSuffix" +
+                        trackingLinkSuffix +
+                        "\n\nலியோ டெலிவரி எப்போதுமே அதிவேகமாகவும் பாதுகாப்பாகவும் உங்களை வந்தடையும்! வேறு ஏதேனும் உதவி வேண்டுமா அண்ணே? 😊✨"
+            } else {
+                // If no active live order, check for the user's latest past order to be helpful
+                val user = currentUser.value
+                val pastOrders = if (user != null) repository.orderDao.getOrdersForUserList(user.phone) else emptyList()
+                if (pastOrders.isNotEmpty()) {
+                    val latestOrd = pastOrders.first()
+                    return "🔍 **லியோ ஏ ஐ நுண்ணறிவுத் தேடல் (Lyo AI Smart Tracking):** \n\n" +
+                            "தற்போது தங்களுக்கு ஆக்டிவ் ஆர்டர் எதுவும் இல்லை அண்ணே. ஆனால், உங்களின் கடைசி ஆர்டர் விபரம் இதோ:\n\n" +
+                            "📦 **ஆர்டர் எண்:** #${latestOrd.id}\n" +
+                            "🏪 **ஹோட்டல்:** ${latestOrd.vendorName}\n" +
+                            "💰 **தொகை:** ₹${latestOrd.totalAmount.toInt()}\n" +
+                            "🚦 **நிலை:** ${if (latestOrd.status == "DELIVERED") "வெற்றிகரமாக டெலிவரி செய்யப்பட்டது (Delivered) ✓" else latestOrd.status}\n\n" +
+                            "புதிய உணவுகளை ருசிக்க உடனே மெனுவில் இருந்து கார்ட்டில் சேர்த்து சுடச்சுட ஆர்டர் செய்யுங்கள்! 🛵🍲"
+                } else {
+                    return "🔍 **லியோ ஏ ஐ நுண்ணறிவுத் தேடல் (Lyo AI Smart Tracking):** \n\n" +
+                            "அன்பார்ந்த எடப்பாடி மக்களே! 🌾 உங்களுடைய கணக்கில் தற்போது எந்தவொரு ஆர்டரும் செயல்பாட்டில் இல்லை. எடப்பாடியின் சுவையான உணவுகளை ருசி பார்க்க இன்றே நமது ஆப்பில் முதல் ஆர்டரைச் சமர்ப்பியுங்கள்! 🛵✨"
+                }
+            }
+        }
+
+        // ── STAGE: cart_conflict ────────────────────────────────────
+        if (state.stage == LyoConvStage.CART_CONFLICT) {
+            val isYes = listOf("ஆம்", "ஆமா", "yes", "சரி", "ok", "okay", "ஓகே", "சரிதான்", "மாற்று", "மாற்றுங்கள்", "clear").any { text.contains(it) }
+            val isNo = listOf("இல்ல", "வேண்டாம்", "no", "வேண்டா", "இல்லை", "முந்தையதே", "keep").any { text.contains(it) }
+
+            if (isYes) {
+                val item = state.pendingMenuItem
+                val vendor = state.selectedRestaurant
+                if (item != null && vendor != null) {
+                    viewModelScope.launch {
+                        repository.clearCart()
+                        repository.addToCartWithQuantity(item, vendor, 1)
+                    }
+                    lyoConvState.value = state.copy(
+                        stage = LyoConvStage.CART_CONFIRM,
+                        pendingMenuItem = null
+                    )
+                    return "✅ முந்தைய கடையில் இருந்த அனைத்து உணவுகளும் நீக்கப்பட்டு, புதிய கடையான *${vendor.nameTa.ifEmpty { vendor.name }}*-ன் *${item.nameTa.ifEmpty { item.nameEn }}* (₹${item.price.toInt()}) கூடையில் வெற்றிகரமாக சேர்க்கப்பட்டது! 😊\n\n🛒 மொத்தம்: ₹${item.price.toInt()}\n\nவேறு ஏதாவது வேண்டுமா அண்ணே?"
+                }
+            }
+            if (isNo) {
+                resetLyoConvState()
+                return "சரிங்க அண்ணே! முந்தைய கார்ட் அப்படியே தக்கவைக்கப்பட்டுள்ளது. வேறு ஏதாவது சிறந்த உணவை தேர்வு செய்கிறீர்களா? 😊"
+            }
+            return "புதிய உணவை சேர்க்க வேண்டுமானால் 'ஆம், மாற்றுங்கள்' என்று சொல்லுங்கள், இல்லையென்றால் 'வேண்டாம்' என்று சொல்லுங்கள் அண்ணே! 😊"
+        }
+
+        // ── STAGE: restaurant_select ────────────────────────────────
+        if (state.stage == LyoConvStage.RESTAURANT_SELECT) {
+            val restaurants = state.matchedRestaurants
+
+            // Number select: "1", "2", "3"
+            val numMatch = "^[1-9][0-9]?$".toRegex().find(text)
+            if (numMatch != null) {
+                val idx = numMatch.value.toInt() - 1
+                if (idx < restaurants.size) {
+                    return handleRestaurantSelected(restaurants[idx].first, restaurants[idx].second)
+                }
+            }
+
+            // Name match: "am square", "merry world"
+            val nameMatch = restaurants.find { (v, _) ->
+                v.name.lowercase(java.util.Locale.ROOT).contains(text) ||
+                v.nameTa.lowercase(java.util.Locale.ROOT).contains(text) ||
+                text.contains(v.name.lowercase(java.util.Locale.ROOT).split(" ").first())
+            }
+            if (nameMatch != null) {
+                return handleRestaurantSelected(nameMatch.first, nameMatch.second)
+            }
+
+            // Not matched
+            return "மன்னிக்கவும் அண்ணே! 1 முதல் ${restaurants.size} வரை ஒரு எண்ணை சொல்லுங்கள் 😊"
+        }
+
+        // ── STAGE: item_select ──────────────────────────────────────
+        if (state.stage == LyoConvStage.ITEM_SELECT) {
+            val items = state.matchedItems
+
+            val numMatch = "^[1-9][0-9]?$".toRegex().find(text)
+            if (numMatch != null) {
+                val idx = numMatch.value.toInt() - 1
+                if (idx < items.size) {
+                    return handleMenuItemSelected(items[idx])
+                }
+            }
+
+            // Name match
+            val nameMatch = items.find { it ->
+                it.nameEn.lowercase(java.util.Locale.ROOT).contains(text) ||
+                it.nameTa.lowercase(java.util.Locale.ROOT).contains(text) ||
+                (text.contains("small") && it.nameEn.lowercase().contains("small")) ||
+                (text.contains("half") && it.nameEn.lowercase().contains("half")) ||
+                (text.contains("full") && it.nameEn.lowercase().contains("full")) ||
+                (text.contains("சின்ன") && it.nameEn.lowercase().contains("small")) ||
+                (text.contains("பெரிய") && it.nameEn.lowercase().contains("full"))
+            }
+            if (nameMatch != null) {
+                return handleMenuItemSelected(nameMatch)
+            }
+
+            return "எந்த item வேண்டும் என்று number சொல்லுங்கள் அண்ணே 😊 (1-${items.size})"
+        }
+
+        // ── STAGE: item_confirm ─────────────────────────────────────
+        if (state.stage == LyoConvStage.ITEM_CONFIRM) {
+            val isYes = listOf("ஆம்", "ஆமா", "yes", "சரி", "ok", "okay", "ஓகே", "சரிதான்").any { text.contains(it) }
+            val isNo = listOf("இல்ல", "வேண்டாம்", "no", "வேண்டா", "இல்லை").any { text.contains(it) }
+
+            if (isYes) {
+                return searchAndShowRestaurants(state.pendingItem ?: "", state.pendingCategory)
+            }
+            if (isNo) {
+                resetLyoConvState()
+                return "சரி அண்ணே! வேற என்ன வேண்டும்? 😊"
+            }
+        }
+
+        // ── STAGE: cart_confirm ─────────────────────────────────────
+        if (state.stage == LyoConvStage.CART_CONFIRM) {
+            val isOrder = listOf("ஆர்டர் செய்", "order", "checkout", "பில்", "ஆர்டர்").any { text.contains(it) }
+            val isMore = listOf("மேலும்", "வேறு", "more", "add").any { text.contains(it) }
+
+            if (isOrder) {
+                resetLyoConvState()
+                navigationTrigger.value = "CHECKOUT"
+                return "சரி அண்ணே! தங்களை செக்அவுட் பக்கத்திற்கு அழைத்துச் செல்கிறேன். அங்கே ஆர்டரை உறுதி செய்து கொள்ளலாம்! 💳✨"
+            } else if (isMore) {
+                resetLyoConvState()
+                return "சரி அண்ணே! வேறு என்ன வேண்டும்? சொல்லுங்கள் 😊"
+            }
+        }
+
+        // ── STAGE: idle ─────────────────────────────────────────────
+        if (state.stage == LyoConvStage.IDLE) {
+            val isRecommendQuery = listOf("நல்லது", "best", "popular", "favourite", "recommend", "பரிந்துரை", "என்ன சாப்பிடலாம்", "what to eat", "suggest", "nalladu", "nalla").any { text.contains(it) }
+
+            if (isRecommendQuery) {
+                return "🌟 எடப்பாடியில் மிகவும் பிரபலமான உணவுகள்:\n\n1️⃣ சிக்கன் பிரியாணி (Chicken Biryani)\n2️⃣ பரோட்டா + சிக்கன் கறி (Parotta & Chicken Curry)\n3️⃣ ஃபிரைட் ரைஸ் (Fried Rice)\n4️⃣ இட்லி + சாம்பார் (Idli & Sambar)\n5️⃣ மட்டன் பிரியாணி (Mutton Biryani)\n\nஏதாவது ஒன்று வேண்டுமா? பெயர் சொல்லுங்கள் அண்ணே! 😊"
+            }
+
+            val lowerPrompt = text
+            val itemDetected = when {
+                lowerPrompt.contains("பிரியாணி") || lowerPrompt.contains("biryani") || lowerPrompt.contains("biriyani") -> Pair("பிரியாணி", if (lowerPrompt.contains("சிக்கன்") || lowerPrompt.contains("chicken")) "சிக்கன்" else if (lowerPrompt.contains("மட்டன்") || lowerPrompt.contains("mutton")) "மட்டன்" else null)
+                lowerPrompt.contains("சாப்பாடு") || lowerPrompt.contains("meals") || lowerPrompt.contains("rice") -> Pair("meals", null)
+                lowerPrompt.contains("தோசை") || lowerPrompt.contains("dosa") -> Pair("dosa", null)
+                lowerPrompt.contains("பர்கர்") || lowerPrompt.contains("burger") -> Pair("burger", null)
+                lowerPrompt.contains("நூடுல்ஸ்") || lowerPrompt.contains("noodles") -> Pair("noodles", null)
+                lowerPrompt.contains("ஜூஸ்") || lowerPrompt.contains("juice") -> Pair("juice", null)
+                lowerPrompt.contains("காபி") || lowerPrompt.contains("coffee") || lowerPrompt.contains("டீ") || lowerPrompt.contains("tea") -> Pair("beverages", null)
+                lowerPrompt.contains("சோறு") || lowerPrompt.contains("சாதம்") || lowerPrompt.contains("sadham") || lowerPrompt.contains("chor") -> Pair("meals", null)
+                lowerPrompt.contains("பரோட்டா") || lowerPrompt.contains("parotta") || lowerPrompt.contains("பொரியல்") || lowerPrompt.contains("poryal") -> Pair("parotta", null)
+                lowerPrompt.contains("இட்லி") || lowerPrompt.contains("idli") || lowerPrompt.contains("idly") -> Pair("idli", null)
+                lowerPrompt.contains("சப்பாத்தி") || lowerPrompt.contains("chapati") || lowerPrompt.contains("பூரி") || lowerPrompt.contains("poori") -> Pair("chapati", null)
+                lowerPrompt.contains("ஃபிரைட் ரைஸ்") || lowerPrompt.contains("fried rice") || lowerPrompt.contains("friedrice") -> Pair("fried rice", null)
+                lowerPrompt.contains("கறி") || lowerPrompt.contains("curry") || lowerPrompt.contains("குழம்பு") || lowerPrompt.contains("kuzhambu") -> Pair("curry", null)
+                lowerPrompt.contains("சிக்கன்") || lowerPrompt.contains("chicken") -> Pair("chicken", null)
+                lowerPrompt.contains("மட்டன்") || lowerPrompt.contains("mutton") -> Pair("mutton", null)
+                lowerPrompt.contains("பனீர்") || lowerPrompt.contains("paneer") -> Pair("paneer", null)
+                lowerPrompt.contains("பிஸ்ஸா") || lowerPrompt.contains("pizza") -> Pair("pizza", null)
+                lowerPrompt.contains("ஐஸ்கிரீம்") || lowerPrompt.contains("ice cream") || lowerPrompt.contains("icecream") -> Pair("ice cream", null)
+                else -> null
+            }
+
+            if (itemDetected != null) {
+                val (item, category) = itemDetected
+                lyoConvState.value = lyoConvState.value.copy(
+                    stage = LyoConvStage.ITEM_CONFIRM,
+                    pendingItem = item,
+                    pendingCategory = category
+                )
+                val catText = if (category != null) "$category " else ""
+                return "${catText}${item} வேண்டுமா அண்ணே? சரிதானே? 😊"
+            }
+        }
+
+        return null
+    }
+
+    fun handleRestaurantSelected(vendor: Vendor, items: List<MenuItem>): String {
+        lyoConvState.value = lyoConvState.value.copy(
+            stage = LyoConvStage.ITEM_SELECT,
+            selectedRestaurant = vendor,
+            matchedItems = items
+        )
+
+        val itemList = items.take(10).mapIndexed { i, it ->
+            "${i + 1}️⃣ ${it.nameTa.ifEmpty { it.nameEn }} — ₹${it.price.toInt()}"
+        }.joinToString("\n")
+
+        return "🏪 *${vendor.nameTa.ifEmpty { vendor.name }}*-ல் கிடைப்பவை:\n\n${itemList}\n\nஎந்த item வேண்டும்? (எண் சொல்லுங்கள்)"
+    }
+
+    suspend fun handleMenuItemSelected(item: MenuItem): String {
+        val vendor = lyoConvState.value.selectedRestaurant
+        val activeVendorVal = repository.currentVendor.value
+        val cartIsEmpty = repository.cart.value.isEmpty()
+
+        if (vendor != null) {
+            if (!cartIsEmpty && activeVendorVal != null && activeVendorVal.id != vendor.id) {
+                lyoConvState.value = lyoConvState.value.copy(
+                    stage = LyoConvStage.CART_CONFLICT,
+                    pendingMenuItem = item
+                )
+                val currentShopName = activeVendorVal.nameTa.ifEmpty { activeVendorVal.name }
+                val newShopName = vendor.nameTa.ifEmpty { vendor.name }
+                return "⚠️ *கார்ட்டில் வேறு கடையின் உணவுகள் உள்ளன!*\n\nஅண்ணே/அக்கா, உங்களுடைய கூடையில் ஏற்கனவே *${currentShopName}* கடையில் இருந்து சேர்க்கப்பட்ட உணவுகள் உள்ளன. ஒரு நேரத்தில் ஒரு கடையில் இருந்து மட்டுமே சுடச்சுட ஆர்டர் செய்ய முடியும்.\n\nமுந்தைய கடையில் உள்ள உணவுகளை நீக்கிவிட்டு, இந்த புதிய *${newShopName}* கடையிலிருந்து *${item.nameTa.ifEmpty { item.nameEn }}* (₹${item.price.toInt()}) உணவை சேர்க்கலாமா? 😊"
+            }
+
+            selectRecommendedOption(item, vendor)
+            repository.addToCartWithQuantity(item, vendor, 1)
+            pendingItemToAdd.value = null
+            showCartConflictDialog.value = false
+        }
+
+        lyoConvState.value = lyoConvState.value.copy(
+            stage = LyoConvStage.CART_CONFIRM
+        )
+
+        // Manual precise mathematical calculation to prevent any asynchronous delay or race conditions (₹0 error)
+        val itemQty = 1
+        val itemCost = item.price * itemQty
+        val updatedSubtotal = if (cartIsEmpty || activeVendorVal?.id == vendor?.id) {
+            getCartSubtotal() + itemCost
+        } else {
+            itemCost
+        }
+        val gst = if (repository.gstEnabled) updatedSubtotal * (repository.gstRate / 100.0) else 0.0
+        val delivery = if (updatedSubtotal > 0.0) getCartDeliveryFee() else 0.0
+        val discount = getCouponDiscount()
+        val tip = selectedTipAmount.value
+        val computedTotal = (updatedSubtotal + gst + delivery + tip - discount).coerceAtLeast(0.0)
+
+        return "✅ *${item.nameTa.ifEmpty { item.nameEn }}* (₹${item.price.toInt()}) கூடையில் சேர்க்கப்பட்டது!\n\n🛒 மொத்தம்: ₹${computedTotal.toInt()}\n\nவேறு ஏதாவது வேண்டுமா அண்ணே?\n_(வேண்டாம் என்றால் \"ஆர்டர் செய்\" என்று சொல்லுங்கள்)_"
+    }
+
+    suspend fun searchAndShowRestaurants(item: String, category: String?): String {
+        val searchTerm = if (category != null) "$category $item" else item
+        val results = searchMenuAcrossRestaurants(searchTerm)
+
+        if (results.isEmpty()) {
+            resetLyoConvState()
+            return "மன்னிக்கவும் அண்ணே! தற்போது \"${item}\" எந்த கடையிலும் கிடைக்கவில்லை 😔\nவேற என்ன வேண்டும்?"
+        }
+
+        lyoConvState.value = lyoConvState.value.copy(
+            stage = LyoConvStage.RESTAURANT_SELECT,
+            matchedRestaurants = results
+        )
+
+        val restaurantList = results.mapIndexed { i, r: Pair<Vendor, List<MenuItem>> ->
+            val shortArea = r.first.address.split(",").firstOrNull()?.trim() ?: "Idappadi"
+            "${i + 1}️⃣ *${r.first.nameTa.ifEmpty { r.first.name }}*\n   📍 ${shortArea} | ⭐ ${r.first.rating} | 🕐 ${r.first.deliveryTime} mins\n   ${r.second.take(2).joinToString(", ") { it.nameTa.ifEmpty { it.nameEn } }}..."
+        }.joinToString("\n\n")
+
+        return "🍽️ *\"${item}\"* இந்த ${results.size} கடைகளில் கிடைக்கிறது:\n\n${restaurantList}\n\nயாரிடம் வாங்க விரும்புகிறீர்கள்? (எண் சொல்லுங்கள்)"
+    }
+
+    fun getLyoAiQuickChips(): List<Pair<String, String>> {
+        val state = lyoConvState.value
+        return when (state.stage) {
+            LyoConvStage.RESTAURANT_SELECT -> {
+                state.matchedRestaurants.mapIndexed { i, r ->
+                    Pair("${i + 1}. ${r.first.nameTa.ifEmpty { r.first.name }}", "${i + 1}")
+                }
+            }
+            LyoConvStage.ITEM_SELECT -> {
+                state.matchedItems.take(5).mapIndexed { i, item ->
+                    Pair("${i + 1}. ${item.nameTa.ifEmpty { item.nameEn }}", "${i + 1}")
+                }
+            }
+            LyoConvStage.CART_CONFIRM -> {
+                listOf(
+                    Pair("✅ ஆர்டர் செய்", "ஆர்டர் செய்"),
+                    Pair("➕ வேறு வேண்டும்", "வேறு ஏதாவது வேண்டும்"),
+                    Pair("🛒 கூடை பார்", "cart")
+                )
+            }
+            LyoConvStage.ITEM_CONFIRM -> {
+                listOf(
+                    Pair("👍 ஆம், சரிதான்", "ஆம்"),
+                    Pair("👎 இல்லை, வேண்டாம்", "வேண்டாம்")
+                )
+            }
+            LyoConvStage.CART_CONFLICT -> {
+                listOf(
+                    Pair("🔄 ஆம், மாற்றுங்கள்", "ஆம்"),
+                    Pair("❌ இல்லை, முந்தையதே போதும்", "வேண்டாம்")
+                )
+            }
+            LyoConvStage.IDLE -> {
+                listOf(
+                    Pair("🍛 பிரியாணி", "பிரியாணி வேணும்"),
+                    Pair("🍗 சிக்கன் பிரியாணி", "சிக்கன் பிரியாணி வேணும்"),
+                    Pair("🥘 சாப்பாடு", "சாப்பாடு வேணும்"),
+                    Pair("🧃 ஜூஸ்", "ஜூஸ் வேணும்"),
+                    Pair("🛒 என் கூடை", "cart"),
+                    Pair("📦 என் ஆர்டர்", "my order status")
+                )
+            }
+        }
+    }
+
+    fun initLyoAiChat() {
+        resetLyoConvState()
+        val userName = currentUser.value?.name?.split(" ")?.firstOrNull() ?: "அண்ணே"
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val greeting = when {
+            hour < 12 -> "காலை வணக்கம்"
+            hour < 17 -> "மதிய வணக்கம்"
+            else -> "மாலை வணக்கம்"
+        }
+        val count = allVendors.value.filter { it.isCurrentlyOpen }.size
+        
+        lyoAiMessages.value = listOf(
+            LyoMessage(
+                "${greeting} ${userName}! 👋\n\nநான் *Lyo AI* — உங்கள் உணவு உதவியாளன்.\nஇப்போது *${count} கடைகள்* open-ஆக உள்ளன! 🍽️\n\nஎன்ன சாப்பிட விரும்புகிறீர்கள்?",
+                false
+            )
+        )
+    }
+
+    val lyoAiMessages = MutableStateFlow<List<LyoMessage>>(listOf(
+        LyoMessage("வணக்கம் எடப்பாடி மக்களே! 🌾 நான் உங்கள் Lyo AI 🤖. எடப்பாடி ஜலகண்டாபுரம் ரோடு முதல் சங்ககிரி மெயின் ரோடு வரை சுடச்சுட ஃபிரஷ்ஷான உணவுகளை ஆர்டர் செய்ய உங்களை அன்போடு வரவேற்கிறேன்! தற்போது எடப்பாடியில் இதமான காவிரி காற்றுடன் 34°C வெதர் நிலվումிறது. உங்கள் ஃபேவரிட் உணவை பரிந்துரைக்கவோ அல்லது கார்ட்டில் சேர்த்து ஆர்டர் செய்யவோ உங்களுக்கு என்ன உதவி வேண்டும்?", false)
+    ))
+    val isLyoAiLoading = MutableStateFlow(false)
+    val showLyoSupportPopup = MutableStateFlow(false)
+
+    private fun calculateOverlapCoefficient(s1: String, s2: String): Double {
+        if (s1.isEmpty() || s2.isEmpty()) return 0.0
+        val set1 = s1.toList().toSet()
+        val set2 = s2.toList().toSet()
+        val intersection = set1.intersect(set2).size
+        val union = set1.union(set2).size
+        return intersection.toDouble() / union.toDouble()
+    }
+
+    private fun isPureVegKitchen(vendor: Vendor): Boolean {
+        val nameLower = (vendor.nameTa + " " + vendor.name).lowercase()
+        return nameLower.contains("pure veg") || nameLower.contains("சைவம்") || nameLower.contains("சரவண பவன்") || nameLower.contains("saravana bhavan")
+    }
+
+    private fun getFuzzyMatchedMenuItems(prompt: String, allMenuItems: List<Pair<MenuItem, Vendor>>): List<Pair<MenuItem, Vendor>> {
+        val rawPrompt = prompt.lowercase(java.util.Locale.ROOT).trim()
+        if (rawPrompt.isEmpty()) return emptyList()
+
+        val isExplicitVeg = rawPrompt.contains("வெஜ்") || rawPrompt.contains("veg") || 
+                rawPrompt.contains("சைவம்") || rawPrompt.contains("vegetarian") || 
+                rawPrompt.contains("pure veg") || rawPrompt.contains("பன்னீர்") || rawPrompt.contains("paneer")
+                
+        val isNonVegIntent = rawPrompt.contains("chicken") || rawPrompt.contains("சிக்கன்") || 
+                rawPrompt.contains("மட்டன்") || rawPrompt.contains("mutton") || 
+                rawPrompt.contains("fish") || rawPrompt.contains("மீன்") || 
+                rawPrompt.contains("அசைவம்") || rawPrompt.contains("non veg") || rawPrompt.contains("nonveg") ||
+                rawPrompt.contains("egg") || rawPrompt.contains("முட்டை")
+
+        val results = mutableListOf<Pair<MenuItem, Vendor>>()
+        val tokens = rawPrompt.split("\\s+".toRegex()).filter { it.length > 1 }
+
+        for (pair in allMenuItems) {
+            val item = pair.first
+            val vendor = pair.second
+
+            // Filter by explicit veg/non-veg preference
+            if (isNonVegIntent && isPureVegKitchen(vendor)) continue
+            if (isExplicitVeg && !item.isVeg) continue
+
+            val nameEn = item.nameEn.lowercase()
+            val nameTa = item.nameTa.lowercase()
+            val vendorNameEn = vendor.name.lowercase()
+            val vendorNameTa = vendor.nameTa.lowercase()
+
+            var matched = false
+
+            // Direct contains check of raw prompt
+            if (nameEn.contains(rawPrompt) || nameTa.contains(rawPrompt) ||
+                vendorNameEn.contains(rawPrompt) || vendorNameTa.contains(rawPrompt)) {
+                matched = true
+            }
+
+            // Word-by-word token match fallback
+            if (!matched && tokens.isNotEmpty()) {
+                val tokenMatch = tokens.any { token ->
+                    nameEn.contains(token) || nameTa.contains(token)
+                }
+                if (tokenMatch) {
+                    matched = true
+                }
+            }
+
+            // Overlap coefficient fallback for typos
+            if (!matched) {
+                val overlapEn = calculateOverlapCoefficient(rawPrompt, nameEn)
+                val overlapTa = calculateOverlapCoefficient(rawPrompt, nameTa)
+                if (overlapEn > 0.35 || overlapTa > 0.35) {
+                    matched = true
+                }
+            }
+
+            // Sentiment / Semantic/ Craving keyword fallback match (e.g., matching "sweet", "தண்ணீர்" / drinks, "soup", "biryani", etc.)
+            if (!matched) {
+                val nameLower = (item.nameEn + " " + item.nameTa).lowercase()
+                var matchedBySentiment = false
+                if (rawPrompt.contains("sweet") || rawPrompt.contains("இனிப்பு")) {
+                    if (nameLower.contains("sweet") || nameLower.contains("ஜாமூன்") || nameLower.contains("jamun") || nameLower.contains("பாயாசம்") || nameLower.contains("கேசரி")) {
+                        matchedBySentiment = true
+                    }
+                } else if (rawPrompt.contains("தண்ணீர்") || rawPrompt.contains("water") || rawPrompt.contains("ஜூஸ்") || rawPrompt.contains("juice") || rawPrompt.contains("drink") || rawPrompt.contains("டிரிங்க்")) {
+                    if (nameLower.contains("water") || nameLower.contains("தண்ணீர்") || nameLower.contains("soup") || nameLower.contains("சூப்") || nameLower.contains("ஜூஸ்") || nameLower.contains("juice")) {
+                        matchedBySentiment = true
+                    }
+                }
+                if (matchedBySentiment) {
+                    matched = true
+                }
+            }
+
+            if (matched) {
+                results.add(pair)
+            }
+        }
+
+        return results
+    }
+
+    fun sendLyoAiPrompt(userPrompt: String, context: android.content.Context) {
+        val prompt = userPrompt.trim()
+        if (prompt.isEmpty() || isLyoAiLoading.value) return
+
+        val msgs = lyoAiMessages.value.toMutableList()
+        msgs.add(LyoMessage(prompt, true))
+        lyoAiMessages.value = msgs
+
+        isLyoAiLoading.value = true
+        aiRecommendBasketOptions.value = emptyList()
+
+        viewModelScope.launch {
+            val stageReply = handleLyoConvStage(prompt)
+            if (stageReply != null) {
+                val updated = lyoAiMessages.value.toMutableList()
+                val currentCart = activeCart.value
+                val vendor = activeVendor.value
+                val itemsSummary = if (currentCart.isNotEmpty()) {
+                    currentCart.map { (item, qty) ->
+                        "${qty}x ${item.nameTa.ifEmpty { item.nameEn }} - ₹${(item.price * qty).toInt()}"
+                    }
+                } else null
+                val totalAmount = if (currentCart.isNotEmpty()) {
+                    calculateCartTotalSynchronously(currentCart)
+                } else null
+                val shopName = vendor?.let { it.nameTa.ifEmpty { it.name } }
+
+                updated.add(LyoMessage(
+                    text = stageReply,
+                    isUser = false,
+                    itemsSummary = itemsSummary,
+                    totalAmount = totalAmount,
+                    shopName = shopName
+                ))
+                lyoAiMessages.value = updated
+                isLyoAiLoading.value = false
+                return@launch
+            }
+
+            var isOffline = false
+            try {
+                val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                if (cm != null) {
+                    val activeNetwork = cm.activeNetwork
+                    if (activeNetwork != null) {
+                        val capabilities = cm.getNetworkCapabilities(activeNetwork)
+                        isOffline = capabilities == null || !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    } else {
+                        isOffline = true
+                    }
+                } else {
+                    isOffline = true
+                }
+            } catch (e: Exception) {
+                isOffline = true
+            }
+
+            if (isOffline) {
+                try {
+                    val vendorsList = repository.vendorDao.getAllVendorsList()
+                    val vendorMap = vendorsList.associateBy { it.id }
+                    val databaseItemsList = repository.menuItemDao.getAllMenuItemsList()
+
+                    val allMenuItems = databaseItemsList.mapNotNull { item ->
+                        val v = vendorMap[item.vendorId]
+                        if (v != null) Pair(item, v) else null
+                    }
+                    val matches = getFuzzyMatchedMenuItems(prompt, allMenuItems)
+                    aiRecommendBasketOptions.value = matches
+
+                    val replyText = if (matches.isNotEmpty()) {
+                        val count = matches.size
+                        val names = matches.joinToString(", ") { "${it.second.nameTa.ifEmpty { it.second.name }} (${it.first.nameTa.ifEmpty { it.first.nameEn }} - ₹${it.first.price.toInt()})" }
+                        "🌐 **ஆஃப்லைன் மோட் (உள்ளூர் தேடல்) செயல்படுகிறது!** \n\nநீங்கள் தேடியப் பொருள் எடப்பாடி சிட்டியில் **$count** கடைகளில் கிடைக்கிறது: \n\n$names \n\nகீழே உள்ள ஒப்பீட்டு கார்ட்டுகள் மூலம் விருப்பமான ஹோட்டலைத் தேர்ந்தெடுத்து 'கார்ட்டில் சேர்க்க' பட்டனை அழுத்தி சுலபமாக ஆர்டர் செய்யலாம்! 🛵✨"
+                    } else {
+                        "🌐 **ஆஃப்லைன் மோட் (உள்ளூர் தேடல்) செயல்படுகிறது!** \n\nமன்னிக்கவும் அன்பான எடப்பாடி மக்களே! 🌾 நீங்கள் கேட்ட உணவுப் பொருள் நமது ஆப்பில் தற்சமயம் இல்லை என்றாலும் கவலை வேண்டாம்! உங்களின் ஸ்பெஷல் தேவைகளுக்காக இதனை உடனடியாக தயார் செய்து டெலிவரி செய்ய Coscoom Creative Tech Solutions தயாராக உள்ளோம்! தயவுசெய்து உடனே 8778148899 என்ற எண்ணிற்கு வாட்ஸ்அப் அல்லது நேரடியாக கால் செய்து தொடர்பு கொள்ளுங்கள்! 🛵✨"
+                    }
+
+                    val updated = lyoAiMessages.value.toMutableList()
+                    updated.add(LyoMessage(
+                        text = replyText,
+                        isUser = false
+                    ))
+                    lyoAiMessages.value = updated
+                } catch (e: Exception) {
+                    val updated = lyoAiMessages.value.toMutableList()
+                    updated.add(LyoMessage(
+                        text = "உள்ளூர் தேடலில் சிறிய சுணக்கம் ஏற்பட்டது: ${e.message}",
+                        isUser = false
+                    ))
+                    lyoAiMessages.value = updated
+                } finally {
+                    isLyoAiLoading.value = false
+                }
+                return@launch
+            }
+
+            // ONLINE BRANCH
+            try {
+                val user = currentUser.value
+                val vendorsList = repository.vendorDao.getAllVendorsList()
+                val vendorMap = vendorsList.associateBy { it.id }
+                val databaseItemsList = repository.menuItemDao.getAllMenuItemsList()
+
+                val allMenuItems = databaseItemsList.mapNotNull { item ->
+                    val v = vendorMap[item.vendorId]
+                    if (v != null) Pair(item, v) else null
+                }
+
+                val matchedOptions = getFuzzyMatchedMenuItems(prompt, allMenuItems)
+                aiRecommendBasketOptions.value = matchedOptions
+
+                val contextBuilder = StringBuilder()
+                contextBuilder.append("""
+                    # ROLE & GENERAL PERSONALITY
+                    You are LYO AI (லியோ ஏ ஐ), the friendly, super-intelligent, prestigious mascot AI conversational guide for 'Lyo' food delivery platform in Edappadi, Salem.
+                    - Tone: Maintain an extremely happy, joyful, encouraging, and welcoming personality (கஸ்டமர்களை குஷிப்படுத்தும் மாபெரும் மகிழ்ச்சியான பாங்கு!).
+                    - Emojis: Frequently use nice food, delivery, and greeting emojis (🌾, 🛵, 🍲, 🛒, ✨, 🥳, 🥦).
+                    - Language: Answer in a friendly, conversational blend of elegant Spoken Tamil (எடப்பாடி வட்டார தமிழ் பாணி) and polite English. Keep responses easy, natural, and friendly—never speak like a scripted robot or script reader. Let Gemini decide the exact phrasing.
+                    
+                    # GEOGRAPHICAL LOCALIZATION
+                    - Centered in Edappadi, Salem, Tamil Nadu!
+                    - Greet customers warmly as 'அன்பார்ந்த எடப்பாடி மக்களே! 🌾' or 'எடப்பாடி சிட்டி மக்களே! 🛵'. Show local familiarity with landmarks: Jalakandapuram Road, Sangagiri Main Road, Jalakandapuram Bypass, etc.
+                    
+                    # REASSURANCE RULE
+                    - If the customer asks for a food item not present in our database, explain enthusiastically and bilingually that they can contact Coscoom Creative Tech Solutions at 8778148899 (WhatsApp/Call) to place a custom order! Do not say "Not Available" coldly.
+                    
+                    # UNSUPPORTED LANGUAGE & COMPLEX FALLBACK RULE
+                    - If the customer writes or asks questions in any language other than Tamil or English (such as Hindi, Telugu, Kannada, French, Spanish, etc.), or if they say something that is completely incomprehensible, confusing, or unsupported, you MUST prefix your response strictly with the tag [UNSUPPORTED_LANGUAGE_ERROR] followed by a warm, bilingual message in Spoken Tamil and English asking them to contact our Coscoom Creative Tech Solutions CEO Anantharaj.R at 8778148899 on Call/WhatsApp for immediate manual support.
+                    
+                    # NON-FOOD & OUT-OF-SCOPE QUESTIONS RULE
+                    - Lyo AI is strictly designed to simplify food ordering. If the customer asks questions about topics other than food, restaurants, menus, order tracking, cart management, or delivery services (for example: coding, math, general science, politics, history, geography, other apps, general gossip, or if the question is too difficult/complex to understand or answer), you MUST refuse to answer politely but firmly.
+                    - In this case, you MUST prefix your response strictly with the tag [UNSUPPORTED_LANGUAGE_ERROR] and explain in Spoken Tamil and English:
+                      "நான் லியோ ஏ ஐ (Lyo AI). நான் இந்த செயலியில் உணவை எளிதாக ஆர்டர் செய்யும் வேலையை எளிமைப்படுத்த மட்டுமே வடிவமைக்கப்பட்டுள்ளேன். உணவு அல்லாத வேறு வினாக்களுக்கு என்னால் பதிலளிக்க முடியாது. வேறு ஏதேனும் உதவி அல்லது தகவல் தேவைப்பட்டால், தயவுசெய்து எங்களது Coscoom Creative Tech Solutions தலைமை நிர்வாகி Anantharaj.R அவர்களை 8778148899 என்ற எண்ணில் தொடர்பு கொள்ளவும்!"
+                    
+                    # SYSTEM CAPABILITIES & TOOLS
+                    You have tools to search hotels/vendors, check the menu of any restaurant, add items to cart, get order status, and retrieve past order history. Do not guess or output raw JSON. Translate data into warm natural sentences.
+                    
+                    # GST & TOTAL CALCULATION
+                    - GST Tax Settings: ${if (repository.gstEnabled) "ENABLED at ${repository.gstRate}% rate" else "DISABLED (₹0.0)"}.
+                    - Always calculate the total amount clearly to the customer. If GST is ENABLED, include GST in your breakdown and explain it clearly to the customer. Otherwise, treat GST as completely removed (₹0.0).
+                    - Total formula: Subtotal + GST + Delivery Fee + Tip - Coupon Discount = Total. Mention each of these components when explaining totals to the user so they see the exact same breakdown as the checkout page.
+                """.trimIndent())
+
+                if (user != null) {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\nACTIVE LOGGED-IN CUSTOMER PROFILE DETAILS (இதைக் கொண்டு பயனர் கணக்கு விபரங்கள் பற்றிய வினாக்களுக்கு மிக துல்லியமாக பதில் சொல்லுங்கள்):")
+                    contextBuilder.append("\n- Name (பெயர்): ${user.name}")
+                    contextBuilder.append("\n- Phone Number (பதிவு செய்யப்பட்ட கைபேசி எண்): ${user.phone}")
+                    contextBuilder.append("\n- Email ID (மின்னஞ்சல் முகவரி): ${user.email}")
+                    contextBuilder.append("\n- Registered Primary Address (முதன்மை முகவரி): ${user.address}")
+                    contextBuilder.append("\n- Account Role (பயனர் கணக்கு வகை): ${user.role}")
+                    contextBuilder.append("\n- WhatsApp Notifications Opt-in (வாட்ஸ்அப் அறிவிப்புகள்): ${if (user.isWhatsAppOptIn) "SUBSCRIBED / ENABLED (செயல்படுத்தப்பட்டுள்ளது)" else "NOT ENABLED (செயல்படுத்தப்படவில்லை)"}")
+                    if (user.role == "DELIVERY") {
+                        contextBuilder.append("\n- Delivery Vehicle Number (வண்டி எண்): ${user.vehicleNo}")
+                        contextBuilder.append("\n- Rider Activity Status (நிலை): ${if (user.isActiveRider) "Active Delivery Courier (செயலில் உள்ளார்)" else "Inactive"}")
+                    }
+                    
+                    // Add saved alternative addresses
+                    val sAddresses = savedAddresses.value
+                    if (sAddresses.isNotEmpty()) {
+                        contextBuilder.append("\n\nSAVED ADDRESSES ON FILE (சேமிக்கப்பட்ட பிற மாற்று முகவரிகள்):")
+                        sAddresses.forEach { addr ->
+                            contextBuilder.append("\n- [Label: ${addr.name}] ${addr.addressLine} ${if (addr.isDefault) "(Default/முதன்மை)" else ""}")
+                        }
+                    } else {
+                        contextBuilder.append("\n- No other alternative saved addresses found on this account.")
+                    }
+
+                    // Add saved payment accounts/cards
+                    val sPayments = savedPaymentMethods.value
+                    if (sPayments.isNotEmpty()) {
+                        contextBuilder.append("\n\nSAVED PAYMENT METHODS (சேமிக்கப்பட்ட கட்டண முறைகள்):")
+                        sPayments.forEach { pay ->
+                            contextBuilder.append("\n- [Payment Type: ${pay.cardType}] ${pay.displayName} (Holder Name: ${pay.holderName}${if (pay.expiryDate.isNotEmpty()) ", Exp: ${pay.expiryDate}" else ""})")
+                        }
+                    } else {
+                        contextBuilder.append("\n- No saved payment methods found for this account.")
+                    }
+
+                    val pastOrders = repository.orderDao.getOrdersForUserList(user.phone)
+
+                    // Loyalty points
+                    val loyaltyPoints = pastOrders.filter { it.status == "DELIVERED" }.sumOf { (it.totalAmount * 0.05).toInt() }
+                    contextBuilder.append("\n\nLOYALTY POINTS BALANCE (லாயல்டி புள்ளிகள்):")
+                    contextBuilder.append("\n- Total Points Earned: $loyaltyPoints pts (5 points per ₹100 spent on delivered orders)")
+                    contextBuilder.append("\n- Estimated Discount Value: ₹${loyaltyPoints / 10} (100 points = ₹10 off)")
+
+                    // Active coupon
+                    val activeCouponCode = appliedCoupon.value.orEmpty()
+                    val couponDiscountAmt = getCouponDiscount()
+                    if (activeCouponCode.isNotBlank()) {
+                        contextBuilder.append("\n\nACTIVE COUPON IN CART:")
+                        contextBuilder.append("\n- Coupon Code Applied: $activeCouponCode")
+                        contextBuilder.append("\n- Discount Amount: ₹${couponDiscountAmt.toInt()}")
+                    } else {
+                        contextBuilder.append("\n\nACTIVE COUPON: None applied in current cart.")
+                    }
+                    contextBuilder.append("\n\nTOTAL PLACED ORDERS COUNT: ${pastOrders.size}")
+                    if (pastOrders.isNotEmpty()) {
+                        contextBuilder.append("\nPAST & ACTIVE ORDERS (REALTIME TRACKING ENABLED):")
+                        pastOrders.take(5).forEach { ord ->
+                            contextBuilder.append("\n- Order ID: #${ord.id}")
+                            contextBuilder.append("\n  * Restaurant: '${ord.vendorName}'")
+                            contextBuilder.append("\n  * Total Amount: ₹${ord.totalAmount.toInt()}")
+                            contextBuilder.append("\n  * Order Status: ${ord.status}")
+                            
+                            // Fetch associated DeliveryRide if any
+                            val ride = repository.getRideForOrder(ord.id)
+                            if (ride != null) {
+                                contextBuilder.append("\n  * Realtime Delivery Ride:")
+                                contextBuilder.append("\n    - Rider Name: ${ride.riderName}")
+                                contextBuilder.append("\n    - Rider Phone Number: ${ride.riderPhone}")
+                                contextBuilder.append("\n    - Ride Delivery Status: ${ride.status}") // ACCEPTED, PICKING_UP, DELIVERING, COMPLETED
+                                contextBuilder.append("\n    - Rider Location coordinates: Lat ${ride.currentLat}, Lng ${ride.currentLng}")
+                                contextBuilder.append("\n    - OTP Verified? ${if (ride.otpVerified) "YES (Delivered successfully)" else "NO"}")
+                            } else {
+                                contextBuilder.append("\n  * Realtime Delivery Ride: No delivery partner assigned yet.")
+                            }
+                        }
+                        
+                        contextBuilder.append("\n\nINSTRUCTIONS FOR ANSWERING ORDER TRACKING QUESTIONS:")
+                        contextBuilder.append("\n- If the customer asks 'Where is my order?' (என்னுடைய ஆர்டர் எங்கே உள்ளது?) or 'When will it arrive?' (எப்போது வந்து சேரும்?):")
+                        contextBuilder.append("\n  1. Check the ACTIVE/RECENT orders listed above (usually the most recent one).")
+                        contextBuilder.append("\n  2. Explicitly state the Order ID and the Restaurant name.")
+                        contextBuilder.append("\n  3. Look at the Order Status and the Realtime Delivery Ride info.")
+                        contextBuilder.append("\n  4. Give a precise, real-time status translation in Spoken Tamil/English blend:")
+                        contextBuilder.append("\n     - If Order Status is PENDING: Tell them the order is waiting to be accepted by the shop. (அன்பான எடப்பாடி சிட்டி மக்களே, உங்க ஆர்டர் இன்னும் கடைக்காரர் கன்பார்ம் பண்ண வெயிட்டிங்ல இருக்குங்க!)")
+                        contextBuilder.append("\n     - If Order Status is ACCEPTED and Ride status is empty/null: The shop accepted the order and is preparing it. No rider is assigned yet.")
+                        contextBuilder.append("\n     - If Ride status is 'ACCEPTED': Rider ${'$'}{ride.riderName} accepted the ride and is rushing to the shop to pick it up. Provide their phone number: ${'$'}{ride.riderPhone}.")
+                        contextBuilder.append("\n     - If Ride status is 'PICKING_UP': Rider ${'$'}{ride.riderName} is at the shop picking up your hot delicious food right now.")
+                        contextBuilder.append("\n     - If Ride status is 'DELIVERING': Rider ${'$'}{ride.riderName} has picked up the food and is riding towards your address! They are currently near coordinates ${'$'}{ride.currentLat}, ${'$'}{ride.currentLng} and will reach you in a few minutes! Call them at ${'$'}{ride.riderPhone} for directions.")
+                        contextBuilder.append("\n     - If Order Status is COMPLETED or Ride status is 'COMPLETED': Confirmed that the order was delivered successfully. Ask them if they enjoyed the meal!")
+                    }
+                    contextBuilder.append("\n==========================================\n")
+                } else {
+                    contextBuilder.append("\nActive Customer: Guest.")
+                }
+
+                // All vendors (for "which shops are available?" queries)
+                val allVendorList = repository.vendorDao.getAllVendorsList()
+                val openVendors = allVendorList.filter { !it.isOnHoliday }
+                val closedVendors = allVendorList.filter { it.isOnHoliday }
+                contextBuilder.append("\n==========================================")
+                contextBuilder.append("\nALL AVAILABLE RESTAURANTS ON LYO PLATFORM (${openVendors.size} OPEN, ${closedVendors.size} CLOSED/HOLIDAY):")
+                openVendors.forEach { v ->
+                    contextBuilder.append("\n✅ OPEN: '${v.name}' / '${v.nameTa}' | Type: ${v.type} | Rating: ${v.rating} | Delivery Fee: ₹${v.deliveryFee.toInt()} | Min Order: ₹${v.minOrderAmount.toInt()} | Phone: ${v.phone}")
+                }
+                if (closedVendors.isNotEmpty()) {
+                    closedVendors.forEach { v ->
+                        contextBuilder.append("\n❌ HOLIDAY/CLOSED: '${v.name}' / '${v.nameTa}' - Currently unavailable.")
+                    }
+                }
+                contextBuilder.append("\n==========================================\n")
+
+                // Append strict pre-matching results so Lyo AI doesn't hallucinate or recommend invalid stores
+                if (matchedOptions.isNotEmpty()) {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n🎯 CURRENT MATCHING FOOD ITEMS IN OUR SYSTEM FOR CLIENT'S REQUEST:")
+                    matchedOptions.forEach { (item, vendor) ->
+                        val vegType = if (item.isVeg) "VEG (pure vegetarian)" else "NON-VEG (contains meat)"
+                        contextBuilder.append("\n- Item name: '${item.nameEn}' or '${item.nameTa}' | Price: ₹${item.price.toInt()} | Pure Veg? ${item.isVeg} | At Hotel: '${vendor.name}' / '${vendor.nameTa}' (Distance: ${String.format("%.1f", vendor.distance)} km, Rating: ${vendor.rating}, Delivery fee: ₹${vendor.deliveryFee.toInt()})")
+                    }
+                    contextBuilder.append("\n\nSTRICT RE-ROUTING MANDATES FOR LYO AI:")
+                    contextBuilder.append("\n1. You MUST recommend ONLY the hotels/kitchens listed above. Do not invent any other food hotels or guess their menus.")
+                    contextBuilder.append("\n2. If the user asked for Non-Veg, NEVER recommend purely vegetarian places like 'Saravana Bhavan' or its items under any circumstances. Ensure other hotels are highlighted.")
+                    contextBuilder.append("\n3. GST TAX: ${if (repository.gstEnabled) "GST is enabled at ${repository.gstRate}% rate. Calculate GST as (Subtotal * ${repository.gstRate / 100.0})." else "GST is completely disabled (GST கிடையாது). Never add or calculate any GST tax."}")
+                    contextBuilder.append("\n4. DELIVERY FEE: Use the exact delivery fee specified for the matched hotel above. Calculate total as (Item Price + Delivery Fee).")
+                    contextBuilder.append("\n5. Keep the conversation extremely polite, upbeat, cheerful, and local to Edappadi bilingually.")
+                    contextBuilder.append("\n==========================================\n")
+                } else {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n❌ NO UNCONSTRAINED DATABASE MENU ITEM FOUND FOR USER PROMPT.")
+                    contextBuilder.append("\n- Politely explain bilingually that we don't have this exact item listed on our standard hotel menus yet, but suggest they can message Coscoom Creative Tech Solutions directly at 8778148899 on WhatsApp/Call to order anything custom across Edappadi.")
+                    contextBuilder.append("\n==========================================\n")
+                }
+
+                val activeBanners = repository.promoBannerDao.getAllPromoBannersList()
+                val pinnedBroadcast = activeBanners.find { it.code == "AI_BROADCAST_PROMO" }
+                if (pinnedBroadcast != null) {
+                    contextBuilder.append("\n[ADMIN PRIORITY PINNED BROADCAST: '${pinnedBroadcast.description}']")
+                }
+
+                val chatContext = mutableListOf<String>()
+                chatContext.add("System Guidelines:\n$contextBuilder")
+                
+                lyoAiMessages.value.takeLast(8).forEach { msg ->
+                    chatContext.add(if (msg.isUser) "User: ${msg.text}" else "Lyo AI: ${msg.text}")
+                }
+                
+                val finalPrompt = chatContext.joinToString("\n")
+                val response = callGeminiApiRest(finalPrompt)
+                
+                var cleanedResponse = response
+                if (response.contains("[UNSUPPORTED_LANGUAGE_ERROR]")) {
+                    cleanedResponse = response.replace("[UNSUPPORTED_LANGUAGE_ERROR]", "").trim()
+                    showLyoSupportPopup.value = true
+                } else if (response.contains("8778148899") && 
+                    (prompt.lowercase().contains("hindi") || prompt.lowercase().contains("telugu") || 
+                     prompt.lowercase().contains("kannada") || prompt.lowercase().contains("french") || 
+                     prompt.lowercase().contains("spanish") || prompt.lowercase().contains("malayalam"))) {
+                    showLyoSupportPopup.value = true
+                }
+                
+                val currentCart = activeCart.value
+                val vendor = activeVendor.value
+                val itemsSummary = if (currentCart.isNotEmpty()) {
+                    currentCart.map { (item, qty) ->
+                        "${qty}x ${item.nameTa.ifEmpty { item.nameEn }} - ₹${(item.price * qty).toInt()}"
+                    }
+                } else null
+                val totalAmount = if (currentCart.isNotEmpty()) {
+                    calculateCartTotalSynchronously(currentCart)
+                } else null
+                val shopName = vendor?.let { it.nameTa.ifEmpty { it.name } }
+
+                val updated = lyoAiMessages.value.toMutableList()
+                updated.add(LyoMessage(
+                    text = cleanedResponse,
+                    isUser = false,
+                    itemsSummary = itemsSummary,
+                    totalAmount = totalAmount,
+                    shopName = shopName,
+                    recommendedItems = if (matchedOptions.isNotEmpty()) matchedOptions else null
+                ))
+                lyoAiMessages.value = updated
+            } catch (e: Exception) {
+                val supportReply = "அன்பார்ந்த எடப்பாடி மக்களே! 🌾 லியோ ஏ ஐ சாட்பாட் சர்வரில் சிறிய நெட்வொர்க் சுணக்கம் ஏற்பட்டுள்ளதால், கீழே உள்ள ஒப்பீட்டு பட்டியலை சரிபார்த்து உங்களுக்கு விசேஷ தேவைகள் ஏதேனும் இருப்பின் உடனே **Coscoom Creative Tech Solutions (8778148899)** என்ற எண்ணிற்கு வாட்ஸ்அப்பிலோ அல்லது நேரடியாக கால் செய்தோ தொடர்பு கொள்ளுங்கள்! 🛵✨"
+                
+                val currentCart = activeCart.value
+                val vendor = activeVendor.value
+                val itemsSummary = if (currentCart.isNotEmpty()) {
+                    currentCart.map { (item, qty) ->
+                        "${qty}x ${item.nameTa.ifEmpty { item.nameEn }} - ₹${(item.price * qty).toInt()}"
+                    }
+                } else null
+                val totalAmount = if (currentCart.isNotEmpty()) {
+                    calculateCartTotalSynchronously(currentCart)
+                } else null
+                val shopName = vendor?.let { it.nameTa.ifEmpty { it.name } }
+                
+                val updated = lyoAiMessages.value.toMutableList()
+                updated.add(LyoMessage(
+                    text = supportReply,
+                    isUser = false,
+                    itemsSummary = itemsSummary,
+                    totalAmount = totalAmount,
+                    shopName = shopName,
+                    recommendedItems = null
+                ))
+                lyoAiMessages.value = updated
+            } finally {
+                isLyoAiLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun callGeminiApiRest(prompt: String): String = withContext(Dispatchers.IO) {
+        try {
+            com.example.data.ai.AiOrchestrator.executePrompt(prompt, 0.7)
+        } catch (e: Exception) {
+            "அன்பார்ந்த எடப்பாடி சிட்டி மக்களே! 🛵 லியோ ஏ ஐ இணைப்பதில் நெட்வொர்க் சுணக்கம் ஏற்பட்டுள்ளது. கவலை வேண்டாம், உங்களுக்கு தேவையானதை உடனே புக் செய்ய Coscoom Creative Tech Solutions (8778148899) என்ற எண்ணிற்கு வாட்ஸ்அப்பிலோ அல்லது கால் செய்தோ உடனே தொடர்பு கொள்ளவும்! நாங்கள் பார்த்துக்கொள்கிறோம்!"
+        }
+    }
+
+    fun getOrdersForUser(userId: String): Flow<List<Order>> {
+        return userOrdersCache.getOrPut(userId) {
+            repository.getOrdersForUser(userId)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+    }
+
+    suspend fun getDeliveryRide(orderId: Long): DeliveryRide? {
+        return repository.getRideForOrder(orderId)
+    }
+
+    fun getRideForOrderFlow(orderId: Long): Flow<DeliveryRide?> {
+        return repository.getRideForOrderFlow(orderId)
+    }
+
+    suspend fun getRiderByPhone(phone: String): User? {
+        return repository.findUser(phone)
+    }
+
+    suspend fun getVendorById(id: Long): Vendor? {
+        val cached = vendorCache[id]
+        if (cached != null) return cached
+        val fetched = repository.vendorDao.getVendorById(id)
+        if (fetched != null) {
+            vendorCache[id] = fetched
+        }
+        return fetched
+    }
+
+    fun resetPasswordOnStorefront(phone: String, newPass: String, onFinished: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val trimPhone = phone.trim()
+            val stripped = trimPhone.replace("+91", "").replace(" ", "").trim()
+            
+            var user = repository.findUser(trimPhone)
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser(stripped)
+            }
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser("+91$stripped")
+            }
+            if (user == null && stripped.isNotEmpty()) {
+                user = repository.findUser("+91 $stripped")
+            }
+            
+            if (user != null) {
+                repository.registerUser(user, newPass)
+                // If it is the current logged-in user, refresh their session
+                if (currentUser.value?.phone == user.phone) {
+                    repository.currentUser.value = user
+                }
+                onFinished(true)
+            } else {
+                onFinished(false)
+            }
+        }
+    }
+
+    fun updateUserProfile(name: String, email: String, address: String, lat: Double, lng: Double, whatsAppOptIn: Boolean) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val updated = user.copy(
+                name = name,
+                email = email,
+                address = address,
+                lat = lat,
+                lng = lng,
+                isWhatsAppOptIn = whatsAppOptIn
+            )
+            repository.registerUser(updated)
+            repository.currentUser.value = updated
+        }
+    }
+
+    fun updateUserWhatsAppOptIn(enabled: Boolean) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val updated = user.copy(isWhatsAppOptIn = enabled)
+            repository.registerUser(updated)
+            repository.currentUser.value = updated
+        }
+    }
+
+    // Coupon configurations
+    val appliedCoupon = MutableStateFlow<String?>(null)
+    val couponError = MutableStateFlow<String?>(null)
+
+    // Tip selection
+    val selectedTipAmount = MutableStateFlow(0.0) // Defaults to 0.0 unless customer explicitly adds tips
+    val selectedPaymentMethod = MutableStateFlow("CASH") // "CASH" or "UPI"
+
+    // High Performance Reactive Cached Cart Calculators (Avoids heavy re-computation during recomposition)
+    val cartSubtotal: StateFlow<Double> = activeCart
+        .map { map -> map.entries.sumOf { it.key.price * it.value } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    val cartDeliveryFee: StateFlow<Double> = combine(
+        activeCart,
+        activeVendor,
+        currentUser
+    ) { cartMap, vendor, user ->
+        if (vendor == null) return@combine 0.0
+        val sub = cartMap.entries.sumOf { it.key.price * it.value }
+        if (user == null) return@combine vendor.deliveryFee
+        val dist = calculateDistance(user.lat, user.lng, vendor.lat, vendor.lng)
+        com.example.data.database.LyoDeliveryPricingEngine.calculateDeliveryFee(
+            distanceKm = dist,
+            subtotal = sub,
+            isDynamicDelivery = vendor.isDynamicDelivery,
+            baseDeliveryFee = vendor.deliveryFee,
+            freeDeliveryThreshold = vendor.freeDeliveryThreshold,
+            maxDeliveryRadiusKm = vendor.visibilityRadiusKm
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    val cartCouponDiscount: StateFlow<Double> = combine(
+        cartSubtotal,
+        activeVendor,
+        appliedCoupon
+    ) { subtotal, vendor, applied ->
+        if (applied == null) return@combine 0.0
+        when (applied) {
+            "LYOFRESH" -> if (subtotal >= 300.0) 80.0 else 0.0
+            "CHENNADI70" -> if (subtotal >= 100.0) 50.0 else 0.0
+            else -> {
+                if (vendor != null && vendor.isCouponEnabled && applied == vendor.couponCode.uppercase().trim() && subtotal >= vendor.couponMinOrder) {
+                    vendor.couponDiscount
+                } else {
+                    0.0
+                }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    val cartTotalAmount: StateFlow<Double> = combine(
+        cartSubtotal,
+        cartDeliveryFee,
+        cartCouponDiscount,
+        selectedTipAmount
+    ) { subtotal, delivery, discount, tip ->
+        val gst = if (repository.gstEnabled) subtotal * (repository.gstRate / 100.0) else 0.0
+        val total = subtotal + gst + delivery + tip - discount
+        if (total < 0.0) 0.0 else total
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    fun addToCart(item: MenuItem, supplier: Vendor) {
+        val activeVendorVal = repository.currentVendor.value
+        val cartIsEmpty = repository.cart.value.isEmpty()
+        if (!cartIsEmpty && activeVendorVal != null && activeVendorVal.id != supplier.id) {
+            pendingItemToAdd.value = Pair(item, supplier)
+            pendingItemQuantity.value = 1
+            showCartConflictDialog.value = true
+        } else {
+            repository.addToCart(item, supplier)
+        }
+    }
+
+    fun addToCartByItemId(item: MenuItem) {
+        viewModelScope.launch {
+            val vendor = repository.vendorDao.getVendorById(item.vendorId)
+            if (vendor != null) {
+                addToCart(item, vendor)
+            }
+        }
+    }
+
+    fun addToCartWithQuantity(item: MenuItem, supplier: Vendor, quantity: Int) {
+        val activeVendorVal = repository.currentVendor.value
+        val cartIsEmpty = repository.cart.value.isEmpty()
+        if (!cartIsEmpty && activeVendorVal != null && activeVendorVal.id != supplier.id) {
+            pendingItemToAdd.value = Pair(item, supplier)
+            pendingItemQuantity.value = quantity
+            showCartConflictDialog.value = true
+        } else {
+            repository.addToCartWithQuantity(item, supplier, quantity)
+        }
+    }
+
+    fun removeFromCart(item: MenuItem) {
+        repository.removeFromCart(item)
+    }
+
+    fun removeItemCompletely(item: MenuItem) {
+        repository.removeItemCompletely(item)
+    }
+
+    fun clearCart() {
+        repository.clearCart()
+    }
+
+    fun reorderOrder(orderId: Long, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val (order, items) = repository.getOrderWithItems(orderId)
+                if (order == null || items.isEmpty()) return@launch
+
+                repository.clearCart()
+                appliedCoupon.value = null
+                selectedTipAmount.value = 0.0
+
+                val vendor = repository.vendorDao.getVendorById(order.vendorId) ?: return@launch
+                val allMenuItems = repository.menuItemDao.getMenuItemsForVendorList(order.vendorId)
+
+                val newCartMap = mutableMapOf<MenuItem, Int>()
+                items.forEach { pastItem ->
+                    val matchedMenuItem = allMenuItems.find { it.nameEn.equals(pastItem.nameEn, ignoreCase = true) }
+                    if (matchedMenuItem != null) {
+                        newCartMap[matchedMenuItem] = pastItem.quantity
+                    }
+                }
+
+                if (newCartMap.isNotEmpty()) {
+                    repository.currentVendor.value = vendor
+                    repository.cart.value = newCartMap
+                    onComplete()
+                }
+            } catch (e: Exception) {
+                Log.e("StorefrontViewModel", "Reorder failed: ${e.message}")
+            }
+        }
+    }
+
+    fun insertPromoBanner(banner: PromoBanner) {
+        viewModelScope.launch {
+            repository.promoBannerDao.insertPromoBanner(banner)
+        }
+    }
+
+    fun deletePromoBanner(banner: PromoBanner) {
+        viewModelScope.launch {
+            repository.promoBannerDao.deletePromoBanner(banner)
+        }
+    }
+
+    fun applyCoupon(code: String) {
+        val uppercaseCode = code.uppercase().trim()
+        val cartSubtotal = getCartSubtotal()
+        val vendor = activeVendor.value
+        
+        if (uppercaseCode == "LYOFRESH" && cartSubtotal >= 300.0) {
+            appliedCoupon.value = uppercaseCode
+            couponError.value = null
+        } else if (uppercaseCode == "CHENNADI70" && cartSubtotal >= 100.0) {
+            appliedCoupon.value = uppercaseCode
+            couponError.value = null
+        } else if (vendor != null && vendor.isCouponEnabled && uppercaseCode == vendor.couponCode.uppercase().trim() && cartSubtotal >= vendor.couponMinOrder) {
+            appliedCoupon.value = uppercaseCode
+            couponError.value = null
+        } else {
+            appliedCoupon.value = null
+            if (vendor != null && vendor.isCouponEnabled && uppercaseCode == vendor.couponCode.uppercase().trim()) {
+                couponError.value = "Min order of ₹${vendor.couponMinOrder.toInt()} required for this coupon!"
+            } else {
+                couponError.value = "Coupon invalid or minimum threshold not met!"
+            }
+        }
+    }
+
+    fun getCartSubtotal(): Double {
+        return cartSubtotal.value
+    }
+
+    fun getCouponDiscount(): Double {
+        return cartCouponDiscount.value
+    }
+
+    fun getCartDeliveryFee(): Double {
+        return cartDeliveryFee.value
+    }
+
+    fun getCartTotalAmount(): Double {
+        return cartTotalAmount.value
+    }
+
+    fun calculateCartTotalSynchronously(cartMap: Map<MenuItem, Int>): Double {
+        if (cartMap.isEmpty()) return 0.0
+        val subtotal = cartMap.entries.sumOf { it.key.price * it.value }
+        val vendor = activeVendor.value
+        val user = currentUser.value
+        val delivery = if (vendor == null) 0.0 else {
+            if (user == null) vendor.deliveryFee else {
+                val dist = calculateDistance(user.lat, user.lng, vendor.lat, vendor.lng)
+                com.example.data.database.LyoDeliveryPricingEngine.calculateDeliveryFee(
+                    distanceKm = dist,
+                    subtotal = subtotal,
+                    isDynamicDelivery = vendor.isDynamicDelivery,
+                    baseDeliveryFee = vendor.deliveryFee,
+                    freeDeliveryThreshold = vendor.freeDeliveryThreshold,
+                    maxDeliveryRadiusKm = vendor.visibilityRadiusKm
+                )
+            }
+        }
+        val applied = appliedCoupon.value
+        val discount = if (applied == null) 0.0 else {
+            when (applied) {
+                "LYOFRESH" -> if (subtotal >= 300.0) 80.0 else 0.0
+                "CHENNADI70" -> if (subtotal >= 100.0) 50.0 else 0.0
+                else -> {
+                    if (vendor != null && vendor.isCouponEnabled && applied == vendor.couponCode.uppercase().trim() && subtotal >= vendor.couponMinOrder) {
+                        vendor.couponDiscount
+                    } else {
+                        0.0
+                    }
+                }
+            }
+        }
+        val tip = selectedTipAmount.value
+        val gst = if (repository.gstEnabled) subtotal * (repository.gstRate / 100.0) else 0.0
+        val total = subtotal + gst + delivery + tip - discount
+        return if (total < 0.0) 0.0 else total
+    }
+
+    fun proceedToCheckout(address: String, lat: Double, lng: Double, loyaltyDiscount: Double = 0.0, onSuccess: (Long) -> Unit) {
+        val user = repository.currentUser.value ?: return
+        val vendor = activeVendor.value ?: return
+        val sub = getCartSubtotal()
+        
+        // Backend logic safeguard for restaurant minimum order requirement
+        if (sub < vendor.minOrderAmount) {
+            return
+        }
+        
+        val delivery = getCartDeliveryFee()
+        val discount = getCouponDiscount()
+        val tip = selectedTipAmount.value
+        val items = activeCart.value.toList()
+
+        viewModelScope.launch {
+            // Resolve smart geocoded coordinates based on address
+            val resolvedLoc = resolveSmartGeocodeTamilNadu(address, lat, lng)
+            val finalLat = resolvedLoc.first
+            val finalLng = resolvedLoc.second
+
+            // Update and persist the user's primary address & coordinates first so it auto-prefills next time
+            val updatedUser = user.copy(address = address, lat = finalLat, lng = finalLng)
+            repository.registerUser(updatedUser)
+            repository.currentUser.value = updatedUser
+
+            val order = repository.placeOrder(
+                userId = updatedUser.phone,
+                vendor = vendor,
+                subtotal = sub,
+                deliveryFee = delivery,
+                couponDiscount = discount + loyaltyDiscount,
+                tipAmount = tip,
+                itemsList = items,
+                customerLat = finalLat,
+                customerLng = finalLng,
+                redeemedPoints = (loyaltyDiscount * 10).toInt()
+            )
+            appliedCoupon.value = null
+            selectedTipAmount.value = 0.0
+            if (order.isPendingSync) {
+                orderSuccessDialogTitle.value = "உள்ளூர் ஆர்டர் சேமிப்பு ⚠️"
+                orderSuccessDialogText.value = "உங்கள் ஆர்டர் லோக்கலாக சேமிக்கப்பட்டுள்ளது, ஆனால் உணவகத்துடன் இன்னும் உறுதிப்படுத்தப்படவில்லை. இணைய இணைப்பு அல்லது லாக்-இன் சீரானவுடன் தானாகவே மீண்டும் முயற்சிக்கப்பட்டு உறுதி செய்யப்படும்.\n(Saved locally, restaurant confirmation pending. Will auto-retry once connectivity/auth is restored.)"
+            } else {
+                orderSuccessDialogTitle.value = "ஆர்டர் வெற்றிகரமாக பதிவு செய்யப்பட்டது! 🎉"
+                orderSuccessDialogText.value = "ஓகே உங்கள் ஆர்டர் வெற்றிகரமாக வந்துவிட்டது!"
+            }
+            showOrderSuccessDialog.value = true
+            onSuccess(order.id)
+        }
+    }
+
+    fun setTipAmount(amount: Double) {
+        selectedTipAmount.value = amount
+    }
+
+    fun getMenuItemsForVendor(vendorId: Long): Flow<List<MenuItem>> {
+        return menuItemsCache.getOrPut(vendorId) {
+            repository.getMenuItemsForVendor(vendorId)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+    }
+
+    fun getCategoriesForVendor(vendorId: Long): Flow<List<Category>> {
+        return categoriesCache.getOrPut(vendorId) {
+            repository.getCategoriesForVendor(vendorId)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+    }
+
+    suspend fun getOrderItems(orderId: Long): List<com.example.data.database.OrderItem> {
+        val cached = orderItemsCache[orderId]
+        if (cached != null) return cached
+        val fetched = repository.getOrderWithItems(orderId).second
+        orderItemsCache[orderId] = fetched
+        return fetched
+    }
+}
+
+
+// ==========================================
+// 3. MASTER ADMIN PORTAL VIEWMODEL
+// ==========================================
+class AdminViewModel(val repository: LyoRepository) : ViewModel() {
+    private val GEMINI_MODEL = "gemini-3.5-flash"
+
+    private val adminCategoriesCache = java.util.concurrent.ConcurrentHashMap<Long, Flow<List<Category>>>()
+    private val adminMenuItemsCache = java.util.concurrent.ConcurrentHashMap<Long, Flow<List<MenuItem>>>()
+
+    val currentUser = repository.currentUser
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val allOrders = repository.allOrdersAdmin
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allVendors = repository.allVendors
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allPromoBanners = repository.allPromoBanners
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allRiders = repository.allRiders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allCustomers = repository.allCustomers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allAdmins = repository.allAdmins
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeDeliveryRides = repository.activeDeliveryRides
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val maxStoreDistanceRadius = repository.maxStoreDistanceRadius
+
+    val customBusinessTypes = kotlinx.coroutines.flow.MutableStateFlow<Map<String, String>>(
+        mapOf(
+            "Restaurant" to "🍔",
+            "Cafe" to "☕",
+            "Bakery" to "🍰",
+            "Hotel" to "🏨",
+            "Snack Shop" to "🍿",
+            "Dhaba" to "🍛",
+            "Juice Shop" to "🍹",
+            "Sweet Stall" to "🍬",
+            "Ice Cream Parlour" to "🍨",
+            "Pizza Shop" to "🍕",
+            "Biryani Center" to "🍗"
+        )
+    )
+
+    fun addCustomBusinessType(name: String, emoji: String) {
+        val current = customBusinessTypes.value.toMutableMap()
+        current[name] = emoji
+        customBusinessTypes.value = current
+    }
+
+    fun insertManualVendor(
+        name: String,
+        nameTa: String,
+        type: String,
+        address: String,
+        phone: String,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val newVendor = com.example.data.database.Vendor(
+                name = name,
+                nameTa = nameTa,
+                type = type,
+                rating = 4.8,
+                distance = 1.8,
+                deliveryTime = 25,
+                deliveryFee = 40.0,
+                address = address,
+                lat = 11.5812,
+                lng = 77.8465,
+                bannerUrl = type.lowercase(),
+                phone = phone,
+                visibilityRadiusKm = 99999.0
+            )
+            val vId = repository.vendorDao.insertVendor(newVendor)
+            val saved = newVendor.copy(id = vId)
+            try {
+                LyoFirebaseHelper.syncVendorToFirestore(saved)
+            } catch (fe: Exception) {
+                Log.e("AdminViewModel", "Firestore sync bypassed or failed", fe)
+            }
+            withContext(Dispatchers.Main) {
+                onSuccess()
+            }
+        }
+    }
+
+    fun updateStoreVisibilityRadius(radius: Double) {
+        viewModelScope.launch {
+            repository.maxStoreDistanceRadius.value = radius
+        }
+    }
+
+    fun deleteCustomer(user: User) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteCustomer attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.deleteCustomer(user)
+        }
+    }
+
+    fun deleteAdmin(user: User) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteAdmin attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.deleteAdmin(user)
+        }
+    }
+
+    fun insertPromoBanner(banner: PromoBanner) {
+        viewModelScope.launch {
+            val generatedId = repository.promoBannerDao.insertPromoBanner(banner)
+            val finalBanner = if (banner.id == 0L) banner.copy(id = generatedId) else banner
+            try {
+                com.example.data.repository.LyoFirebaseHelper.syncPromoBannerToFirestore(finalBanner)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore sync failed for insertPromoBanner: ${e.message}")
+            }
+        }
+    }
+
+    fun deletePromoBanner(banner: PromoBanner) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deletePromoBanner attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.promoBannerDao.deletePromoBanner(banner)
+            try {
+                com.example.data.repository.LyoFirebaseHelper.deletePromoBannerFromFirestore(banner)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore delete failed for deletePromoBanner: ${e.message}")
+            }
+        }
+    }
+
+    fun createOrUpdateAdmin(username: String, name: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            if (username.isBlank() || pass.isBlank()) {
+                onError("Username and Password cannot be empty.")
+                return@launch
+            }
+            val existing = repository.findUser(username)
+            if (existing != null && existing.role != "ADMIN") {
+                onError("Username already exists!")
+                return@launch
+            }
+            val checkName = if (name.isNotBlank()) name else (if (existing != null) existing.name else "Lyo Branch Admin")
+            val newAdmin = User(
+                phone = username,
+                name = checkName,
+                email = if (existing != null) existing.email else "admin_${username.lowercase()}@lyo.in",
+                address = if (existing != null) existing.address else "Lyo Branch Office",
+                lat = 11.5812,
+                lng = 77.8465,
+                isWhatsAppOptIn = false,
+                role = "ADMIN"
+            )
+            repository.registerUser(newAdmin, pass)
+            onSuccess()
+        }
+    }
+
+    // Rider Onboarding inputs
+    val newRiderName = MutableStateFlow("")
+    val newRiderPhone = MutableStateFlow("")
+    val newRiderEmail = MutableStateFlow("")
+    val newRiderPassword = MutableStateFlow("")
+    val newRiderVehicleNo = MutableStateFlow("")
+    val newRiderAddress = MutableStateFlow("")
+    val newRiderSalaryType = MutableStateFlow("MONTHLY") // "MONTHLY" or "PER_KM"
+    val newRiderSalaryRate = MutableStateFlow("")
+
+    // Vendor Onboarding inputs
+    val newVendorName = MutableStateFlow("")
+    val newVendorNameTa = MutableStateFlow("")
+    val newVendorPhone = MutableStateFlow("")
+    val newVendorType = MutableStateFlow("Restaurant") // Restaurant, Cafe, Hotel, Bakery, Snack Shop
+    val newVendorAddress = MutableStateFlow("")
+    val newVendorLat = MutableStateFlow(11.5812) // Default Salem Idappadi
+    val newVendorLng = MutableStateFlow(77.8465)
+    val newVendorDeliveryFee = MutableStateFlow("50.0")
+    val newVendorMinThreshold = MutableStateFlow("150.0")
+    val newVendorFreeThreshold = MutableStateFlow("500.0")
+    val newVendorBannerUrl = MutableStateFlow("")
+    val newVendorVisibilityRadius = MutableStateFlow(15.0)
+    val isOnboarding = MutableStateFlow(false)
+
+    // Categories and MenuItem management
+    val selectedAdminVendor = MutableStateFlow<Vendor?>(null)
+    val newCategoryNameEn = MutableStateFlow("")
+    val newCategoryNameTa = MutableStateFlow("")
+
+    val newItemNameEn = MutableStateFlow("")
+    val newItemNameTa = MutableStateFlow("")
+    val newItemDescEn = MutableStateFlow("")
+    val newItemDescTa = MutableStateFlow("")
+    val newItemPrice = MutableStateFlow("120.0")
+    val selectedCategoryId = MutableStateFlow<Long?>(null)
+    val newItemIsVeg = MutableStateFlow(true)
+    val newItemImageUrl = MutableStateFlow("")
+
+    fun sendSmartMenuMessage(text: String, onPublishSuccess: () -> Unit = {}) {
+        if (text.isBlank() || isSmartMenuLoading.value) return
+
+        // PUBLISH command: skip Gemini entirely, write current draft to DB directly
+        if (text.trim().uppercase() == "PUBLISH") {
+            val currentState = smartMenuState.value
+            if (currentState == null || currentState.restaurantName.isBlank()) {
+                val msgs = smartMenuMessages.value.toMutableList()
+                msgs.add(SmartMenuMessage("assistant", "⚠️ Publish செய்ய முதலில் ஒரு கடையின் விவரங்களை அனுப்பவும். இப்போது draft இல்லை."))
+                smartMenuMessages.value = msgs
+                return
+            }
+            isSmartMenuLoading.value = true
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    executePublishToDB(currentState)
+                    withContext(Dispatchers.Main) {
+                        val msgs = smartMenuMessages.value.toMutableList()
+                        msgs.add(SmartMenuMessage("assistant", "✅ \"${currentState.restaurantName}\" வெற்றிகரமாக DB-ல் சேர்க்கப்பட்டது! வாடிக்கையாளர் app-ல் இப்போதே தெரியும். 🚀"))
+                        smartMenuMessages.value = msgs
+                        smartMenuState.value = null
+                        onPublishSuccess()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        val msgs = smartMenuMessages.value.toMutableList()
+                        msgs.add(SmartMenuMessage("assistant", "❌ Publish தோல்வியடைந்தது: ${e.message}. மீண்டும் முயற்சிக்கவும்."))
+                        smartMenuMessages.value = msgs
+                    }
+                } finally {
+                    withContext(Dispatchers.Main) {
+                        isSmartMenuLoading.value = false
+                    }
+                }
+            }
+            return
+        }
+
+        val currentMsgs = smartMenuMessages.value.toMutableList()
+        currentMsgs.add(SmartMenuMessage("admin", text))
+        smartMenuMessages.value = currentMsgs
+        isSmartMenuLoading.value = true
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val promptBuilder = StringBuilder()
+                promptBuilder.append("""
+You are the Lyo Smart Menu Parsing Engine. Parse the incoming text from a restaurant vendor.
+The text could be a paragraph describing the restaurant's name, category/classification, phone, address, and its menu items, or just a menu.
+Your job is to identify and extract BOTH the restaurant metadata (store info) AND the menu data.
+
+CRITICAL INSTRUCTIONS:
+1. Extract "store_info":
+   - "name": English name of the restaurant/shop. If not found, infer or use the Tamil name translated to English.
+   - "name_ta": Tamil name of the restaurant/shop. If not found in the text, TRANSLATE/TRANSLITERATE the English name into standard, elegant Tamil.
+   - "business_type": Map this to one of the standard classifications: "Restaurant", "Cafe", "Hotel", "Bakery", "Snack Shop", "Dhaba", "Juice Shop", "Sweet Stall", "Ice Cream Parlour", "Pizza Shop", "Biryani Center". If the text mentions things like "Briyani", "Biriyani", map to "Biryani Center". If it mentions "tea", "coffee", "bakes", map to "Cafe" or "Bakery". Always choose the most appropriate classification from these options (default is "Restaurant" if unclear).
+   - "address": Address if mentioned in the paragraph, otherwise default to "Salem".
+   - "phone": Extract any phone or mobile number mentioned, otherwise default to "".
+   - "photo_url": Leave as "".
+
+2. Extract "menu_data":
+   - Group items into categories.
+   - Format category keys as "EnglishCategoryName__AND__TamilCategoryName" (e.g. "Biryani__AND__பிரியாணி" or "Starters__AND__துவக்கிகள்").
+   - For each item, extract:
+     - "name": English item name (e.g., "Mutton Biryani").
+     - "name_ta": Tamil item name (e.g., "மட்டன் பிரியாணி"). Translate/transliterate it accurately if not provided!
+     - "price": Double price (e.g., 280.0).
+     - "meat_type": "Veg", "Chicken", "Mutton", "Egg", "Fish", or "Other".
+
+Return ONLY valid JSON wrapped between "---JSON_STATE_START---" and "---JSON_STATE_END---" markers with NO markdown code blocks inside.
+
+Example output format:
+I have parsed the menu with 3 categories and 12 items.
+---JSON_STATE_START---
+{"restaurant_id":"resto_1234","store_info":{"name":"Hotel Example","name_ta":"ஹோட்டல் எக்சாம்பிள்","business_type":"Restaurant","address":"Salem","phone":"9876543210","photo_url":""},"menu_data":{"Biryani__AND__பிரியாணி":[{"name":"Mutton Biryani","name_ta":"மட்டன் பிரியாணி","price":280,"meat_type":"Mutton"}]},"status":"DRAFT"}
+---JSON_STATE_END---
+============================
+""")
+
+                currentMsgs.filter { !it.text.startsWith("Lyo Admin System Ready.") }.takeLast(6).forEach { msg ->
+                    val r = if (msg.sender == "admin") "User/Admin" else "Lyo Master Admin Engine"
+                    promptBuilder.append("$r: ${msg.text}\n")
+                }
+                promptBuilder.append("\nLyo Master Admin Engine:")
+
+                val responseText = callGeminiRestForSmartMenu(promptBuilder.toString())
+
+                var jsonPart: String? = null
+                var chatBubbleText = responseText.trim()
+
+                val startIdx = responseText.indexOf("---JSON_STATE_START---")
+                val endIdx = responseText.indexOf("---JSON_STATE_END---")
+
+                if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+                    chatBubbleText = responseText.substring(0, startIdx).trim()
+                    jsonPart = responseText.substring(startIdx + "---JSON_STATE_START---".length, endIdx).trim()
+                } else {
+                    val startBrace = responseText.indexOf("{")
+                    val endBrace = responseText.lastIndexOf("}")
+                    if (startBrace != -1 && endBrace > startBrace) {
+                        val candidate = responseText.substring(startBrace, endBrace + 1).trim()
+                        if (candidate.contains("restaurant_id") || candidate.contains("store_info") || candidate.contains("menu_data")) {
+                            jsonPart = candidate
+                            chatBubbleText = responseText.substring(0, startBrace).trim()
+                        }
+                    }
+                }
+
+                // Strip markdown code fences
+                if (jsonPart != null) {
+                    jsonPart = jsonPart.trim()
+                    if (jsonPart.startsWith("```")) {
+                        val firstNewline = jsonPart.indexOf("\n")
+                        if (firstNewline != -1) jsonPart = jsonPart.substring(firstNewline).trim()
+                        if (jsonPart.endsWith("```")) jsonPart = jsonPart.substring(0, jsonPart.length - 3).trim()
+                    }
+                }
+
+                val updatedList = smartMenuMessages.value.toMutableList()
+                if (chatBubbleText.isNotBlank()) {
+                    updatedList.add(SmartMenuMessage("assistant", chatBubbleText))
+                }
+                withContext(Dispatchers.Main) {
+                    smartMenuMessages.value = updatedList
+                }
+
+                if (jsonPart != null) {
+                    try {
+                        val rootObj = org.json.JSONObject(jsonPart)
+                        val rId = rootObj.optString("restaurant_id", "")
+                        val storeInfo = rootObj.optJSONObject("store_info")
+                        val rName = storeInfo?.optString("name", "") ?: ""
+                        val rNameTa = storeInfo?.optString("name_ta", "") ?: ""
+                        val rType = storeInfo?.optString("business_type", "Restaurant") ?: "Restaurant"
+                        val rLoc = storeInfo?.optString("address", "") ?: ""
+                        val rContact = storeInfo?.optString("phone", "") ?: ""
+                        val rPhoto = storeInfo?.optString("photo_url", "") ?: ""
+                        val rLat = if (storeInfo != null && storeInfo.has("lat")) storeInfo.optDouble("lat", 11.5812) else 11.5812
+                        val rLng = if (storeInfo != null && storeInfo.has("lng")) storeInfo.optDouble("lng", 77.8465) else 77.8465
+                        val menuMap = mutableMapOf<String, List<SmartMenuItem>>()
+                        val menuObj = rootObj.optJSONObject("menu_data")
+                        if (menuObj != null) {
+                            val keys = menuObj.keys()
+                            while (keys.hasNext()) {
+                                val catName = keys.next()
+                                val itemsArr = menuObj.optJSONArray(catName)
+                                val itemList = mutableListOf<SmartMenuItem>()
+                                if (itemsArr != null) {
+                                    for (i in 0 until itemsArr.length()) {
+                                        val itemObj = itemsArr.optJSONObject(i) ?: continue
+                                        itemList.add(SmartMenuItem(
+                                            itemName = itemObj.optString("name", ""),
+                                            price = itemObj.optDouble("price", 0.0),
+                                            meatType = itemObj.optString("meat_type", "Other"),
+                                            itemNameTa = itemObj.optString("name_ta", "")
+                                        ))
+                                    }
+                                }
+                                if (itemList.isNotEmpty()) menuMap[catName] = itemList
+                            }
+                        }
+                        
+                        withContext(Dispatchers.Main) {
+                            smartMenuState.value = SmartMenuState(
+                                restaurantId = rId,
+                                restaurantName = rName,
+                                restaurantNameTa = rNameTa,
+                                businessType = rType,
+                                address = rLoc,
+                                phone = rContact,
+                                photoUrl = rPhoto,
+                                menuData = menuMap,
+                                status = "DRAFT",
+                                lat = rLat,
+                                lng = rLng
+                            )
+                            lastParsedJson.value = rootObj.toString(4)
+                            if (rName.isNotBlank() && menuMap.isNotEmpty()) {
+                                val confirmMsg = smartMenuMessages.value.toMutableList()
+                                confirmMsg.add(SmartMenuMessage("assistant", "✅ ${rName} - ${menuMap.values.sumOf { it.size }} items ready. வலதுபுறம் சரிபார்த்தuவிட்டு **PUBLISH** என்று அனுப்பவும்!"))
+                                smartMenuMessages.value = confirmMsg
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("SmartMenu", "JSON parse error: ${e.message}", e)
+                        withContext(Dispatchers.Main) {
+                            val errMsgs = smartMenuMessages.value.toMutableList()
+                            errMsgs.add(SmartMenuMessage("assistant", "⚠️ மெனு தரவு பாதிப்படைந்தது. Gemini response format சரியாக வரவில்லை. மீண்டும் அனுப்புங்கள் அல்லது Reset செய்து மீண்டும் try செய்யுங்கள்."))
+                            smartMenuMessages.value = errMsgs
+                        }
+                    }
+                } else {
+                    if (chatBubbleText.isBlank()) {
+                        withContext(Dispatchers.Main) {
+                            val errMsgs = smartMenuMessages.value.toMutableList()
+                            errMsgs.add(SmartMenuMessage("assistant", "Gemini பதில் அனுப்பவில்லை. மீண்டும் முயற்சிக்கவும்."))
+                            smartMenuMessages.value = errMsgs
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    val errMsgs = smartMenuMessages.value.toMutableList()
+                    errMsgs.add(SmartMenuMessage("assistant", "❌ இணைப்பு தோல்வி: ${e.localizedMessage}. மீண்டும் முயற்சிக்கவும்."))
+                    smartMenuMessages.value = errMsgs
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isSmartMenuLoading.value = false
+                }
+            }
+        }
+    }
+
+    // --- SMART MENU MANAGER STATES ---
+    data class SmartMenuMessage(
+        val sender: String, // "admin" or "assistant"
+        val text: String,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+
+    data class SmartMenuItem(
+        val itemName: String,
+        val price: Double,
+        val meatType: String, // "Mutton", "Chicken", "Veg", "Other"
+        val itemNameTa: String = ""
+    )
+
+    data class SmartMenuState(
+        val restaurantId: String = "",
+        val restaurantName: String = "",
+        val restaurantNameTa: String = "",
+        val businessType: String = "",
+        val address: String = "",
+        val phone: String = "",
+        val photoUrl: String = "",
+        val menuData: Map<String, List<SmartMenuItem>> = emptyMap(),
+        val status: String = "NONE", // DRAFT, PUBLISHED
+        val lat: Double = 11.5812,
+        val lng: Double = 77.8465
+    )
+
+    val smartMenuMessages = MutableStateFlow<List<SmartMenuMessage>>(listOf(
+        SmartMenuMessage("assistant", "வணக்கம்! நான் தான் லியோ ஸ்மார்ட் மெனு மேனேஜர் (Lyo Smart Menu Manager) 🤖\n\nஎன்னிடம் நீங்கள் எந்த ஒரு கடையின் பெயர், முகவரி, தொலைபேசி எண் மற்றும் உணவுகளின் பட்டியல் (விலையுடன்) போன்ற விவரங்களை அப்படியே டைப் செய்தோ அல்லது நகலெடுத்து (Copy-Paste) போட்டோ கொடுத்தால், நான் அதைத் துல்லியமாகப் பகுப்பாய்வு செய்து, தமிழ் மொழிபெயர்ப்புகளுடன் அழகான மெனுவாக வடிவமைத்துத் தருவேன்!\n\nஎப்படிப் பயன்படுத்துவது (How to Use):\n1. கீழே உள்ள மாதிரிப் பொத்தான்களைக் (Template Buttons) கிளிக் செய்து விவரங்களை ஏற்றிக் கொள்ளலாம்.\n2. அல்லது நீங்களாகவே ஒரு கடையின் விவரங்களையும் மெனுவையும் டைப் செய்து அனுப்பலாம்.\n3. நான் தயாரிக்கும் மெனுவை வலதுபுறம் சரிபார்த்துவிட்டு 'Publish to DB 🚀' கொடுத்தால், அது உடனடியாக வாடிக்கையாளர் ஆப்பில் நேரலையாகிவிடும்!")
+    ))
+    val isSmartMenuLoading = MutableStateFlow(false)
+    val smartMenuState = MutableStateFlow<SmartMenuState?>(null)
+    val lastParsedJson = MutableStateFlow<String>("") // raw formatted json storage
+
+    fun resetSmartMenu() {
+        smartMenuMessages.value = listOf(
+            SmartMenuMessage("assistant", "வணக்கம்! நான் தான் லியோ ஸ்மார்ட் மெனு மேனேஜர் (Lyo Smart Menu Manager) 🤖\n\nஎன்னிடம் நீங்கள் எந்த ஒரு கடையின் பெயர், முகவரி, தொலைபேசி எண் மற்றும் உணவுகளின் பட்டியல் (விலையுடன்) போன்ற விவரங்களை அப்படியே டைப் செய்தோ அல்லது நகலெடுத்து (Copy-Paste) போட்டோ கொடுத்தால், நான் அதைத் துல்லியமாகப் பகுப்பாய்வு செய்து, தமிழ் மொழிபெயர்ப்புகளுடன் அழகான மெனுவாக வடிவமைத்துத் தருவேன்!\n\nஎப்படிப் பயன்படுத்துவது (How to Use):\n1. கீழே உள்ள மாதிரிப் பொத்தான்களைக் (Template Buttons) கிளிக் செய்து விவரங்களை ஏற்றிக் கொள்ளலாம்.\n2. அல்லது நீங்களாகவே ஒரு கடையின் விவரங்களையும் மெனுவையும் டைப் செய்து அனுப்பலாம்.\n3. நான் தயாரிக்கும் மெனுவை வலதுபுறம் சரிபார்த்துவிட்டு 'Publish to DB 🚀' கொடுத்தால், அது உடனடியாக வாடிக்கையாளர் ஆப்பில் நேரலையாகிவிடும்!")
+        )
+        smartMenuState.value = null
+        lastParsedJson.value = ""
+        isSmartMenuLoading.value = false
+    }
+
+    fun updateDraftRestaurantName(name: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(restaurantName = name)
+    }
+
+    fun updateDraftRestaurantNameTa(nameTa: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(restaurantNameTa = nameTa)
+    }
+
+    fun updateDraftBusinessType(bType: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(businessType = bType)
+    }
+
+    fun updateDraftAddress(address: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(address = address)
+    }
+
+    fun updateDraftPhone(phone: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(phone = phone)
+    }
+
+    fun updateDraftPhotoUrl(photoUrl: String) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(photoUrl = photoUrl)
+    }
+
+    fun updateDraftLocation(lat: Double, lng: Double) {
+        val current = smartMenuState.value ?: return
+        smartMenuState.value = current.copy(lat = lat, lng = lng)
+    }
+
+    fun updateDraftMenuItem(categoryKey: String, itemIndex: Int, updatedItem: SmartMenuItem) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        val itemList = currentMenuData[categoryKey]?.toMutableList() ?: return
+        if (itemIndex in itemList.indices) {
+            itemList[itemIndex] = updatedItem
+            currentMenuData[categoryKey] = itemList
+            smartMenuState.value = current.copy(menuData = currentMenuData)
+        }
+    }
+    
+    fun deleteDraftMenuItem(categoryKey: String, itemIndex: Int) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        val itemList = currentMenuData[categoryKey]?.toMutableList() ?: return
+        if (itemIndex in itemList.indices) {
+            itemList.removeAt(itemIndex)
+            if (itemList.isEmpty()) {
+                currentMenuData.remove(categoryKey)
+            } else {
+                currentMenuData[categoryKey] = itemList
+            }
+            smartMenuState.value = current.copy(menuData = currentMenuData)
+        }
+    }
+
+    fun renameDraftCategory(oldKey: String, newKey: String) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        val items = currentMenuData.remove(oldKey) ?: return
+        currentMenuData[newKey] = items
+        smartMenuState.value = current.copy(menuData = currentMenuData)
+    }
+
+    fun deleteDraftCategory(categoryKey: String) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        currentMenuData.remove(categoryKey)
+        smartMenuState.value = current.copy(menuData = currentMenuData)
+    }
+
+    fun addDraftMenuItem(categoryKey: String, item: SmartMenuItem) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        val itemList = currentMenuData[categoryKey]?.toMutableList() ?: mutableListOf()
+        itemList.add(item)
+        currentMenuData[categoryKey] = itemList
+        smartMenuState.value = current.copy(menuData = currentMenuData)
+    }
+
+    fun addDraftCategory(categoryKey: String) {
+        val current = smartMenuState.value ?: return
+        val currentMenuData = current.menuData.toMutableMap()
+        if (!currentMenuData.containsKey(categoryKey)) {
+            currentMenuData[categoryKey] = emptyList()
+            smartMenuState.value = current.copy(menuData = currentMenuData)
+        }
+    }
+
+    private suspend fun executePublishToDB(state: SmartMenuState) {
+        val rName = state.restaurantName
+        val rNameTa = state.restaurantNameTa
+        val rType = state.businessType
+        val rLoc = state.address
+        val rContact = state.phone
+        val rPhoto = state.photoUrl
+        val menuMap = state.menuData
+
+        val currentVendorList = repository.vendorDao.getAllVendorsList()
+        val existingVendor = currentVendorList.find { v ->
+            val matchesName = v.name.trim().equals(rName.trim(), ignoreCase = true)
+            val matchesPhone = rContact.isNotBlank() && v.phone.replace(Regex("[^0-9]"), "") == rContact.replace(Regex("[^0-9]"), "")
+            val matchesAddr = rLoc.isNotBlank() && v.address.trim().equals(rLoc.trim(), ignoreCase = true)
+            matchesName && (matchesPhone || matchesAddr || (rContact.isBlank() && rLoc.isBlank()))
+        }
+
+        val vId: Long
+        if (existingVendor != null) {
+            vId = existingVendor.id
+            val updatedVendor = existingVendor.copy(
+                nameTa = rNameTa.ifBlank { existingVendor.nameTa },
+                type = rType,
+                address = rLoc,
+                phone = rContact.ifBlank { existingVendor.phone },
+                bannerUrl = if (rPhoto.isNotBlank()) rPhoto else existingVendor.bannerUrl,
+                visibilityRadiusKm = 99999.0,
+                lat = state.lat,
+                lng = state.lng
+            )
+            repository.vendorDao.updateVendor(updatedVendor)
+            try { LyoFirebaseHelper.syncVendorToFirestore(updatedVendor) } catch (e: Exception) { Log.e("SmartMenu", "Vendor sync error: ${e.message}") }
+            repository.categoryDao.deleteCategoriesByVendor(vId)
+            repository.menuItemDao.deleteMenuItemsByVendor(vId)
+            try { LyoFirebaseHelper.clearMenuAndCategoriesFromFirestore(vId) } catch (e: Exception) { Log.e("SmartMenu", "Clear error: ${e.message}") }
+        } else {
+            val newVendor = Vendor(
+                name = rName, nameTa = rNameTa, type = rType,
+                rating = 4.8, distance = 1.8, deliveryTime = 25, deliveryFee = 40.0,
+                address = rLoc, lat = state.lat, lng = state.lng,
+                bannerUrl = if (rPhoto.isNotBlank()) rPhoto else rType.lowercase(),
+                phone = rContact, visibilityRadiusKm = 99999.0
+            )
+            vId = repository.vendorDao.insertVendor(newVendor)
+            try { LyoFirebaseHelper.syncVendorToFirestore(newVendor.copy(id = vId)) } catch (e: Exception) { Log.e("SmartMenu", "Vendor sync error: ${e.message}") }
+        }
+
+        menuMap.forEach { (rawCatKey, itemsList) ->
+            val parts = rawCatKey.split("__AND__")
+            val catNameEn = parts.getOrNull(0)?.trim() ?: rawCatKey
+            val catNameTa = parts.getOrNull(1)?.trim() ?: catNameEn
+            val categoryId = repository.categoryDao.insertCategory(Category(vendorId = vId, nameEn = catNameEn, nameTa = catNameTa))
+            val catObj = Category(id = categoryId, vendorId = vId, nameEn = catNameEn, nameTa = catNameTa)
+            try { LyoFirebaseHelper.syncCategoryToFirestore(catObj) } catch (e: Exception) { Log.e("SmartMenu", "Cat sync error: ${e.message}") }
+            itemsList.forEach { iDraft ->
+                val rawMeat = iDraft.meatType.lowercase().trim()
+                val isVegDish = !(rawMeat.contains("chicken") || rawMeat.contains("mutton") || rawMeat.contains("meat") || rawMeat.contains("fish") || rawMeat.contains("egg") || rawMeat.contains("non"))
+                val finalNameTa = iDraft.itemNameTa.ifBlank { iDraft.itemName }
+
+                val itemId = repository.menuItemDao.insertMenuItem(MenuItem(
+                    vendorId = vId, categoryId = categoryId,
+                    nameEn = iDraft.itemName, nameTa = finalNameTa,
+                    descEn = "Delicious ${iDraft.itemName} prepared fresh.",
+                    descTa = "சுவையான $finalNameTa உடனுக்குடன் தயாரிக்கப்பட்டது.",
+                    price = iDraft.price,
+                    isVeg = isVegDish,
+                    isAvailable = true, imageUrl = ""
+                ))
+                val itemObj = MenuItem(
+                    id = itemId, vendorId = vId, categoryId = categoryId,
+                    nameEn = iDraft.itemName, nameTa = finalNameTa,
+                    descEn = "Delicious ${iDraft.itemName} prepared fresh.",
+                    descTa = "சுவையான $finalNameTa உடனுக்குடன் தயாரிக்கப்பட்டது.",
+                    price = iDraft.price,
+                    isVeg = isVegDish,
+                    isAvailable = true, imageUrl = ""
+                )
+                try { LyoFirebaseHelper.syncMenuItemToFirestore(itemObj) } catch (e: Exception) { Log.e("SmartMenu", "Item sync error: ${e.message}") }
+            }
+        }
+    }
+
+    fun publishCurrentDraftDirectly(onSuccess: () -> Unit = {}) {
+        val currentState = smartMenuState.value ?: return
+        if (currentState.restaurantName.isBlank()) return
+        sendSmartMenuMessage("PUBLISH", onPublishSuccess = onSuccess)
+    }
+
+    private suspend fun callGeminiRestForSmartMenu(prompt: String): String = withContext(Dispatchers.IO) {
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext "API Configuration Error: Please secure and set your GEMINI_API_KEY in the Secrets panel."
+        }
+        
+        try {
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+                
+            val requestBodyMap = mapOf(
+                "contents" to listOf(
+                    mapOf(
+                        "parts" to listOf(
+                            mapOf("text" to prompt)
+                        )
+                    )
+                ),
+                "generationConfig" to mapOf(
+                    "temperature" to 0.2, // lower temperature for precision parsing
+                    "maxOutputTokens" to 4096
+                )
+            )
+            
+            val jsonString = com.squareup.moshi.Moshi.Builder()
+                .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                .build()
+                .adapter(Map::class.java)
+                .toJson(requestBodyMap)
+                
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = okhttp3.RequestBody.create(
+                mediaType,
+                jsonString
+            )
+            
+            val request = okhttp3.Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_MODEL:generateContent?key=$apiKey")
+                .post(requestBody)
+                .build()
+                
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val status = response.code
+                    val errorBody = response.body?.string() ?: ""
+                    Log.e("SmartMenu", "Gemini API error (Status Code: $status): $errorBody")
+                    return@withContext "Gemini API failed with HTTP Status Code: $status. Error details: $errorBody"
+                }
+                val bodyString = response.body?.string() ?: ""
+                
+                val root = com.squareup.moshi.Moshi.Builder()
+                    .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                    .build()
+                    .adapter(Map::class.java)
+                    .fromJson(bodyString)
+                    
+                val candidates = root?.get("candidates") as? List<*>
+                val firstCandidate = candidates?.firstOrNull() as? Map<*, *>
+                val content = firstCandidate?.get("content") as? Map<*, *>
+                val parts = content?.get("parts") as? List<*>
+                val firstPart = parts?.firstOrNull() as? Map<*, *>
+                val text = firstPart?.get("text") as? String
+                
+                text ?: "Internal error: Failed to extract response from parser."
+            }
+        } catch (e: Exception) {
+            val sw = java.io.StringWriter()
+            e.printStackTrace(java.io.PrintWriter(sw))
+            "Error connecting to Lyo Smart Menu engine: [${e.javaClass.name}] ${e.message}\n\nStack Trace:\n$sw"
+        }
+    }
+
+    fun lockCoordinates(address: String, lat: Double, lng: Double) {
+        newVendorAddress.value = address
+        newVendorLat.value = lat
+        newVendorLng.value = lng
+    }
+
+    fun onboardVendor(onSuccess: () -> Unit) {
+        if (isOnboarding.value) return
+        viewModelScope.launch {
+            val name = newVendorName.value.trim()
+            if (name.isBlank()) return@launch
+
+            val nameTa = newVendorNameTa.value.trim()
+
+            isOnboarding.value = true
+            val phone = newVendorPhone.value.trim()
+            val fee = newVendorDeliveryFee.value.toDoubleOrNull() ?: 40.0
+            val minOrder = newVendorMinThreshold.value.toDoubleOrNull() ?: 100.0
+            val freeDel = newVendorFreeThreshold.value.toDoubleOrNull() ?: 500.0
+            val customBanner = newVendorBannerUrl.value.trim()
+
+            val vendor = Vendor(
+                name = name,
+                nameTa = if (nameTa.isNotBlank()) nameTa else name,
+                type = newVendorType.value,
+                rating = 4.5,
+                distance = 2.0,
+                deliveryTime = (15..45).random(),
+                deliveryFee = fee,
+                address = newVendorAddress.value,
+                lat = newVendorLat.value,
+                lng = newVendorLng.value,
+                bannerUrl = if (customBanner.isNotBlank()) customBanner else newVendorType.value.lowercase(),
+                minOrderAmount = minOrder,
+                freeDeliveryThreshold = freeDel,
+                phone = phone,
+                visibilityRadiusKm = newVendorVisibilityRadius.value
+            )
+
+            try {
+                val vendorId = repository.vendorDao.insertVendor(vendor)
+                val savedVendor = vendor.copy(id = vendorId)
+
+                // Sync to cloud Firestore real-time DB compliant
+                LyoFirebaseHelper.syncVendorToFirestore(savedVendor)
+
+                // Auto-seed over 25+ default items specific to vendor type with bilingual titles & high-res images
+                repository.seedMenuForVendor(vendorId, vendor.type)
+                
+                // Clear inputs
+                newVendorName.value = ""
+                newVendorNameTa.value = ""
+                newVendorPhone.value = ""
+                newVendorAddress.value = ""
+                newVendorBannerUrl.value = ""
+                newVendorVisibilityRadius.value = 15.0
+                
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isOnboarding.value = false
+            }
+        }
+    }
+
+    fun onboardRider(onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            val name = newRiderName.value.trim()
+            val phone = newRiderPhone.value.trim()
+            val password = newRiderPassword.value.trim()
+            val vehicle = newRiderVehicleNo.value.trim()
+            val baseAddress = newRiderAddress.value.trim()
+
+            if (name.isBlank() || phone.length != 10 || !phone.all { it.isDigit() }) {
+                onError("Please enter a valid Name and 10-digit mobile number!")
+                return@launch
+            }
+            if (password.isBlank() || password.length < 4) {
+                onError("Please enter a valid password (minimum 4 characters)!")
+                return@launch
+            }
+            if (vehicle.isBlank()) {
+                onError("Please enter the vehicle registration number!")
+                return@launch
+            }
+
+            val existingRider = repository.findUser(phone)
+            if (existingRider != null) {
+                if (existingRider.role == "DELIVERY") {
+                    onError("This phone number is already registered as an active Rider!")
+                    return@launch
+                } else if (existingRider.role == "ADMIN") {
+                    onError("This phone number is registered as an Administrator!")
+                    return@launch
+                } else if (existingRider.role == "CUSTOMER") {
+                    // Update user's role to DELIVERY and set details
+                    val updatedRider = existingRider.copy(
+                        name = name,
+                        email = newRiderEmail.value.trim().ifEmpty { existingRider.email },
+                        address = if (baseAddress.isBlank()) existingRider.address else baseAddress,
+                        role = "DELIVERY",
+                        vehicleNo = vehicle,
+                        isActiveRider = true,
+                        salaryType = newRiderSalaryType.value,
+                        salaryRate = newRiderSalaryRate.value.toDoubleOrNull() ?: 0.0
+                    )
+                    repository.registerUser(updatedRider, password)
+                    
+                    // Clear inputs
+                    newRiderName.value = ""
+                    newRiderPhone.value = ""
+                    newRiderEmail.value = ""
+                    newRiderPassword.value = ""
+                    newRiderVehicleNo.value = ""
+                    newRiderAddress.value = ""
+                    newRiderSalaryType.value = "MONTHLY"
+                    newRiderSalaryRate.value = ""
+                    
+                    onSuccess()
+                    return@launch
+                }
+            }
+
+            val newRider = User(
+                phone = phone,
+                name = name,
+                email = newRiderEmail.value.trim(),
+                address = if (baseAddress.isBlank()) "Lyo Central Depo, Idappadi, Salem" else baseAddress,
+                lat = 11.5812,
+                lng = 77.8465,
+                isWhatsAppOptIn = true,
+                role = "DELIVERY",
+                vehicleNo = vehicle,
+                isActiveRider = true,
+                salaryType = newRiderSalaryType.value,
+                salaryRate = newRiderSalaryRate.value.toDoubleOrNull() ?: 0.0
+            )
+
+            repository.registerUser(newRider, password)
+
+            // Clear inputs
+            newRiderName.value = ""
+            newRiderPhone.value = ""
+            newRiderEmail.value = ""
+            newRiderPassword.value = ""
+            newRiderVehicleNo.value = ""
+            newRiderAddress.value = ""
+            newRiderSalaryType.value = "MONTHLY"
+            newRiderSalaryRate.value = ""
+
+            onSuccess()
+        }
+    }
+
+    fun toggleRiderActiveStatus(rider: User) {
+        viewModelScope.launch {
+            val updated = rider.copy(isActiveRider = !rider.isActiveRider)
+            repository.registerUser(updated)
+        }
+    }
+
+    fun deleteRider(rider: User) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteRider attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.deleteCustomer(rider)
+        }
+    }
+
+    fun updateRider(rider: User, newPassword: String? = null) {
+        viewModelScope.launch {
+            repository.registerUser(rider, newPassword)
+        }
+    }
+
+    fun updateOrderStatus(orderId: Long, status: String) {
+        viewModelScope.launch {
+            repository.updateOrderStatus(orderId, status)
+        }
+    }
+
+    fun assignRiderToOrder(
+        orderId: Long,
+        riderName: String,
+        riderPhone: String,
+        onSuccess: (Order, Vendor?, List<OrderItem>, com.example.data.database.User?) -> Unit
+    ) {
+        viewModelScope.launch {
+            // First transition order status to ACCEPTED then to PREPARING automatically
+            repository.updateOrderStatus(orderId, "ACCEPTED")
+            repository.updateOrderStatus(orderId, "PREPARING")
+
+            val order = repository.orderDao.getOrderById(orderId)
+            if (order != null) {
+                // Check and insert/update DeliveryRide
+                val existingRide = repository.deliveryRideDao.getRideForOrder(orderId)
+                val ride = existingRide?.copy(
+                    riderName = riderName,
+                    riderPhone = riderPhone,
+                    status = "ACCEPTED"
+                ) ?: run {
+                    val rideTs = System.currentTimeMillis() / 1000L
+                    val rideRand = (100000..999999).random()
+                    val uniqueRideId = rideTs * 1000000L + rideRand
+                    DeliveryRide(
+                        id = uniqueRideId,
+                        orderId = orderId,
+                        riderName = riderName,
+                        riderPhone = riderPhone,
+                        status = "ACCEPTED",
+                        currentLat = 11.5850,
+                        currentLng = 77.8420,
+                        totalDistance = if (order.deliveryFee > 0) order.deliveryFee / 10.0 else 3.5,
+                        earnings = (order.deliveryFee * 0.8) + order.tipAmount + 15.0
+                    )
+                }
+                if (existingRide != null) {
+                    repository.updateRide(ride)
+                } else {
+                    repository.deliveryRideDao.insertDeliveryRide(ride)
+                    val insertedRide = ride
+                    try {
+                        LyoFirebaseHelper.syncDeliveryRideToFirestore(insertedRide)
+                    } catch (e: Exception) {}
+                }
+
+                // Retrieve Vendor and OrderItems for WhatsApp routing
+                val vendor = repository.vendorDao.getVendorById(order.vendorId)
+                val items = repository.orderItemDao.getItemsForOrder(orderId)
+                val customer = repository.findUser(order.userId)
+                onSuccess(order, vendor, items, customer)
+            }
+        }
+    }
+
+    suspend fun getOrderItems(orderId: Long): List<com.example.data.database.OrderItem> {
+        return repository.getOrderWithItems(orderId).second
+    }
+
+    fun updateVendor(vendor: Vendor) {
+        viewModelScope.launch {
+            repository.vendorDao.updateVendor(vendor)
+            try {
+                LyoFirebaseHelper.syncVendorToFirestore(vendor)
+            } catch (e: java.lang.Exception) {
+                e.printStackTrace()
+            }
+            if (selectedAdminVendor.value?.id == vendor.id) {
+                selectedAdminVendor.value = vendor
+            }
+            if (repository.currentVendor.value?.id == vendor.id) {
+                repository.currentVendor.value = vendor
+            }
+        }
+    }
+
+    fun deleteVendor(vendor: Vendor, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteVendor attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.deleteVendor(vendor)
+            selectedAdminVendor.value = null
+            onSuccess()
+        }
+    }
+
+    fun deleteCategory(category: Category) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteCategory attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            // Find and delete all menu items under this category from Firestore first
+            try {
+                val categoryItems = repository.menuItemDao.getMenuItemsForCategoryList(category.id)
+                categoryItems.forEach { item ->
+                    try {
+                        com.example.data.repository.LyoFirebaseHelper.deleteMenuItemFromFirestore(item.id)
+                    } catch (ex: Exception) {
+                        Log.e("AdminViewModel", "Error deleting menuItem under category from Firestore: ${ex.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error fetching category menu items for deletion: ${e.message}")
+            }
+
+            repository.menuItemDao.deleteMenuItemsByCategory(category.id)
+            repository.categoryDao.deleteCategory(category)
+            if (selectedCategoryId.value == category.id) {
+                selectedCategoryId.value = null
+            }
+            try {
+                com.example.data.repository.LyoFirebaseHelper.deleteCategoryFromFirestore(category.id)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore deleteCategory error: ${e.message}")
+            }
+        }
+    }
+
+    fun updateCategory(category: Category) {
+        viewModelScope.launch {
+            repository.categoryDao.updateCategory(category)
+            try {
+                com.example.data.repository.LyoFirebaseHelper.syncCategoryToFirestore(category)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore updateCategory error: ${e.message}")
+            }
+        }
+    }
+
+    fun updateMenuItem(menuItem: MenuItem) {
+        viewModelScope.launch {
+            repository.menuItemDao.updateMenuItem(menuItem)
+            try {
+                com.example.data.repository.LyoFirebaseHelper.syncMenuItemToFirestore(menuItem)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore updateMenuItem error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteMenuItem(menuItem: MenuItem) {
+        viewModelScope.launch {
+            val adminUser = repository.currentUser.value
+            if (adminUser?.role != "ADMIN") {
+                Log.e("AdminViewModel", "Unauthorized deleteMenuItem attempt by: ${adminUser?.phone}")
+                return@launch
+            }
+            repository.menuItemDao.deleteMenuItem(menuItem)
+            try {
+                com.example.data.repository.LyoFirebaseHelper.deleteMenuItemFromFirestore(menuItem.id)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore deleteMenuItem error: ${e.message}")
+            }
+        }
+    }
+
+    fun createCategory(vendorId: Long) {
+        viewModelScope.launch {
+            val en = newCategoryNameEn.value.trim()
+            val ta = newCategoryNameTa.value.trim()
+            if (en.isBlank() || ta.isBlank()) return@launch
+
+            val cat = Category(vendorId = vendorId, nameEn = en, nameTa = ta)
+            val newId = repository.categoryDao.insertCategory(cat)
+            val updatedCat = cat.copy(id = newId)
+            selectedCategoryId.value = newId
+            newCategoryNameEn.value = ""
+            newCategoryNameTa.value = ""
+            try {
+                com.example.data.repository.LyoFirebaseHelper.syncCategoryToFirestore(updatedCat)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore createCategory error: ${e.message}")
+            }
+        }
+    }
+
+    fun createMenuItem(vendorId: Long) {
+        viewModelScope.launch {
+            val catId = selectedCategoryId.value ?: return@launch
+            val en = newItemNameEn.value.trim()
+            val ta = newItemNameTa.value.trim()
+            val pr = newItemPrice.value.toDoubleOrNull() ?: 100.0
+            if (en.isBlank() || ta.isBlank()) return@launch
+
+            val defaultImgs = if (newItemIsVeg.value) {
+                listOf(
+                    "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=500&auto=format&fit=crop",
+                    "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop",
+                    "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=500&auto=format&fit=crop"
+                )
+            } else {
+                listOf(
+                    "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=500&auto=format&fit=crop",
+                    "https://images.unsplash.com/photo-1606787366850-de6330128bfc?w=500&auto=format&fit=crop",
+                    "https://images.unsplash.com/photo-1589187151053-5ec8818e661b?w=500&auto=format&fit=crop"
+                )
+            }
+            val finalImg = newItemImageUrl.value.trim().ifEmpty {
+                defaultImgs.random()
+            }
+
+            val mItem = MenuItem(
+                vendorId = vendorId,
+                categoryId = catId,
+                nameEn = en,
+                nameTa = ta,
+                descEn = newItemDescEn.value.trim().ifEmpty { "Traditional fresh delicacy." },
+                descTa = newItemDescTa.value.trim().ifEmpty { "பாரம்பரிய முறையில் சமைக்கப்பட்டது." },
+                price = pr,
+                isVeg = newItemIsVeg.value,
+                imageUrl = finalImg
+            )
+
+            val generatedId = repository.menuItemDao.insertMenuItem(mItem)
+            val updatedItem = mItem.copy(id = generatedId)
+            
+            // Clear
+            newItemNameEn.value = ""
+            newItemNameTa.value = ""
+            newItemDescEn.value = ""
+            newItemDescTa.value = ""
+            newItemImageUrl.value = ""
+
+            try {
+                com.example.data.repository.LyoFirebaseHelper.syncMenuItemToFirestore(updatedItem)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Firestore createMenuItem error: ${e.message}")
+            }
+        }
+    }
+
+    fun getCategoriesForVendorFlow(vendorId: Long): Flow<List<Category>> {
+        return adminCategoriesCache.getOrPut(vendorId) {
+            repository.getCategoriesForVendor(vendorId)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+    }
+
+    fun getMenuItemsForVendorFlow(vendorId: Long): Flow<List<MenuItem>> {
+        return adminMenuItemsCache.getOrPut(vendorId) {
+            repository.getMenuItemsForVendor(vendorId)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+    }
+
+    fun syncWithFirestore(onFinished: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                repository.syncAllLocalToFirestore()
+                onFinished("Successfully synced local Room database with Cloud Firestore!")
+            } catch (e: Exception) {
+                onFinished("Sync failed: ${e.message}")
+            }
+        }
+    }
+}
+
+
+// ==========================================
+// 4. REAL-TIME DELIVERY VIEWMODEL
+// ==========================================
+class DeliveryViewModel(val repository: LyoRepository) : ViewModel() {
+
+    private var fusedLocationClient: FusedLocationProviderClient? = null
+    private var activeLocationCallback: LocationCallback? = null
+
+    val currentUser = repository.currentUser
+
+    fun toggleRiderStatus() {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val updatedStatus = !user.isActiveRider
+            val updatedUser = user.copy(isActiveRider = updatedStatus)
+            repository.registerUser(updatedUser)
+        }
+    }
+
+    // Cashout state details
+    val isCashoutRequested = MutableStateFlow(false)
+    val showCashoutSuccess = MutableStateFlow(false)
+
+    fun requestCashout(upiId: String) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            isCashoutRequested.value = true
+            // Simulate bank gateway processing
+            kotlinx.coroutines.delay(2000)
+            isCashoutRequested.value = false
+            showCashoutSuccess.value = true
+        }
+    }
+
+    // Active deliver orders (READY_FOR_PICKUP, OUT_FOR_DELIVERY) to show in the Driver HUD
+    val deliveryRides = repository.activeDeliveryRides
+        .combine(currentUser) { rides, user ->
+            if (user != null && user.role == "DELIVERY") {
+                val userPhoneStripped = user.phone.replace(" ", "").replace("+91", "").trim()
+                rides.filter {
+                    val ridePhoneStripped = it.riderPhone.replace(" ", "").replace("+91", "").trim()
+                    ridePhoneStripped == userPhoneStripped
+                }
+            } else {
+                rides
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // All completed deliver orders to show details of past completed trips
+    val completedRides = repository.allDeliveryRides
+        .combine(currentUser) { rides, user ->
+            if (user != null && user.role == "DELIVERY") {
+                val userPhoneStripped = user.phone.replace(" ", "").replace("+91", "").trim()
+                rides.filter {
+                    val ridePhoneStripped = it.riderPhone.replace(" ", "").replace("+91", "").trim()
+                    ridePhoneStripped == userPhoneStripped && it.status == "COMPLETED"
+                }
+            } else {
+                emptyList()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeOrder = repository.activeLiveOrder
+
+    // Track active coordinates progression (Rider -> Restaurant -> Customer)
+    val riderLat = MutableStateFlow(11.5850)
+    val riderLng = MutableStateFlow(77.8420)
+    
+    // Independent step tracking per ride
+    val rideSteps = MutableStateFlow<Map<Long, String>>(emptyMap())
+
+    fun getStepForRide(rideId: Long, rideStatus: String): String {
+        val currentMap = rideSteps.value
+        if (currentMap.containsKey(rideId)) {
+            return currentMap[rideId]!!
+        }
+        val initialStep = when (rideStatus) {
+            "PICKING_UP" -> "ARRIVING_AT_STORE"
+            "DELIVERING" -> "COLLECTED"
+            "COMPLETED" -> "ARRIVED_AT_CUSTOMER"
+            else -> "ASSIGNED"
+        }
+        return initialStep
+    }
+
+    fun updateRiderLocation(rideId: Long, lat: Double, lng: Double) {
+        viewModelScope.launch {
+            val activeRide = repository.getRideById(rideId)
+            if (activeRide != null) {
+                val updatedRide = activeRide.copy(
+                    currentLat = lat,
+                    currentLng = lng
+                )
+                repository.updateRide(updatedRide)
+                riderLat.value = lat
+                riderLng.value = lng
+            }
+        }
+    }
+
+    data class DeliveryStats(
+        val totalEarnings: Double,
+        val completedRides: Int,
+        val totalDistance: Double,
+        val averageTimeMinutes: Int
+    )
+
+    val todayStatsFlow: StateFlow<DeliveryStats> = combine(
+        repository.allDeliveryRides,
+        repository.allOrdersAdmin,
+        currentUser
+    ) { rides, orders, user ->
+        if (user == null || user.role != "DELIVERY") {
+            return@combine DeliveryStats(0.0, 0, 0.0, 0)
+        }
+        val userPhoneStripped = user.phone.replace(" ", "").replace("+91", "").trim()
+        val userRides = rides.filter {
+            it.riderPhone.replace(" ", "").replace("+91", "").trim() == userPhoneStripped
+        }
+        
+        // Find today's boundary
+        val now = System.currentTimeMillis()
+        val calendar = java.util.Calendar.getInstance().apply {
+            timeInMillis = now
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val todayStart = calendar.timeInMillis
+        
+        val ordersMap = orders.associateBy { it.id }
+        
+        val completedToday = userRides.filter { ride ->
+            ride.status == "COMPLETED" && (ordersMap[ride.orderId]?.timestamp ?: 0L) >= todayStart
+        }
+        
+        val earningsSum = completedToday.sumOf { it.earnings }
+        val count = completedToday.size
+        val totalDistanceCovered = completedToday.sumOf { it.totalDistance }
+        
+        val listAvgTimes = completedToday.map { (it.totalDistance * 4.0) + 12.0 }
+        val averageTime = if (listAvgTimes.isEmpty()) 0.0 else listAvgTimes.average().coerceIn(12.0, 45.0)
+        
+        DeliveryStats(earningsSum, count, totalDistanceCovered, averageTime.toInt())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DeliveryStats(0.0, 0, 0.0, 0))
+
+    val totalEarningsToday: StateFlow<Double> = todayStatsFlow.map { it.totalEarnings }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val completedRidesCount: StateFlow<Int> = todayStatsFlow.map { it.completedRides }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val todayDistanceCovered: StateFlow<Double> = todayStatsFlow.map { it.totalDistance }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val averageDeliveryTimeMinutes: StateFlow<Int> = todayStatsFlow.map { it.averageTimeMinutes }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    // OTP security validation modal
+    val otpInputVal = MutableStateFlow("")
+    val otpErrorState = MutableStateFlow<String?>(null)
+    private val simulationJobs = java.util.concurrent.ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
+
+    fun startLiveRiderMovementSimulation(ride: DeliveryRide) {
+        val oldJob = simulationJobs.remove(ride.id)
+        oldJob?.cancel()
+        
+        val newJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val order = repository.orderDao.getOrderById(ride.orderId) ?: return@launch
+            val vendor = repository.vendorDao.getVendorById(order.vendorId)
+            val startLat = vendor?.lat ?: 11.5850
+            val startLng = vendor?.lng ?: 77.8420
+            val endLat = order.customerLat
+            val endLng = order.customerLng
+            
+            val stepsCount = 12
+            for (i in 0..stepsCount) {
+                if (!isActive) break
+                val fraction = i.toDouble() / stepsCount.toDouble()
+                val currentLatVal = startLat + (endLat - startLat) * fraction
+                val currentLngVal = startLng + (endLng - startLng) * fraction
+                
+                val activeRide = repository.getRideById(ride.id)
+                if (activeRide != null && activeRide.status == "DELIVERING") {
+                    val updatedRide = activeRide.copy(
+                        currentLat = currentLatVal,
+                        currentLng = currentLngVal
+                    )
+                    repository.updateRide(updatedRide)
+                }
+                kotlinx.coroutines.delay(2500)
+            }
+        }
+        simulationJobs[ride.id] = newJob
+    }
+
+    fun acceptDelivery(ride: DeliveryRide) {
+        viewModelScope.launch {
+            val updated = ride.copy(status = "PICKING_UP")
+            repository.updateRide(updated)
+            repository.updateOrderStatus(ride.orderId, "ACCEPTED")
+            
+            val currentMap = rideSteps.value.toMutableMap()
+            currentMap[ride.id] = "ARRIVING_AT_STORE"
+            rideSteps.value = currentMap
+        }
+    }
+
+    fun performSimulatedTransit(ride: DeliveryRide) {
+        viewModelScope.launch {
+            val step = getStepForRide(ride.id, ride.status)
+            val currentMap = rideSteps.value.toMutableMap()
+            when (step) {
+                "ARRIVING_AT_STORE" -> {
+                    currentMap[ride.id] = "STORE_ARRIVED"
+                    repository.updateOrderStatus(ride.orderId, "PREPARING")
+                    val order = repository.orderDao.getOrderById(ride.orderId)
+                    val vendor = order?.let { repository.vendorDao.getVendorById(it.vendorId) }
+                    if (vendor != null) {
+                        val updated = ride.copy(
+                            currentLat = vendor.lat,
+                            currentLng = vendor.lng
+                        )
+                        repository.updateRide(updated)
+                    }
+                    // Inform customer of arrival
+                    com.example.data.repository.LyoFirebaseHelper.appContext?.let { ctx ->
+                        com.example.ui.screens.LyoNotificationHelper.showPushNotification(
+                            ctx,
+                            "Lyo Track • கடைக்கு வந்தடைந்தார்",
+                            "டெலிவரி தம்பி உணவகத்தை வந்தடைந்தார்! உங்கள் உணவு விரைவில் பெறப்படும். 🏬"
+                        )
+                    }
+                }
+                "STORE_ARRIVED" -> {
+                    currentMap[ride.id] = "COLLECTED"
+                    val order = repository.orderDao.getOrderById(ride.orderId)
+                    val vendor = order?.let { repository.vendorDao.getVendorById(it.vendorId) }
+                    val startLat = vendor?.lat ?: ride.currentLat
+                    val startLng = vendor?.lng ?: ride.currentLng
+                    val updated = ride.copy(
+                        status = "DELIVERING",
+                        currentLat = startLat,
+                        currentLng = startLng
+                    )
+                    repository.updateRide(updated)
+                    repository.updateOrderStatus(ride.orderId, "OUT_FOR_DELIVERY")
+                    startLiveRiderMovementSimulation(ride)
+                    
+                    // Inform customer that items are being delivered
+                    com.example.data.repository.LyoFirebaseHelper.appContext?.let { ctx ->
+                        com.example.ui.screens.LyoNotificationHelper.showPushNotification(
+                            ctx,
+                            "Lyo Track • உணவு பெறப்பட்டது",
+                            "சுடச்சுட உணவு டெலிவரி தம்பியிடம் ஒப்படைக்கப்பட்டது! உங்கள் இருப்பிடத்திற்கு புறப்பட்டுவிட்டார்! 🏍️💨"
+                        )
+                    }
+                }
+                "COLLECTED" -> {
+                    currentMap[ride.id] = "ARRIVED_AT_CUSTOMER"
+                    val order = repository.orderDao.getOrderById(ride.orderId)
+                    if (order != null) {
+                        val updated = ride.copy(
+                            currentLat = order.customerLat,
+                            currentLng = order.customerLng
+                        )
+                        repository.updateRide(updated)
+                    }
+                    
+                    // Inform customer about arrival near home
+                    com.example.data.repository.LyoFirebaseHelper.appContext?.let { ctx ->
+                        com.example.ui.screens.LyoNotificationHelper.showPushNotification(
+                            ctx,
+                            "Lyo Track • உங்கள் வீட்டு அருகில்",
+                            "டெலிவரி தம்பி உங்கள் வீட்டு வாசலில் காத்துள்ளார்! தயவுசெய்து சூடான உணவைப் பெற்றுக்கொள்ளவும். 🏡🔔"
+                        )
+                    }
+                }
+            }
+            rideSteps.value = currentMap
+        }
+    }
+
+    fun startRealGpsTracking(context: android.content.Context, ride: DeliveryRide) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w("DeliveryViewModel", "ACCESS_FINE_LOCATION permission not granted for real GPS tracking.")
+            return
+        }
+
+        stopRealGpsTracking()
+
+        val client = LocationServices.getFusedLocationProviderClient(context)
+        fusedLocationClient = client
+
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4000L).build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                val lastLocation = locationResult.lastLocation ?: return
+                val lat = lastLocation.latitude
+                val lng = lastLocation.longitude
+
+                viewModelScope.launch {
+                    val activeRide = repository.getRideById(ride.id)
+                    if (activeRide != null) {
+                        val updatedRide = activeRide.copy(
+                            currentLat = lat,
+                            currentLng = lng
+                        )
+                        repository.updateRide(updatedRide)
+                        riderLat.value = lat
+                        riderLng.value = lng
+                    }
+                }
+            }
+        }
+
+        activeLocationCallback = callback
+        try {
+            client.requestLocationUpdates(locationRequest, callback, android.os.Looper.getMainLooper())
+        } catch (unlikely: SecurityException) {
+            Log.e("DeliveryViewModel", "SecurityException requesting location updates: ${unlikely.message}")
+        }
+    }
+
+    fun stopRealGpsTracking() {
+        val client = fusedLocationClient
+        val callback = activeLocationCallback
+        if (client != null && callback != null) {
+            client.removeLocationUpdates(callback)
+        }
+        fusedLocationClient = null
+        activeLocationCallback = null
+    }
+
+    fun verifyDeliveryOTP(ride: DeliveryRide, onSuccess: () -> Unit) {
+        val input = otpInputVal.value.trim()
+        viewModelScope.launch {
+            val orderPair = repository.getOrderWithItems(ride.orderId)
+            val order = orderPair.first
+            val correctOTP = order?.otpCode ?: ""
+            
+            if (input == correctOTP) {
+                otpErrorState.value = null
+                stopRealGpsTracking()
+                simulationJobs.remove(ride.id)?.cancel()
+                val updated = ride.copy(status = "COMPLETED", otpVerified = true)
+                repository.updateRide(updated)
+                repository.updateOrderStatus(ride.orderId, "DELIVERED")
+                
+                val currentMap = rideSteps.value.toMutableMap()
+                currentMap[ride.id] = "DELIVERED"
+                rideSteps.value = currentMap
+
+                otpInputVal.value = ""
+                onSuccess()
+            } else {
+                otpErrorState.value = "Invalid Hand-off Code matches. Please ask Customer for the correct security verification OTP."
+            }
+        }
+    }
+}
+
+
+// ==========================================
+// 5. UNIFIED VIEWMODEL PROVIDER FACTORY
+// ==========================================
+class LyoViewModelFactory(private val repository: LyoRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return when {
+            modelClass.isAssignableFrom(AuthViewModel::class.java) -> AuthViewModel(repository) as T
+            modelClass.isAssignableFrom(StorefrontViewModel::class.java) -> StorefrontViewModel(repository) as T
+            modelClass.isAssignableFrom(AdminViewModel::class.java) -> AdminViewModel(repository) as T
+            modelClass.isAssignableFrom(DeliveryViewModel::class.java) -> DeliveryViewModel(repository) as T
+            else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+        }
+    }
+}

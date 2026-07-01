@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="300dp"
+    android:height="200dp"
+    android:viewportWidth="300"
+    android:viewportHeight="200">
+
+    <!-- Light/Medium-grey rounded background representing the service area bounds -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M16,0 H284 C292.8,0 300,7.2 300,16 V184 C300,192.8 292.8,200 284,200 H16 C7.2,200 0,192.8 0,184 V16 C0,7.2 7.2,0 16,0 Z" />
+
+    <!-- Stylized Grid Marks representing mapping network -->
+    <!-- Horizontal lines -->
+    <path
+        android:strokeColor="#2E3B4E"
+        android:strokeWidth="1"
+        android:pathData="M0,40 L300,40 M0,80 L300,80 M0,120 L300,120 M0,160 L300,160" />
+
+    <!-- Vertical lines -->
+    <path
+        android:strokeColor="#2E3B4E"
+        android:strokeWidth="1"
+        android:pathData="M60,0 L60,200 M120,0 L120,200 M180,0 L180,200 M240,0 L240,200" />
+
+    <!-- Stylized intersecting roads to simulate organic town geography -->
+    <!-- Road 1 -->
+    <path
+        android:strokeColor="#334155"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M10,30 C80,30 120,100 150,110 C180,120 220,70 290,170" />
+
+    <!-- Road 2 -->
+    <path
+        android:strokeColor="#334155"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M280,20 Q160,80 50,180" />
+
+    <!-- Road 3 -->
+    <path
+        android:strokeColor="#334155"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M150,10 L150,190" />
+
+    <!-- Service Area Circle boundary -->
+    <path
+        android:strokeColor="#475569"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:pathData="M150,100m-70,0a70,70 0 1,1 140,0a70,70 0 1,1 -140,0" />
+
+</vector>

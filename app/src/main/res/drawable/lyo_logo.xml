@@ -1,0 +1,658 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- 1. Deep Space Tech Dark Canvas Background (Modern Premium Dark Obsidian) -->
+    <path
+        android:pathData="M 64,16 H 448 C 474.5,16 496,37.5 496,64 V 448 C 496,474.5 474.5,496 448,496 H 64 C 37.5,496 16,474.5 16,448 V 64 C 16,37.5 37.5,16 64,16 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="16"
+                android:startY="16"
+                android:endX="496"
+                android:endY="496"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF080C16" />
+                <item android:offset="0.5" android:color="#FF03060C" />
+                <item android:offset="1.0" android:color="#FF0F1626" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 2. Cyberpunk Ambient Neon Glows (Popping Electric Colors) -->
+    <!-- Neon Blue Glow (Radial Aura on Upper Right) -->
+    <path
+        android:pathData="M256,256m-240,0a240,240 0 1,1 480,0a240,240 0 1,1 -240,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="360"
+                android:centerY="200"
+                android:gradientRadius="260"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#4D00F0FF" />
+                <item android:offset="1.0" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Neon Orange Glow (Radial Aura on Lower Left) -->
+    <path
+        android:pathData="M256,256m-240,0a240,240 0 1,1 480,0a240,240 0 1,1 -240,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="160"
+                android:centerY="340"
+                android:gradientRadius="260"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#4DFF5E00" />
+                <item android:offset="1.0" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3. Thin Neon Accent Inner Border (High-Tech Glossy Outline) -->
+    <path
+        android:strokeWidth="2.5"
+        android:pathData="M 64,20 H 448 C 472.3,20 492,39.7 492,64 V 448 C 492,472.3 472.3,492 448,492 H 64 C 39.7,492 20,472.3 20,448 V 64 C 20,39.7 39.7,20 64,20 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="20"
+                android:startY="20"
+                android:endX="492"
+                android:endY="492"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="0.5" android:color="#4DFFFFFF" />
+                <item android:offset="1.0" android:color="#FFFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3D Chamfered Glass Outer Bezel Highlight (Adds physical thick glass plate dimension) -->
+    <path
+        android:strokeWidth="3.2"
+        android:pathData="M 64,18 H 448 C 473.5,18 494,38.5 494,64 V 200 M 18,300 V 448 C 18,473.5 38.5,494 64,494 H 200">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="18"
+                android:startY="18"
+                android:endX="494"
+                android:endY="494"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#CCFFFFFF" />
+                <item android:offset="0.3" android:color="#4DFFFFFF" />
+                <item android:offset="0.7" android:color="#00FFFFFF" />
+                <item android:offset="1.0" android:color="#1AFFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3D LIFT SHADOW - Creates the physical floating gap under the glass plate -->
+    <path
+        android:pathData="M 256,84 C 196,84 148,132 148,192 C 148,259 208,319 256,362 C 304,319 364,259 364,192 C 364,132 316,84 256,84 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="256"
+                android:centerY="223"
+                android:gradientRadius="140"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#AA000000" />
+                <item android:offset="0.6" android:color="#4402050B" />
+                <item android:offset="1.0" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 4. 3D GLASSMORPHIC Location Pin - PERFECTLY CENTERED (Electric Neon Cyan + Floating Frosted Glass plate look) -->
+    <!-- Outer Neon Cyan Glass Backing Core -->
+    <path
+        android:pathData="M 256,70 C 196,70 148,118 148,178 C 148,245 208,305 256,348 C 304,305 364,245 364,178 C 364,118 316,70 256,70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="148"
+                android:startY="70"
+                android:endX="364"
+                android:endY="348"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#CC00F0FF" />
+                <item android:offset="0.5" android:color="#800072FF" />
+                <item android:offset="1.0" android:color="#E60A1128" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Glowing Glass Highlight Rim (Gives the gorgeous 3D reflection border) -->
+    <path
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round"
+        android:pathData="M 256,72 C 199,72 151,120 151,178 C 151,241 209,299 256,342 C 303,299 361,241 361,178 C 361,120 313,72 256,72 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="151"
+                android:startY="72"
+                android:endX="361"
+                android:endY="342"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.3" android:color="#8000F0FF" />
+                <item android:offset="0.7" android:color="#2000F0FF" />
+                <item android:offset="1.0" android:color="#CCFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Frosted Glass Core Inner Fill (Translucent blur sheet simulation) -->
+    <path
+        android:pathData="M 256,80 C 206,80 162,121 162,178 C 162,233 213,286 256,326 C 299,286 350,233 350,178 C 350,121 306,80 256,80 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="162"
+                android:startY="80"
+                android:endX="350"
+                android:endY="326"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#4DFFFFFF" />
+                <item android:offset="1.0" android:color="#0D00F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3D Specular Glare over the Glass Pin (Adds premium polished crystal realism) -->
+    <path
+        android:pathData="M 256,70 C 196,70 148,118 148,178 C 148,210 165,240 190,265 L 320,135 C 305,100 285,70 256,70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="170"
+                android:startY="100"
+                android:endX="280"
+                android:endY="210"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#59FFFFFF" />
+                <item android:offset="0.5" android:color="#1DFFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Pin Inner Premium Glass Disc (Frosted Backing) -->
+    <path
+        android:pathData="M 256,178 m -70,0 a 70,70 0 1,1 140,0 a 70,70 0 1,1 -140,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="186"
+                android:startY="108"
+                android:endX="326"
+                android:endY="248"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#26FFFFFF" />
+                <item android:offset="1.0" android:color="#0A00F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Glowing Border for Inner Glass Disc -->
+    <path
+        android:strokeWidth="1.5"
+        android:pathData="M 256,178 m -70,0 a 70,70 0 1,1 140,0 a 70,70 0 1,1 -140,0">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="186"
+                android:startY="108"
+                android:endX="326"
+                android:endY="248"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="0.5" android:color="#33FFFFFF" />
+                <item android:offset="1.0" android:color="#FFFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 5. SPEED WINGS / DELIVERY MOTION TRAILS (Highly Emphasizing Prompt Delivery) -->
+    <!-- Left Speed Trail 1 (Glowing Neon Orange) -->
+    <path
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 165,189 H 115">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="165"
+                android:startY="189"
+                android:endX="115"
+                android:endY="189"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFF5E00" />
+                <item android:offset="1.0" android:color="#00FF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Left Speed Trail 2 (Glowing Neon Gold) -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 172,181 H 132">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="172"
+                android:startY="181"
+                android:endX="132"
+                android:endY="181"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFD54F" />
+                <item android:offset="1.0" android:color="#00FFD54F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Left Speed Trail 3 (Glowing Neon Cyan) -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 172,197 H 127">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="172"
+                android:startY="197"
+                android:endX="127"
+                android:endY="197"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="1.0" android:color="#0000F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Speed Trail 1 (Glowing Neon Orange) -->
+    <path
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 347,189 H 397">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="347"
+                android:startY="189"
+                android:endX="397"
+                android:endY="189"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFF5E00" />
+                <item android:offset="1.0" android:color="#00FF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Right Speed Trail 2 (Glowing Neon Gold) -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 340,181 H 380">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="340"
+                android:startY="181"
+                android:endX="380"
+                android:endY="181"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFD54F" />
+                <item android:offset="1.0" android:color="#00FFD54F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Right Speed Trail 3 (Glowing Neon Cyan) -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 340,197 H 385">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="340"
+                android:startY="197"
+                android:endX="385"
+                android:endY="197"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="1.0" android:color="#0000F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 6. MAJESTIC LARGE FOOD CLOCHE (Metallic Gold/Orange/Cyan Hot Fluid Gradient) -->
+    <!-- Cloche Dome -->
+    <path
+        android:pathData="M 195,180 C 195,125 317,125 317,180 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="195"
+                android:startY="125"
+                android:endX="317"
+                android:endY="180"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFF9E40" />
+                <item android:offset="0.5" android:color="#FFFF5E00" />
+                <item android:offset="1.0" android:color="#FF00F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Platter Tray Base (Luxury Liquid Gold Gradient) -->
+    <path
+        android:pathData="M 175,184 H 337 C 341,184 343,186.5 343,189 C 343,191.5 341,194 337,194 H 175 C 171,194 169,191.5 169,189 C 169,186.5 171,184 175,184 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="169"
+                android:startY="184"
+                android:endX="343"
+                android:endY="194"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFE57F" />
+                <item android:offset="0.5" android:color="#FFFFD54F" />
+                <item android:offset="1.0" android:color="#FFFF8F00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 7. ROYAL CROWN SIT MAJESTICALLY ON TOP -->
+    <path
+        android:pathData="M 242,125 L 270,125 L 274,110 L 264,117 L 256,102 L 248,117 L 238,110 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="238"
+                android:startY="102"
+                android:endX="274"
+                android:endY="125"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFE57F" />
+                <item android:offset="0.5" android:color="#FFFFD54F" />
+                <item android:offset="1.0" android:color="#FFFF8F00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Three royal peak circles -->
+    <path
+        android:fillColor="#FFFFE57F"
+        android:pathData="M 238,108 m -2.5,0 a 2.5,2.5 0 1,1 5,0 a 2.5,2.5 0 1,1 -5,0" />
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 256,100 m -2.5,0 a 2.5,2.5 0 1,1 5,0 a 2.5,2.5 0 1,1 -5,0" />
+    <path
+        android:fillColor="#FFFFE57F"
+        android:pathData="M 274,108 m -2.5,0 a 2.5,2.5 0 1,1 5,0 a 2.5,2.5 0 1,1 -5,0" />
+
+    <!-- 8. ROYAL GOLD LAUREL LEAVES BRANCHES (Symmetrically framing the cloche for premium signature feel) -->
+    <!-- Left Branch Leaves -->
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 169,189 Q 155,183 162,176 Q 174,182 169,189 Z" />
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 163,172 Q 149,166 156,159 Q 168,165 163,172 Z" />
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 166,155 Q 152,149 159,142 Q 171,148 166,155 Z" />
+    <path
+        android:fillColor="#FFFFE57F"
+        android:pathData="M 175,138 Q 163,132 170,125 Q 180,131 175,138 Z" />
+
+    <!-- Right Branch Leaves -->
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 343,189 Q 357,183 350,176 Q 338,182 343,189 Z" />
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 349,172 Q 363,166 356,159 Q 344,165 349,172 Z" />
+    <path
+        android:fillColor="#FFFFD54F"
+        android:pathData="M 346,155 Q 360,149 353,142 Q 341,148 346,155 Z" />
+    <path
+        android:fillColor="#FFFFE57F"
+        android:pathData="M 337,138 Q 349,132 342,125 Q 332,131 337,138 Z" />
+
+    <!-- 9. Modern Glowing Royal Vapor Steam Waves (Rising elegantly behind and beside the crown) -->
+    <path
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M 234,95 C 231,85 237,80 234,70">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="231"
+                android:startY="70"
+                android:endX="237"
+                android:endY="95"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00FFD54F" />
+                <item android:offset="1.0" android:color="#FFFFD54F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M 256,92 C 253,82 259,77 256,67">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="253"
+                android:startY="67"
+                android:endX="259"
+                android:endY="92"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00FFD54F" />
+                <item android:offset="1.0" android:color="#FFFFD54F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M 278,95 C 275,85 281,80 278,70">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="275"
+                android:startY="70"
+                android:endX="281"
+                android:endY="95"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00FFD54F" />
+                <item android:offset="1.0" android:color="#FFFFD54F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 9. Symmetric Neural Network Circuits -->
+    <!-- Left Top -->
+    <path
+        android:strokeColor="#FF00F0FF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 152,150 L 102,100 H 77" />
+    <path
+        android:fillColor="#FF00F0FF"
+        android:pathData="M 77,100 m -5.5,0 a 5.5,5.5 0 1,1 11,0 a 5.5,5.5 0 1,1 -11,0" />
+
+    <!-- Right Top -->
+    <path
+        android:strokeColor="#FF00F0FF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 360,150 L 410,100 H 435" />
+    <path
+        android:fillColor="#FF00F0FF"
+        android:pathData="M 435,100 m -5.5,0 a 5.5,5.5 0 1,1 11,0 a 5.5,5.5 0 1,1 -11,0" />
+
+    <!-- Left Bottom -->
+    <path
+        android:strokeColor="#FFFF5E00"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 160,240 L 110,290 H 85" />
+    <path
+        android:fillColor="#FFFF5E00"
+        android:pathData="M 85,290 m -5.5,0 a 5.5,5.5 0 1,1 11,0 a 5.5,5.5 0 1,1 -11,0" />
+
+    <!-- Right Bottom -->
+    <path
+        android:strokeColor="#FFFF5E00"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 352,240 L 402,290 H 427" />
+    <path
+        android:fillColor="#FFFF5E00"
+        android:pathData="M 427,290 m -5.5,0 a 5.5,5.5 0 1,1 11,0 a 5.5,5.5 0 1,1 -11,0" />
+
+    <!-- 10. High-End Custom Geometric Neon Typography "Lyo AI" -->
+    <!-- Beautifully styled with round caps and perfectly balanced spacing -->
+
+    <!-- L (Neon Orange Gradient) -->
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 145,360 V 410 H 173">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="145"
+                android:startY="360"
+                android:endX="173"
+                android:endY="410"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFB800" />
+                <item android:offset="1.0" android:color="#FFFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- y (Neon Orange Gradient) -->
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 193,380 L 209,412 L 225,380">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="193"
+                android:startY="380"
+                android:endX="225"
+                android:endY="412"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFB800" />
+                <item android:offset="1.0" android:color="#FFFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 209,412 L 197,438">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="209"
+                android:startY="412"
+                android:endX="197"
+                android:endY="438"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFF5E00" />
+                <item android:offset="1.0" android:color="#FFFF0055" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- o (Neon Orange Gradient) -->
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:pathData="M 261,395 m -16,0 a 16,16 0 1,1 32,0 a 16,16 0 1,1 -32,0">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="245"
+                android:startY="379"
+                android:endX="277"
+                android:endY="411"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFB800" />
+                <item android:offset="1.0" android:color="#FFFF5E00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- A (Electric Neon Cyan Gradient) -->
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 307,410 L 323,360 L 339,410">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="307"
+                android:startY="410"
+                android:endX="339"
+                android:endY="360"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="1.0" android:color="#FF0072FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeColor="#FF00F0FF"
+        android:strokeWidth="9"
+        android:strokeLineCap="round"
+        android:pathData="M 313,392 H 333" />
+
+    <!-- I (Electric Neon Cyan Gradient) -->
+    <path
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:pathData="M 359,360 V 410">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="359"
+                android:startY="360"
+                android:endX="359"
+                android:endY="410"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00F0FF" />
+                <item android:offset="1.0" android:color="#FF0072FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 11. Glowing Cyber-star / Brand Sparkle (Gold Neon Highlight) -->
+    <path
+        android:fillColor="#FFFFB800"
+        android:pathData="M 430,50 L 434,66 L 450,70 L 434,74 L 430,90 L 426,74 L 410,70 L 426,66 Z" />
+
+    <!-- Ultra-Premium 3D Curved Glass Lens Reflection Overlays -->
+    <!-- This gives a gorgeous glossy, shiny glass reflection sweeping diagonally across the card -->
+    <path
+        android:pathData="M 16,64 C 16,37.5 37.5,16 64,16 H 320 L 16,320 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="16"
+                android:startY="16"
+                android:endX="320"
+                android:endY="320"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#22FFFFFF" />
+                <item android:offset="0.4" android:color="#14FFFFFF" />
+                <item android:offset="0.8" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Subtlest secondary glass glare on the bottom right -->
+    <path
+        android:pathData="M 496,448 C 496,474.5 474.5,496 448,496 H 250 L 496,250 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="496"
+                android:startY="496"
+                android:endX="250"
+                android:endY="250"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#10FFFFFF" />
+                <item android:offset="0.6" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+</vector>
