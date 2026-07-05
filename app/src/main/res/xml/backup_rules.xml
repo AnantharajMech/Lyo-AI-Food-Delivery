@@ -3,5 +3,4 @@
     <include domain="database" path="lyo_food_delivery_db"/>
     <include domain="database" path="lyo_food_delivery_db-shm"/>
     <include domain="database" path="lyo_food_delivery_db-wal"/>
-    <exclude domain="sharedpref" path="."/>
 </full-backup-content>

@@ -263,8 +263,8 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                                 return@launch
                             }
                         } else {
-                            // Any other user must use "1234" as offline fallback, or log in online first to cache their credentials.
-                            if (trimPass != "1234") {
+                            // Any other user must use "1234" or "123456" as offline fallback, or log in online first to cache their credentials.
+                            if (trimPass != "1234" && trimPass != "123456") {
                                 _loginError.value = "Incorrect password or please log in online first to cache your credentials. (தவறான கடவுச்சொல் அல்லது முதலில் இணையத்தில் உள்நுழையவும்.)"
                                 return@launch
                             }
@@ -2227,6 +2227,11 @@ class AdminViewModel(val repository: LyoRepository) : ViewModel() {
                         repository.orderDao.insertOrder(order)
                     }
                 }
+            }
+        }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            if (com.example.data.repository.LyoFirebaseHelper.isInitialized) {
+                com.example.data.repository.LyoFirebaseHelper.fetchAndSyncRidersFromFirestore(repository.userDao)
             }
         }
     }

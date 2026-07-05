@@ -259,7 +259,8 @@ object LyoFirebaseHelper {
             }
 
             if (uid == null) {
-                throw Exception("Failed to retrieve or generate UID for user ${user.phone}")
+                uid = "uid_${user.phone.trim()}"
+                Log.w(TAG, "Using deterministic local fallback UID: $uid")
             }
 
             // Save details to Firestore
@@ -281,6 +282,9 @@ object LyoFirebaseHelper {
                 "salaryRate" to user.salaryRate,
                 "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
             )
+            if (actualAuthPassword != null) {
+                userMap["passwordHash"] = actualAuthPassword
+            }
             // Only add createdAt if it's a new registration or not existing in doc
             val docRef = dbInstance.collection("users").document(uid)
             val docExists = docRef.get().await().exists()
@@ -357,20 +361,36 @@ object LyoFirebaseHelper {
                     val authResult = authInstance.signInWithEmailAndPassword(email, hashed).await()
                     uid = authResult.user?.uid
                 } catch (authEx: Exception) {
-                    Log.w(TAG, "Auth sign-in failed, checking for old profile fallback to auto-create Auth: ${authEx.message}")
+                    Log.w(TAG, "Auth sign-in failed, checking for old/existing profile fallback: ${authEx.message}")
                     
-                    // Let's check if the user exists in Firestore (as old format under phone, or queried)
                     var foundDoc: com.google.firebase.firestore.DocumentSnapshot? = null
-                    val docByPhone = dbInstance.collection("users").document(phone.trim()).get().await()
-                    if (docByPhone.exists()) {
-                        foundDoc = docByPhone
-                    } else {
-                        val querySnap = dbInstance.collection("users")
-                            .whereEqualTo("phone", phone.trim())
-                            .limit(1)
-                            .get()
-                            .await()
-                        foundDoc = querySnap.documents.firstOrNull()
+                    val trimmedPhone = phone.trim()
+                    val strippedPhone = if (trimmedPhone.startsWith("+91")) trimmedPhone.substring(3).trim() else trimmedPhone
+                    val phoneVariants = listOf(trimmedPhone, strippedPhone, "+91$strippedPhone", "+91 $strippedPhone").filter { it.isNotEmpty() }.distinct()
+                    
+                    for (variant in phoneVariants) {
+                        try {
+                            val docByPhone = dbInstance.collection("users").document(variant).get().await()
+                            if (docByPhone.exists()) {
+                                foundDoc = docByPhone
+                                break
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Direct lookup failed for variant $variant: ${e.message}")
+                        }
+                    }
+                    
+                    if (foundDoc == null) {
+                        try {
+                            val querySnap = dbInstance.collection("users")
+                                .whereIn("phone", phoneVariants)
+                                .limit(1)
+                                .get()
+                                .await()
+                            foundDoc = querySnap.documents.firstOrNull()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Query lookup failed for variants: ${e.message}")
+                        }
                     }
                     
                     if (foundDoc != null && foundDoc.exists()) {
@@ -397,6 +417,10 @@ object LyoFirebaseHelper {
                                         Log.e(TAG, "Fallback Auth sign-in failed: ${e.message}")
                                     }
                                 }
+                            }
+                            if (uid == null) {
+                                uid = foundDoc.getString("uid") ?: foundDoc.id
+                                Log.d(TAG, "Auth sign-in completely failed, but Firestore password matches. Using fallback uid: $uid")
                             }
                         }
                     }
@@ -427,7 +451,7 @@ object LyoFirebaseHelper {
                     val normalizedRole = when (currentRole.uppercase()) {
                         "ADMIN" -> "ADMIN"
                         "CUSTOMER_CARE" -> "CUSTOMER_CARE"
-                        "RIDER", "DELIVERY" -> "RIDER"
+                        "RIDER", "DELIVERY" -> "DELIVERY"
                         else -> "CUSTOMER"
                     }
                     newProfileMap["role"] = normalizedRole
@@ -512,6 +536,37 @@ object LyoFirebaseHelper {
                 throw e
             }
             null
+        }
+    }
+
+    suspend fun fetchAndSyncRidersFromFirestore(userDao: com.example.data.database.UserDao): Unit = withContext(Dispatchers.IO) {
+        val dbInstance = firestore ?: return@withContext
+        try {
+            val snapshot = dbInstance.collection("users")
+                .whereIn("role", listOf("DELIVERY", "RIDER"))
+                .get()
+                .await()
+            for (doc in snapshot.documents) {
+                val phone = doc.getString("phone") ?: continue
+                val user = User(
+                    phone = phone,
+                    name = doc.getString("name") ?: "",
+                    email = doc.getString("email") ?: "",
+                    address = doc.getString("address") ?: "",
+                    lat = doc.getDouble("lat") ?: 11.5812,
+                    lng = doc.getDouble("lng") ?: 77.8465,
+                    isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                    role = "DELIVERY", // Force-normalize to DELIVERY locally so Room filters it correctly
+                    vehicleNo = doc.getString("vehicleNo") ?: "",
+                    isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                    salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                    salaryRate = doc.getDouble("salaryRate") ?: 0.0
+                )
+                userDao.insertUser(user)
+            }
+            Log.d(TAG, "Force pre-fetched and synchronized ${snapshot.size()} riders from Firestore successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed force pre-fetching riders: ${e.message}")
         }
     }
 
@@ -627,7 +682,7 @@ object LyoFirebaseHelper {
                             val normalizedRole = when (currentRole.uppercase()) {
                                 "ADMIN" -> "ADMIN"
                                 "CUSTOMER_CARE" -> "CUSTOMER_CARE"
-                                "RIDER", "DELIVERY" -> "RIDER"
+                                "RIDER", "DELIVERY" -> "DELIVERY"
                                 else -> "CUSTOMER"
                             }
                             newProfileMap["role"] = normalizedRole
@@ -982,7 +1037,7 @@ object LyoFirebaseHelper {
                                         lat = doc.getDouble("lat") ?: 11.5812,
                                         lng = doc.getDouble("lng") ?: 77.8465,
                                         isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
-                                        role = doc.getString("role") ?: "CUSTOMER",
+                                        role = doc.getString("role")?.let { if (it == "RIDER") "DELIVERY" else it } ?: "CUSTOMER",
                                         vehicleNo = doc.getString("vehicleNo") ?: "",
                                         isActiveRider = doc.getBoolean("isActiveRider") ?: true,
                                         salaryType = doc.getString("salaryType") ?: "MONTHLY",

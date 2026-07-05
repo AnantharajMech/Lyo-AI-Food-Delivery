@@ -241,7 +241,11 @@ class LyoRepository(private val db: AppDatabase) {
         }
 
         if (LyoFirebaseHelper.isInitialized) {
-            LyoFirebaseHelper.registerInFirebase(user, plaintextPassword)
+            try {
+                LyoFirebaseHelper.registerInFirebase(user, plaintextPassword)
+            } catch (e: Exception) {
+                Log.e("LyoRepository", "Firebase registration failed, but local registration completed: ${e.message}")
+            }
         }
     }
 

@@ -95,8 +95,8 @@ object LyoGlassDesignTokens {
         )
     )
     
-    val Standard3DElevation = 12.dp
-    val Active3DElevation = 20.dp
+    val Standard3DElevation = 3.dp
+    val Active3DElevation = 5.dp
     
     @Composable
     fun Modifier.liquidGlass3D(
@@ -109,15 +109,14 @@ object LyoGlassDesignTokens {
     ): Modifier {
         return this
             .graphicsLayer {
-                shadowElevation = elevation.toPx()
                 shape = RoundedCornerShape(cornerRadius)
                 clip = false
             }
             .shadow(
                 elevation = elevation,
                 shape = RoundedCornerShape(cornerRadius),
-                ambientColor = Color.Black,
-                spotColor = glowColor.copy(alpha = 0.25f)
+                ambientColor = Color.Black.copy(alpha = 0.3f),
+                spotColor = glowColor.copy(alpha = 0.15f)
             )
             .background(
                 brush = Brush.verticalGradient(
@@ -367,15 +366,14 @@ fun GlassCard(
         .graphicsLayer(
             scaleX = scale,
             scaleY = scale,
-            shadowElevation = finalElevation.value,
             shape = RoundedCornerShape(cornerRadius),
             clip = false
         )
         .shadow(
             elevation = finalElevation,
             shape = RoundedCornerShape(cornerRadius),
-            ambientColor = Color.Black,
-            spotColor = finalSpotColor
+            ambientColor = Color.Black.copy(alpha = 0.3f),
+            spotColor = finalSpotColor.copy(alpha = 0.3f)
         )
         .clip(RoundedCornerShape(cornerRadius))
 

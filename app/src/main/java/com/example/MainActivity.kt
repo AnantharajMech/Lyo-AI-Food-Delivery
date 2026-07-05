@@ -141,7 +141,8 @@ class MainActivity : ComponentActivity() {
                       val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
                       if (isActive) {
                           // f. Read and validate the role
-                          val role = doc.getString("role") ?: "CUSTOMER"
+                          val rawRole = doc.getString("role") ?: "CUSTOMER"
+                          val role = if (rawRole == "RIDER") "DELIVERY" else rawRole
                           val phone = doc.getString("phone") ?: ""
                           
                           val user = User(
