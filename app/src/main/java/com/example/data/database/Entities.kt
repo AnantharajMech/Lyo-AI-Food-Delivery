@@ -138,7 +138,9 @@ data class SavedAddress(
     val userId: String,
     val name: String, // e.g., "Home", "Work", "Other"
     val addressLine: String,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0
 )
 
 @Entity(tableName = "saved_payment_methods", indices = [Index(value = ["userId"])])

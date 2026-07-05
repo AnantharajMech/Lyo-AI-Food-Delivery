@@ -19,7 +19,7 @@ import androidx.room.RoomDatabase
         SavedPaymentMethod::class,
         Review::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -45,7 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "lyo_food_delivery_db"
-                ).fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+                ).fallbackToDestructiveMigration()
                  .build()
                 INSTANCE = instance
                 instance

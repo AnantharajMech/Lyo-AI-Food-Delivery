@@ -56,10 +56,17 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow create: if isAuthenticated();
-      allow read, update: if isAdmin() || (isAuthenticated() && isUserOwner(userId));
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId &&
+        (request.resource.data.role == 'CUSTOMER' || request.resource.data.role == 'RIDER' || isAdmin())
+      );
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow update: if isAdmin() || (
+        isAuthenticated() && request.auth.uid == userId &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isActive', 'isActiveRider', 'uid']))
+      );
       allow list: if isAdmin();
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     // NEW — previously had NO rules at all (default deny in this file)

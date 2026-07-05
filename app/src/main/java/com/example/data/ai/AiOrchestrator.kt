@@ -371,7 +371,7 @@ object AiOrchestrator {
         "எடப்பாடி மக்களே! 🌾 சிறிய நெட்வொர்க் சுணக்கம் ஏற்பட்டுள்ளதால், நீங்கள் கேட்ட வசதிகளுக்கு உடனடியாக எங்களை Coscoom Creative Tech Solutions (8778148899) என்ற எண்ணில் கால் அல்லது வாட்ஸ்அப் மூலம் தொடர்பு கொள்ள அன்புடன் கேட்டுக்கொள்கிறோம்!"
     }
 
-    private suspend fun makeApiCall(config: AiProviderConfig, prompt: String, temperature: Double): String {
+    suspend fun makeApiCall(config: AiProviderConfig, prompt: String, temperature: Double): String {
         val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
         val requestBuilder = Request.Builder()
 

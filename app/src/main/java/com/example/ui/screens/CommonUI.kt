@@ -923,13 +923,16 @@ object WebViewPool {
             val existing = pool.remove(tag)
             if (existing != null) {
                 (existing.parent as? android.view.ViewGroup)?.removeView(existing)
+                (existing.context as? android.content.MutableContextWrapper)?.baseContext = context
                 return existing
             }
         }
-        return android.webkit.WebView(context.applicationContext).apply {
+        val wrapper = android.content.MutableContextWrapper(context)
+        return android.webkit.WebView(wrapper).apply {
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.databaseEnabled = true
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
@@ -943,6 +946,12 @@ object WebViewPool {
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             webViewClient = android.webkit.WebViewClient()
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                    android.util.Log.d("WebViewMap", "${consoleMessage?.message()} -- From line ${consoleMessage?.lineNumber()} of ${consoleMessage?.sourceId()}")
+                    return true
+                }
+            }
         }
     }
 
@@ -1943,6 +1952,8 @@ fun Lyo3DSearchBar(
 fun Lyo3DDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    containerColor: Color = Color(0xFF0F172A),
+    borderColor: Color = Color(0xFF334155),
     content: @Composable () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismissRequest) {
@@ -1962,8 +1973,8 @@ fun Lyo3DDialog(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFFFFFFFF), shape = RoundedCornerShape(24.dp))
-                    .border(1.5.dp, Color(0xFFCBD5E1), shape = RoundedCornerShape(24.dp))
+                    .background(containerColor, shape = RoundedCornerShape(24.dp))
+                    .border(1.5.dp, borderColor, shape = RoundedCornerShape(24.dp))
                     .padding(14.dp)
             ) {
                 content()
@@ -1972,7 +1983,15 @@ fun Lyo3DDialog(
     }
 }
 
-class InteractiveMapAppInterface(private val onPicked: (Double, Double) -> Unit) {
+class InteractiveMapAppInterface(
+    private val onPageLoaded: (() -> Unit)? = null,
+    private val onPicked: (Double, Double) -> Unit
+) {
+    @android.webkit.JavascriptInterface
+    fun onPageLoaded() {
+        onPageLoaded?.invoke()
+    }
+
     @android.webkit.JavascriptInterface
     fun onLocationPicked(lat: Double, lng: Double) {
         onPicked(lat, lng)
@@ -1985,10 +2004,11 @@ fun InteractiveMapPickerView(
     initialLng: Double = 77.8465,
     onLocationPicked: (Double, Double) -> Unit,
     screenTag: String = "interactive_map_picker",
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier.fillMaxSize()
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val webView = remember(screenTag) { WebViewPool.acquire(context, screenTag) }
+    var isPageLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(webView) {
         webView.setOnTouchListener { v, event ->
@@ -2012,41 +2032,281 @@ fun InteractiveMapPickerView(
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" onload="initMap()" onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';s.onload=initMap;document.head.appendChild(s);"></script>
 <style>
-html,body,#map{height:100%;width:100%;margin:0;padding:0;background:#0c0f17;}
-.info-bar{position:absolute;top:8px;left:8px;right:8px;background:rgba(15,23,42,0.9);border:1px solid rgba(255,107,0,0.4);border-radius:8px;padding:6px 10px;font-size:11px;color:#FFB347;font-weight:bold;z-index:1000;text-align:center;}
-.btn-row{position:absolute;bottom:8px;left:8px;right:8px;display:flex;gap:6px;z-index:1000;}
-.btn{flex:1;background:#FF6B00;border:none;color:white;font-size:11px;font-weight:bold;padding:8px 4px;border-radius:6px;cursor:pointer;}
+html,body {height:100%;width:100%;margin:0;padding:0;background:#0c0f17;overflow:hidden;}
+#map {position:absolute;top:0;bottom:0;left:0;right:0;background:#0c0f17;}
+#offline-container {height:100%;width:100%;background:#0F172A;display:none;position:relative;}
+#offline-canvas {display:block;width:100%;height:100%;}
+.info-bar{position:absolute;top:8px;left:8px;right:8px;background:rgba(15,23,42,0.95);border:1px solid rgba(255,107,0,0.5);border-radius:8px;padding:6px 10px;font-size:11px;color:#FFB347;font-weight:bold;z-index:1001;text-align:center;box-shadow:0 2px 4px rgba(0,0,0,0.5);}
+.controls-container{position:absolute;bottom:8px;left:8px;right:8px;display:flex;flex-direction:column;gap:6px;z-index:1001;}
+.zoom-row{display:flex;gap:6px;width:100%;}
+.center-row{display:flex;width:100%;}
+.btn{flex:1;background:#FF6B00;border:none;color:white;font-size:11px;font-weight:bold;padding:6px 4px;border-radius:6px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.5);min-height:34px;height:auto;display:flex;align-items:center;justify-content:center;}
 .btn-sec{background:#1E293B;border:1px solid #FF6B00;}
 </style>
 </head>
-<body>
-<div id="map"></div>
+<body onload="initMap()">
 <div class="info-bar" id="info">📍 தொட்டு location தேர்வு செய்யுங்கள்</div>
-<div class="btn-row">
-  <button class="btn btn-sec" onclick="zoomIn()">➕ Zoom</button>
-  <button class="btn" onclick="pinCenter()">📍 PIN CENTER</button>
-  <button class="btn btn-sec" onclick="zoomOut()">➖ Zoom</button>
+
+<div id="map"></div>
+
+<div id="offline-container">
+  <canvas id="offline-canvas"></canvas>
 </div>
+
+<div class="controls-container">
+  <div class="zoom-row">
+    <button class="btn btn-sec" onclick="zoomIn()">➕ Zoom In</button>
+    <button class="btn btn-sec" onclick="zoomOut()">➖ Zoom Out</button>
+  </div>
+  <div class="center-row">
+    <button class="btn" onclick="pinCenter()">📍 PICK CENTER (நடுவில் வை)</button>
+  </div>
+</div>
+
 <script>
-var map = L.map('map',{zoomControl:false,attributionControl:false}).setView([$initialLat,$initialLng],17);
-L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{maxZoom:22,maxNativeZoom:20,subdomains:'0123'}).addTo(map);
-var marker = L.marker([$initialLat,$initialLng],{draggable:true}).addTo(map);
-marker.bindPopup("📍 இங்கே").openPopup();
-document.getElementById('info').textContent = '📍 Lat: ${initialLat.toString().take(8)}, Lng: ${initialLng.toString().take(8)}';
-function notify(lat,lng){
-  document.getElementById('info').textContent = '✅ Lat: '+lat.toFixed(6)+', Lng: '+lng.toFixed(6);
-  if(window.AndroidApp) window.AndroidApp.onLocationPicked(lat,lng);
+var mapInitialized = false;
+var map;
+
+function initMap() {
+  if (mapInitialized) return;
+  if (typeof L !== 'undefined') {
+    mapInitialized = true;
+    document.getElementById('offline-container').style.display = 'none';
+    document.getElementById('map').style.display = 'block';
+
+    map = L.map('map',{zoomControl:false,attributionControl:false}).setView([$initialLat,$initialLng],17);
+    
+    // OpenStreetMap primary layer - extremely fast, never blocked
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom:19,
+      attribution:'© OpenStreetMap'
+    }).addTo(map);
+
+    // Google Maps Layer fallback
+    L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{
+      maxZoom:22,
+      maxNativeZoom:20,
+      subdomains:'0123'
+    }).addTo(map);
+
+    var marker = L.marker([$initialLat,$initialLng],{draggable:true}).addTo(map);
+    marker.bindPopup("📍 இங்கே").openPopup();
+    
+    function notify(lat,lng){
+      document.getElementById('info').textContent = '✅ Lat: '+lat.toFixed(6)+', Lng: '+lng.toFixed(6);
+      if(window.AndroidApp) window.AndroidApp.onLocationPicked(lat,lng);
+    }
+
+    // Call notify immediately to send default coordinate values on start
+    notify($initialLat, $initialLng);
+
+    marker.on('dragend',function(e){var p=e.target.getLatLng();notify(p.lat,p.lng);});
+    map.on('click',function(e){marker.setLatLng(e.latlng);map.panTo(e.latlng);notify(e.latlng.lat,e.latlng.lng);});
+    
+    window.zoomIn = function(){map.zoomIn();};
+    window.zoomOut = function(){map.zoomOut();};
+    window.pinCenter = function(){var c=map.getCenter();marker.setLatLng(c);notify(c.lat,c.lng);};
+    
+    window.setCoords = function(lat,lng){
+      marker.setLatLng([lat,lng]);
+      map.setView([lat,lng],17);
+      notify(lat,lng);
+    };
+
+    setTimeout(function(){map.invalidateSize();},300);
+    
+    if (window.AndroidApp && window.AndroidApp.onPageLoaded) {
+      window.AndroidApp.onPageLoaded();
+    }
+  } else {
+    setupOfflineMap();
+  }
 }
-marker.on('dragend',function(e){var p=e.target.getLatLng();notify(p.lat,p.lng);});
-map.on('click',function(e){marker.setLatLng(e.latlng);map.panTo(e.latlng);notify(e.latlng.lat,e.latlng.lng);});
-function pinCenter(){var c=map.getCenter();marker.setLatLng(c);notify(c.lat,c.lng);}
-function zoomIn(){map.zoomIn();}
-function zoomOut(){map.zoomOut();}
-window.setCoords=function(lat,lng){marker.setLatLng([lat,lng]);map.setView([lat,lng],17);notify(lat,lng);};
-setTimeout(function(){map.invalidateSize();},300);
+
+// Fallback to offline map if Leaflet fails to load after 1.5 seconds
+setTimeout(function() {
+  if (typeof L === 'undefined' && !mapInitialized) {
+    setupOfflineMap();
+  }
+}, 1500);
+
+var offlineLat = $initialLat;
+var offlineLng = $initialLng;
+
+function setupOfflineMap() {
+  if (mapInitialized) return;
+  mapInitialized = true;
+  document.getElementById('map').style.display = 'none';
+  document.getElementById('offline-container').style.display = 'block';
+  document.getElementById('info').textContent = '⚠️ Offline Mode (வரைபடம் ஆஃப்லைனில் உள்ளது)';
+  
+  var canvas = document.getElementById('offline-canvas');
+  var ctx = canvas.getContext('2d');
+  
+  function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth || 360;
+    canvas.height = canvas.parentElement.clientHeight || 400;
+    drawOfflineMap();
+  }
+  
+  window.addEventListener('resize', resizeCanvas);
+  setTimeout(resizeCanvas, 100);
+  setTimeout(resizeCanvas, 500);
+  setTimeout(resizeCanvas, 1000);
+  
+  function drawOfflineMap() {
+    var w = canvas.width;
+    var h = canvas.height;
+    
+    // Background Slate
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(0, 0, w, h);
+    
+    // Agricultural green patches
+    ctx.fillStyle = '#14532D';
+    ctx.fillRect(20, 20, w * 0.3, h * 0.25);
+    ctx.fillRect(w * 0.65, h * 0.55, w * 0.3, h * 0.3);
+    
+    // Hills
+    ctx.fillStyle = '#292524';
+    ctx.beginPath(); ctx.arc(w * 0.2, h * 0.75, 40, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1C1917';
+    ctx.beginPath(); ctx.arc(w * 0.2, h * 0.75, 25, 0, Math.PI*2); ctx.fill();
+    
+    // Lake Big Blue
+    ctx.fillStyle = '#0F766E';
+    ctx.beginPath(); ctx.arc(w * 0.8, h * 0.25, 45, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0D9488';
+    ctx.beginPath(); ctx.arc(w * 0.8, h * 0.25, 30, 0, Math.PI*2); ctx.fill();
+    
+    // Roads (Main and side streets)
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#334155';
+    // Main road
+    ctx.beginPath(); ctx.moveTo(0, h * 0.5); ctx.lineTo(w, h * 0.5); ctx.stroke();
+    // Bazaar street
+    ctx.beginPath(); ctx.moveTo(w * 0.5, 0); ctx.lineTo(w * 0.5, h); ctx.stroke();
+    
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#E2E8F0';
+    ctx.setLineDash([6, 6]);
+    // Dash lines
+    ctx.beginPath(); ctx.moveTo(0, h * 0.25); ctx.lineTo(w, h * 0.25); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w * 0.25, 0); ctx.lineTo(w * 0.25, h); ctx.stroke();
+    ctx.setLineDash([]); // Reset
+    
+    // Labels
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('🛣️ சேலம் மெயின் ரோடு (Salem Road)', 10, h * 0.5 - 12);
+    ctx.fillText('🛒 இடப்பாடி கடைவீதி (Bazaar St)', w * 0.5 + 8, 20);
+    ctx.fillText('⛰️ சிவகிரி திருமலை (Sivagiri Hill)', w * 0.1, h * 0.75 + 50);
+    ctx.fillText('🌊 பெரிய ஏரி (Big Lake)', w * 0.7, h * 0.25 - 55);
+    
+    // Draw Pin Drop Marker
+    var latMin = 11.5700, latMax = 11.6000;
+    var lngMin = 77.8300, lngMax = 77.8700;
+    
+    var pctX = (offlineLng - lngMin) / (lngMax - lngMin);
+    var pctY = (latMax - offlineLat) / (latMax - latMin);
+    
+    var px = pctX * w;
+    var py = pctY * h;
+    
+    px = Math.max(20, Math.min(w - 20, px));
+    py = Math.max(20, Math.min(h - 20, py));
+    
+    var grad = ctx.createRadialGradient(px, py, 2, px, py, 20);
+    grad.addColorStop(0, 'rgba(255, 107, 0, 0.6)');
+    grad.addColorStop(1, 'rgba(255, 107, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI*2); ctx.fill();
+    
+    // Pin Center
+    ctx.fillStyle = '#FF6B00';
+    ctx.beginPath();
+    ctx.arc(px, py - 15, 8, 0, Math.PI*2);
+    ctx.fill();
+    // Pin stem
+    ctx.strokeStyle = '#FF6B00';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(px, py - 15);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    // Pin center dot
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(px, py - 15, 3, 0, Math.PI*2);
+    ctx.fill();
+  }
+  
+  function handleCanvasInteraction(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX || e.touches[0].clientX) - rect.left;
+    var y = (e.clientY || e.touches[0].clientY) - rect.top;
+    
+    var w = canvas.width;
+    var h = canvas.height;
+    
+    var pctX = x / w;
+    var pctY = y / h;
+    
+    var latMin = 11.5700, latMax = 11.6000;
+    var lngMin = 77.8300, lngMax = 77.8700;
+    
+    offlineLat = latMax - (pctY * (latMax - latMin));
+    offlineLng = lngMin + (pctX * (lngMax - lngMin));
+    
+    drawOfflineMap();
+    notifyOffline(offlineLat, offlineLng);
+  }
+  
+  canvas.addEventListener('mousedown', function(e) {
+    handleCanvasInteraction(e);
+    canvas.addEventListener('mousemove', handleCanvasInteraction);
+  });
+  
+  canvas.addEventListener('mouseup', function() {
+    canvas.removeEventListener('mousemove', handleCanvasInteraction);
+  });
+  
+  canvas.addEventListener('touchstart', function(e) {
+    handleCanvasInteraction(e);
+  });
+  
+  canvas.addEventListener('touchmove', function(e) {
+    handleCanvasInteraction(e);
+    e.preventDefault();
+  });
+  
+  function notifyOffline(lat, lng) {
+    document.getElementById('info').textContent = '✅ Lat: '+lat.toFixed(6)+', Lng: '+lng.toFixed(6);
+    if(window.AndroidApp) window.AndroidApp.onLocationPicked(lat,lng);
+  }
+  
+  notifyOffline(offlineLat, offlineLng);
+  
+  window.zoomIn = function() {
+    document.getElementById('info').textContent = 'ℹ️ Zoom In (Offline Map Static)';
+  };
+  window.zoomOut = function() {
+    document.getElementById('info').textContent = 'ℹ️ Zoom Out (Offline Map Static)';
+  };
+  window.pinCenter = function() {
+    offlineLat = 11.5812;
+    offlineLng = 77.8465;
+    drawOfflineMap();
+    notifyOffline(offlineLat, offlineLng);
+  };
+
+  if (window.AndroidApp && window.AndroidApp.onPageLoaded) {
+    window.AndroidApp.onPageLoaded();
+  }
+}
 </script>
 </body>
 </html>
@@ -2055,26 +2315,35 @@ setTimeout(function(){map.invalidateSize();},300);
 
     LaunchedEffect(webView) {
         webView.clearHistory()
-        webView.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
         webView.loadDataWithBaseURL("https://lyofresh-map-service.com/", html, "text/html", "UTF-8", null)
-        kotlinx.coroutines.delay(80)
-        webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-        webView.invalidate()
-        webView.requestLayout()
     }
 
     var lastSentLat by remember { mutableStateOf(0.0) }
     var lastSentLng by remember { mutableStateOf(0.0) }
 
     DisposableEffect(webView, screenTag) {
-        webView.addJavascriptInterface(InteractiveMapAppInterface { lat, lng ->
-            lastSentLat = lat
-            lastSentLng = lng
-            onLocationPicked(lat, lng)
-        }, "AndroidApp")
+        webView.addJavascriptInterface(InteractiveMapAppInterface(
+            onPageLoaded = {
+                isPageLoaded = true
+            },
+            onPicked = { lat, lng ->
+                lastSentLat = lat
+                lastSentLng = lng
+                onLocationPicked(lat, lng)
+            }
+        ), "AndroidApp")
         onDispose {
             webView.removeJavascriptInterface("AndroidApp")
             WebViewPool.release(webView, screenTag)
+        }
+    }
+
+    LaunchedEffect(isPageLoaded, initialLat, initialLng) {
+        if (isPageLoaded) {
+            webView.evaluateJavascript(
+                "if (window.setCoords) { window.setCoords($initialLat, $initialLng); }",
+                null
+            )
         }
     }
 
@@ -2096,16 +2365,6 @@ setTimeout(function(){map.invalidateSize();},300);
         update = { parentLayout ->
             webView.invalidate()
             webView.requestLayout()
-            val diffLat = Math.abs(initialLat - lastSentLat)
-            val diffLng = Math.abs(initialLng - lastSentLng)
-            if (diffLat > 0.00001 || diffLng > 0.00001) {
-                lastSentLat = initialLat
-                lastSentLng = initialLng
-                webView.evaluateJavascript(
-                    "if (window.setCoords) { window.setCoords($initialLat, $initialLng); }",
-                    null
-                )
-            }
         },
         modifier = modifier
     )

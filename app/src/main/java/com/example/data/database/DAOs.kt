@@ -80,6 +80,9 @@ interface CategoryDao {
     @Query("DELETE FROM categories WHERE id = :id")
     suspend fun deleteCategoryById(id: Long)
 
+    @Query("SELECT * FROM categories")
+    suspend fun getAllCategoriesList(): List<Category>
+
     @Query("SELECT * FROM categories WHERE vendorId = :vendorId")
     suspend fun getCategoriesForVendorList(vendorId: Long): List<Category>
 

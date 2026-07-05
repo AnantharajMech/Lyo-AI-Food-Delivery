@@ -17,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -70,15 +72,20 @@ fun StorefrontDashboardScreen(
     viewModel: StorefrontViewModel,
     onNavigateToVendor: (Long) -> Unit,
     onNavigateToActiveOrder: () -> Unit,
-    onLogoutClick: () -> Unit
+    onLogoutClick: () -> Unit,
+    onNavigateToAdmin: (() -> Unit)? = null
 ) {
     val vendors by viewModel.allVendors.collectAsState(initial = emptyList())
     val promoBanners by viewModel.allPromoBanners.collectAsState(initial = emptyList())
     val searchQuery by viewModel.searchQueries.collectAsState(initial = "")
-    val activeFilter by viewModel.selectedCategoryFilter.collectAsState(initial = "")
+    val activeFilter by viewModel.selectedCategoryFilter.collectAsState(initial = "All")
     val cartItems by viewModel.activeCart.collectAsState(initial = emptyMap())
     val activeOrderVal by viewModel.activeLiveOrder.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+
+    val isPaused by viewModel.isAppPaused.collectAsState()
+    val pauseMsgEn by viewModel.appPauseMessageEn.collectAsState()
+    val pauseMsgTa by viewModel.appPauseMessageTa.collectAsState()
 
     val selectedTab by viewModel.selectedTabState.collectAsState(initial = "")
 
@@ -107,7 +114,7 @@ fun StorefrontDashboardScreen(
 
     // Filtered vendor list logic (Optimized using remember to avoid redundant list computation on every frame)
     val filteredVendors = remember(vendors, searchQuery, activeFilter) {
-        vendors.distinctBy { it.name.trim().lowercase() }.filter { vendor ->
+        vendors.filter { vendor ->
             val matchesSearch = vendor.name.contains(searchQuery, ignoreCase = true) || 
                                 vendor.nameTa.contains(searchQuery, ignoreCase = true) ||
                                 vendor.address.contains(searchQuery, ignoreCase = true) ||
@@ -133,10 +140,101 @@ fun StorefrontDashboardScreen(
     )
 
     LyoBackground {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
+        if (isPaused && currentUser?.role != "ADMIN") {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0F172A))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.NotificationsOff,
+                        contentDescription = "Shop Closed",
+                        tint = Color(0xFFF43F5E),
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(Color(0xFFF43F5E).copy(alpha = 0.1f), CircleShape)
+                            .padding(16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "TEMPORARILY CLOSED",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "கடை தற்காலிகமாக மூடப்பட்டுள்ளது",
+                        color = Color(0xFFF43F5E),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                            .padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (pauseMsgEn.isBlank()) "We are currently closed for a short break. Please check back soon!" else pauseMsgEn,
+                            color = Color.LightGray,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                        
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        Text(
+                            text = if (pauseMsgTa.isBlank()) "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!" else pauseMsgTa,
+                            color = Color(0xFFFFCCAA),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(30.dp))
+
+                    Text(
+                        text = "Thank you for your patience and support! 🙏",
+                        color = Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onLogoutClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Logout / Account Switch (வெளியேறு)", fontSize = 11.sp, color = Color.White)
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
             // Address & Session Header Block - Only shown on HOME tab to maximize chatbot screen space
             if (selectedTab == "HOME") {
                 Row(
@@ -643,6 +741,7 @@ fun StorefrontDashboardScreen(
                         pastOrders = pastOrders,
                         viewModel = viewModel,
                         onLogoutClick = onLogoutClick,
+                        onNavigateToAdmin = onNavigateToAdmin,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -862,6 +961,7 @@ fun StorefrontDashboardScreen(
         }
     }
 }
+}
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -870,6 +970,7 @@ fun CustomerProfileSection(
     pastOrders: List<Order>,
     viewModel: StorefrontViewModel,
     onLogoutClick: () -> Unit,
+    onNavigateToAdmin: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -896,6 +997,9 @@ fun CustomerProfileSection(
     var newAddressLabel by remember { mutableStateOf("") }
     var newAddressLine by remember { mutableStateOf("") }
     var newAddressIsDefault by remember { mutableStateOf(false) }
+    var newAddressLat by remember { mutableStateOf(0.0) }
+    var newAddressLng by remember { mutableStateOf(0.0) }
+    var showAddressMapDialog by remember { mutableStateOf(false) }
 
     var showAddPaymentForm by remember { mutableStateOf(false) }
     var newPaymentType by remember { mutableStateOf("UPI") }
@@ -1411,8 +1515,7 @@ fun CustomerProfileSection(
                 }
             }
         }
-
-        // 3.1. DETAILED INTERACTIVE SAVED ADDRESSES SECTION
+                                // 3.1. DETAILED INTERACTIVE SAVED ADDRESSES SECTION
         Spacer(modifier = Modifier.height(20.dp))
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -1420,19 +1523,29 @@ fun CustomerProfileSection(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "📍 SAVED DELIVERY LOCATIONS (${savedAddresses.size})",
+                text = "📍 SAVED DELIVERY LOCATIONS (${savedAddresses.size}/10)",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
                 color = Color(0xFF38BDF8),
                 letterSpacing = 1.2.sp
             )
             Text(
-                text = if (showAddAddressForm) "Cancel" else "+ Add New",
+                text = if (showAddAddressForm) "Cancel" else if (savedAddresses.size >= 10) "Limit Reached ⚠️" else "+ Add New",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = LyoColors.AccentOrange,
+                color = if (savedAddresses.size >= 10 && !showAddAddressForm) Color.Gray else LyoColors.AccentOrange,
                 modifier = Modifier
-                    .clickable { showAddAddressForm = !showAddAddressForm }
+                    .clickable {
+                        val ctx = context
+                        if (savedAddresses.size >= 10 && !showAddAddressForm) {
+                            Toast.makeText(ctx, "அதிகபட்சமாக 10 முகவரிகளை மட்டுமே சேர்க்க முடியும்! (Maximum 10 addresses limit reached!)", Toast.LENGTH_LONG).show()
+                        } else {
+                            if (!showAddAddressForm && newAddressLabel.isBlank()) {
+                                newAddressLabel = "Home"
+                            }
+                            showAddAddressForm = !showAddAddressForm
+                        }
+                    }
                     .testTag("add_address_toggle_btn")
             )
         }
@@ -1447,21 +1560,91 @@ fun CustomerProfileSection(
                     Text("Add New Delivery Location", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Label input
-                    OutlinedTextField(
-                        value = newAddressLabel,
-                        onValueChange = { newAddressLabel = it },
-                        placeholder = { Text("Label (e.g., Home, Office, Gym)", color = Color(0x88FFFFFF), fontSize = 12.sp) },
-                        maxLines = 1,
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = LyoColors.AccentOrange
-                        ),
-                        modifier = Modifier.fillMaxWidth().testTag("add_address_label_input")
+                    // Segmented Selector for Address Type
+                    Text(
+                        text = "SELECT ADDRESS TYPE (முகவரி வகை) 🏷️",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.padding(bottom = 6.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("Home", "Office", "Other").forEach { type ->
+                            val isSelected = if (type == "Other") {
+                                newAddressLabel != "Home" && newAddressLabel != "Office" && newAddressLabel.isNotBlank()
+                            } else {
+                                newAddressLabel == type
+                            }
+                            val labelTa = when (type) {
+                                "Home" -> "வீடு"
+                                "Office" -> "அலுவலகம்"
+                                else -> "இதர"
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(60.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) LyoColors.AccentOrange.copy(alpha = 0.2f) else Color(0xFF0F172A))
+                                    .border(1.dp, if (isSelected) LyoColors.AccentOrange else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        if (type == "Other") {
+                                            newAddressLabel = "Custom"
+                                        } else {
+                                            newAddressLabel = type
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxHeight().padding(horizontal = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = when (type) {
+                                            "Home" -> Icons.Filled.Home
+                                            "Office" -> Icons.Filled.Work
+                                            else -> Icons.Filled.Place
+                                        },
+                                        contentDescription = type,
+                                        tint = if (isSelected) LyoColors.AccentOrange else Color.LightGray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "$type / $labelTa",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) LyoColors.AccentOrange else Color.LightGray,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 11.sp,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // If "Other" or custom is selected, show a small text field to specify the custom name
+                    if (newAddressLabel != "Home" && newAddressLabel != "Office") {
+                        OutlinedTextField(
+                            value = if (newAddressLabel == "Custom") "" else newAddressLabel,
+                            onValueChange = { newAddressLabel = it },
+                            placeholder = { Text("Enter Custom Label (e.g., Gym, PG, Hostel)", color = Color(0x88FFFFFF), fontSize = 12.sp) },
+                            maxLines = 1,
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = LyoColors.AccentOrange
+                            ),
+                            modifier = Modifier.fillMaxWidth().testTag("add_address_label_input").padding(bottom = 8.dp)
+                        )
+                    }
 
                     // Address Line input
                     OutlinedTextField(
@@ -1478,69 +1661,152 @@ fun CustomerProfileSection(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Fetch location via Live GPS button
-                    val context = LocalContext.current
+                    // Fetch location via Live GPS/Map buttons
+                    val ctx = LocalContext.current
                     val launcher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.RequestPermission()
                     ) { isGranted ->
                         if (isGranted) {
                             coroutineScope.launch {
-                                val locResult = fetchCurrentLocationAndReverseGeocode(context)
+                                val locResult = fetchCurrentLocationAndReverseGeocode(ctx)
                                 if (locResult != null) {
+                                    newAddressLat = locResult.first
+                                    newAddressLng = locResult.second
                                     newAddressLine = locResult.third
-                                    Toast.makeText(context, "📍 GPS லொகேஷன் வெற்றிகரமாக பெறப்பட்டது!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(ctx, "📍 GPS லொகேஷன் வெற்றிகரமாக பெறப்பட்டது!", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, "GPS சிக்னல் கிடைக்கவில்லை! தயவுசெய்து வீட்டிற்கு வெளியே சென்று மீண்டும் முயற்சிக்கவும் அல்லது முகவரியை கையால் உள்ளிடவும்.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(ctx, "GPS சிக்னல் கிடைக்கவில்லை! தயவுசெய்து வீட்டிற்கு வெளியே சென்று மீண்டும் முயற்சிக்கவும் அல்லது முகவரியை கையால் உள்ளிடவும்.", Toast.LENGTH_LONG).show()
                                 }
                             }
                         } else {
-                            Toast.makeText(context, "லொகேஷன் அனுமதி மறுக்கப்பட்டது! மேனுவலாக முகவரியை உள்ளிடவும்.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "லொகேஷன் அனுமதி மறுக்கப்பட்டது! மேனுவலாக முகவரியை உள்ளிடவும்.", Toast.LENGTH_SHORT).show()
                         }
                     }
 
-                    Box(
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // GPS Detect button
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x1138BDF8))
+                                .border(1.dp, Color(0x3338BDF8), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                        coroutineScope.launch {
+                                            val locResult = fetchCurrentLocationAndReverseGeocode(ctx)
+                                            if (locResult != null) {
+                                                newAddressLat = locResult.first
+                                                newAddressLng = locResult.second
+                                                newAddressLine = locResult.third
+                                                Toast.makeText(ctx, "📍 தற்போதைய லைவ் லொகேஷன் பெறப்பட்டது!", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(ctx, "GPS சிக்னல் கிடைக்கவில்லை! தயவுசெய்து மீண்டும் முயற்சிக்கவும்.", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    } else {
+                                        launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.MyLocation, contentDescription = "GPS", tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("GPS Detect 🛰️", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Map Pick button
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x11F97316))
+                                .border(1.dp, Color(0x33F97316), RoundedCornerShape(8.dp))
+                                .clickable { showAddressMapDialog = true }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Map, contentDescription = "Map Select", tint = LyoColors.AccentOrange, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pick on Map 🗺️", color = LyoColors.AccentOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (showAddressMapDialog) {
+                        Lyo3DDialog(onDismissRequest = { showAddressMapDialog = false }) {
+                            Column(modifier = Modifier.fillMaxWidth().height(420.dp)) {
+                                Text(
+                                    text = "🗺️ Pick Location Pin on Map\n(வரைபடத்தில் லொகேஷனை தேர்வு செய்யவும்)",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                    lineHeight = 17.sp
+                                )
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(12.dp))) {
+                                    InteractiveMapPickerView(
+                                        initialLat = if (newAddressLat != 0.0) newAddressLat else 11.5812,
+                                        initialLng = if (newAddressLng != 0.0) newAddressLng else 77.8465,
+                                        onLocationPicked = { pickedLat, pickedLng ->
+                                            newAddressLat = pickedLat
+                                            newAddressLng = pickedLng
+                                            coroutineScope.launch {
+                                                try {
+                                                    val geoCoder = android.location.Geocoder(ctx, java.util.Locale.getDefault())
+                                                    val addresses = geoCoder.getFromLocation(pickedLat, pickedLng, 1)
+                                                    if (!addresses.isNullOrEmpty()) {
+                                                        newAddressLine = addresses[0].getAddressLine(0) ?: "$pickedLat, $pickedLng"
+                                                    } else {
+                                                        newAddressLine = "Lat: $pickedLat, Lng: $pickedLng"
+                                                    }
+                                                } catch (e: Exception) {
+                                                    newAddressLine = "Custom Map Location ($pickedLat, $pickedLng)"
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                LyoButton(
+                                    text = "Confirm Location (லொகேஷனை உறுதிசெய்)",
+                                    onClick = { showAddressMapDialog = false },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val isGeoTagged = newAddressLat != 0.0 && newAddressLng != 0.0
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x1138BDF8))
-                            .border(1.dp, Color(0x3338BDF8), RoundedCornerShape(8.dp))
-                            .clickable {
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                                    coroutineScope.launch {
-                                        val locResult = fetchCurrentLocationAndReverseGeocode(context)
-                                        if (locResult != null) {
-                                            newAddressLine = locResult.third
-                                            Toast.makeText(context, "📍 தற்போதைய லைவ் லொகேஷன் பெறப்பட்டது!", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, "GPS சிக்னல் கிடைக்கவில்லை! தயவுசெய்து வீட்டிற்கு வெளியே சென்று மீண்டும் முயற்சிக்கவும் அல்லது முகவரியை கையால் உள்ளிடவும்.", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                } else {
-                                    launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                                }
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                            .background(if (isGeoTagged) Color(0x1F22C55E) else Color(0x1FEF4444))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.MyLocation,
-                                contentDescription = "GPS",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "📍 ஜிபிஎஸ் உதவியுடன் லைவ் லொகேஷனை பெறுக (Live GPS Detect)",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(if (isGeoTagged) LyoColors.VegGreen else LyoColors.NonVegRed, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isGeoTagged) "✓ Location geo-tagged: ${String.format(java.util.Locale.US, "%.5f, %.5f", newAddressLat, newAddressLng)}" else "⚠️ GPS Coordinates missing! Pick on Map or use GPS",
+                            color = if (isGeoTagged) LyoColors.VegGreen else LyoColors.NonVegRed,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -1562,12 +1828,29 @@ fun CustomerProfileSection(
 
                     Button(
                         onClick = {
-                            if (newAddressLabel.isNotBlank() && newAddressLine.isNotBlank()) {
-                                viewModel.addSavedAddress(newAddressLabel.trim(), newAddressLine.trim(), newAddressIsDefault)
-                                newAddressLabel = ""
-                                newAddressLine = ""
-                                newAddressIsDefault = false
-                                showAddAddressForm = false
+                            val targetLabel = newAddressLabel.trim()
+                            if (targetLabel.isNotBlank() && newAddressLine.isNotBlank()) {
+                                viewModel.addSavedAddress(
+                                    name = targetLabel,
+                                    addressLine = newAddressLine.trim(),
+                                    isDefault = newAddressIsDefault,
+                                    latitude = newAddressLat,
+                                    longitude = newAddressLng,
+                                    onSuccess = {
+                                        Toast.makeText(ctx, "✅ முகவரி வெற்றிகரமாக சேமிக்கப்பட்டது!", Toast.LENGTH_SHORT).show()
+                                        newAddressLabel = ""
+                                        newAddressLine = ""
+                                        newAddressIsDefault = false
+                                        newAddressLat = 0.0
+                                        newAddressLng = 0.0
+                                        showAddAddressForm = false
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
+                                    }
+                                )
+                            } else {
+                                Toast.makeText(ctx, "தயவுசெய்து முகவரியை உள்ளிடவும்!", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
@@ -1924,6 +2207,51 @@ fun CustomerProfileSection(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+            }
+        }
+
+        if (onNavigateToAdmin != null && currentUser?.role == "ADMIN") {
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0x1AFF6B00))
+                    .border(1.dp, Color(0x33FF6B00), RoundedCornerShape(16.dp))
+                    .clickable { onNavigateToAdmin() }
+                    .padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Security,
+                        contentDescription = "admin",
+                        tint = LyoColors.AccentOrange,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "ADMIN PORTAL / CONTROL TOWER",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "அட்மின் பகுதி: கடைகள், ஆர்டர்களை நிர்வகிக்கவும்",
+                            color = LyoColors.TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowRight,
+                        contentDescription = "go",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
@@ -4836,6 +5164,7 @@ fun CheckoutCartScreen(
     // Slider state for custom tips
     var sliderTipValue by remember { mutableFloatStateOf(0f) }
     var showConfirmOrderDialog by remember { mutableStateOf(false) }
+    var isAddressConfirmed by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -4845,6 +5174,19 @@ fun CheckoutCartScreen(
     var deliveryAddress by remember(currentUser) { mutableStateOf(currentUser?.address ?: "") }
     var deliveryLat by remember(currentUser) { mutableStateOf(currentUser?.lat ?: 0.0) }
     var deliveryLng by remember(currentUser) { mutableStateOf(currentUser?.lng ?: 0.0) }
+
+    LaunchedEffect(savedAddresses) {
+        val defaultAddress = savedAddresses.find { it.isDefault }
+        if (defaultAddress != null) {
+            deliveryAddress = defaultAddress.addressLine
+            deliveryLat = defaultAddress.latitude
+            deliveryLng = defaultAddress.longitude
+        }
+    }
+
+    LaunchedEffect(deliveryLat, deliveryLng) {
+        viewModel.updateCheckoutCoordinates(deliveryLat, deliveryLng)
+    }
 
     var showMapDialog by remember { mutableStateOf(false) }
 
@@ -4983,11 +5325,8 @@ fun CheckoutCartScreen(
                                                 )
                                                 .clickable {
                                                     deliveryAddress = addr.addressLine
-                                                    // Set coordinates if we have corresponding user coordinates
-                                                    if (currentUser != null && currentUser!!.address == addr.addressLine) {
-                                                        deliveryLat = currentUser!!.lat
-                                                        deliveryLng = currentUser!!.lng
-                                                    }
+                                                    deliveryLat = addr.latitude
+                                                    deliveryLng = addr.longitude
                                                 }
                                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                                         ) {
@@ -5730,38 +6069,118 @@ fun CheckoutCartScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Filled.CheckCircle,
+                            imageVector = Icons.Filled.Place,
                             contentDescription = null,
-                            tint = LyoColors.VegGreen,
+                            tint = LyoColors.AccentOrange,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Confirm Order?",
-                            fontSize = 18.sp,
+                            text = "டெலிவரி முகவரி சரிபார்ப்பு 📍",
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    
                     Text(
-                        text = "Would you like to place this order of high-quality cuisine from '${partner.name}'?",
-                        fontSize = 14.sp,
-                        color = Color.LightGray,
-                        lineHeight = 18.sp
+                        text = "உங்களுக்கு இந்த அட்ரஸ் தான் வர வேண்டுமா? தயவுசெய்து சரிபார்க்கவும்:",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LyoColors.AccentOrange,
+                        lineHeight = 17.sp
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "(Is this the correct delivery address you want?)",
+                        fontSize = 11.sp,
+                        color = Color.LightGray,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+
+                    // Address Display Box
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                imageVector = Icons.Filled.MyLocation,
+                                contentDescription = "Pin",
+                                tint = LyoColors.AccentOrange,
+                                modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = deliveryAddress,
+                                    fontSize = 13.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 17.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Coordinates / வரைபடம்: $deliveryLat, $deliveryLng",
+                                    fontSize = 10.sp,
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Address Confirmation Checkbox Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isAddressConfirmed) Color(0x1122C55E) else Color(0x11EF4444))
+                            .border(1.dp, if (isAddressConfirmed) LyoColors.VegGreen else LyoColors.NonVegRed, RoundedCornerShape(10.dp))
+                            .clickable { isAddressConfirmed = !isAddressConfirmed }
+                            .padding(10.dp)
+                    ) {
+                        Checkbox(
+                            checked = isAddressConfirmed,
+                            onCheckedChange = { isAddressConfirmed = it },
+                            colors = CheckboxDefaults.colors(checkedColor = LyoColors.VegGreen)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Column {
+                            Text(
+                                text = "ஆம், இந்த முகவரி சரியானது தான்! ✅",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "(Yes, my delivery address is correct!)",
+                                color = Color.LightGray,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     Row(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF1E293B), shape = RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B), shape = RoundedCornerShape(10.dp))
                             .padding(12.dp)
                     ) {
-                        Text("Total Payable:", color = LyoColors.TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("₹${finalTotalAmount.toInt()}", color = LyoColors.AccentOrange, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("Total Payable / மொத்த தொகை:", color = LyoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("₹${finalTotalAmount.toInt()}", color = LyoColors.AccentOrange, fontSize = 15.sp, fontWeight = FontWeight.Black)
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
                     Row(
                         horizontalArrangement = Arrangement.End,
                         modifier = Modifier.fillMaxWidth(),
@@ -5770,7 +6189,7 @@ fun CheckoutCartScreen(
                         TextButton(
                             onClick = { showConfirmOrderDialog = false }
                         ) {
-                            Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                            Text("Cancel / ரத்து செய்", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Button(
@@ -5801,10 +6220,19 @@ fun CheckoutCartScreen(
                                     }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),
+                            enabled = isAddressConfirmed,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = LyoColors.VegGreen,
+                                disabledContainerColor = Color.White.copy(alpha = 0.12f)
+                            ),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("Confirm Booking ✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Confirm Order / ஆர்டர் செய் ✓",
+                                color = if (isAddressConfirmed) Color.White else Color.White.copy(alpha = 0.4f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -7086,14 +7514,25 @@ fun LyoAiChatbotSection(
             val isBelowMin = activeVendorVal?.let { cartSubtotal < it.minOrderAmount } ?: false
             val remainingToMin = activeVendorVal?.let { it.minOrderAmount - cartSubtotal } ?: 0.0
             
-            val glowColorVal = if (isBelowMin) Color(0x33EF4444) else Color(0x3322C55E)
-            val borderColorVal = if (isBelowMin) Color(0xFFEF4444).copy(alpha = 0.45f) else Color(0xFF10B981).copy(alpha = 0.55f)
+            val glowColorVal = if (isBelowMin) Color(0x33EF4444) else Color(0x3310B981)
+            val borderColorVal = if (isBelowMin) Color(0xFFEF4444).copy(alpha = 0.4f) else Color(0xFF10B981).copy(alpha = 0.5f)
+
+            val pulseTransition = rememberInfiniteTransition(label = "pulse_active")
+            val dotAlpha by pulseTransition.animateFloat(
+                initialValue = 0.4f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot_alpha"
+            )
 
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                cornerRadius = 20.dp,
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                cornerRadius = 16.dp,
                 innerPadding = 0.dp,
                 borderColor = borderColorVal,
                 glowColor = glowColorVal
@@ -7101,7 +7540,7 @@ fun LyoAiChatbotSection(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(14.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -7110,11 +7549,12 @@ fun LyoAiChatbotSection(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(6.dp)
+                                    .alpha(dotAlpha)
                                     .clip(CircleShape)
                                     .background(if (isBelowMin) Color(0xFFEF4444) else Color(0xFF10B981))
                             )
@@ -7122,55 +7562,55 @@ fun LyoAiChatbotSection(
                                 text = if (isBelowMin) "LYO AI SMART BASKET" else "LYO AI SMART BASKET ACTIVE",
                                 color = if (isBelowMin) Color(0xFFEF4444) else Color(0xFF10B981),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
+                                fontSize = 10.sp,
+                                letterSpacing = 0.3.sp
                             )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = "₹${totalAmount.toInt()}",
                                 color = Color.White,
-                                fontSize = 18.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
 
-                            // Clear Basket tap button elegantly integrated as a modern, subtle close circle
+                            // Clear Basket tap button
                             Box(
                                 modifier = Modifier
-                                    .size(24.dp)
+                                    .size(20.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.1f))
+                                    .background(Color.White.copy(alpha = 0.08f))
                                     .clickable { showClearCartConfirm = true },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = androidx.compose.material.icons.Icons.Filled.Close,
                                     contentDescription = "Clear Basket",
-                                    tint = Color.White.copy(alpha = 0.75f),
-                                    modifier = Modifier.size(13.dp)
+                                    tint = Color.White.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(11.dp)
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "🛒 Basket Summary & Adjustment (சரிபார்க்கவும்):",
+                        text = "🛒 Basket Summary (சரிபார்க்கவும்):",
                         color = LyoColors.AmberYellow,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 6.dp)
+                        modifier = Modifier.padding(bottom = 3.dp)
                     )
                     
                     liveCart.forEach { (menuItem, qty) ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                                .padding(vertical = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -7178,127 +7618,102 @@ fun LyoAiChatbotSection(
                                 Text(
                                     text = menuItem.nameTa.ifEmpty { menuItem.nameEn },
                                     color = Color.White,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = "₹${menuItem.price.toInt()} x $qty = ₹${(menuItem.price * qty).toInt()}",
                                     color = LyoColors.TextSecondary,
-                                    fontSize = 10.sp
+                                    fontSize = 9.sp
                                 )
                             }
                             
                             Row(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.White.copy(alpha = 0.1f))
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.07f))
                                     .padding(horizontal = 4.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(18.dp)
                                         .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.15f))
+                                        .background(Color.White.copy(alpha = 0.12f))
                                         .clickable {
                                             viewModel.removeFromCart(menuItem)
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("-", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("-", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Text(
                                     text = qty.toString(),
                                     color = Color.White,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(18.dp)
                                         .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.15f))
+                                        .background(Color.White.copy(alpha = 0.12f))
                                         .clickable {
                                             viewModel.addToCartByItemId(menuItem)
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("+", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("+", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
+                    // Ultra-slim, high-contrast single horizontal line receipt breakdown
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Food Subtotal (உணவு விலை):",
-                            color = LyoColors.TextSecondary,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            text = "₹${cartSubtotal.toInt()}",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("உணவு ₹${cartSubtotal.toInt()}", color = Color.White.copy(alpha = 0.9f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        Box(modifier = Modifier.width(1.dp).height(10.dp).background(Color.White.copy(alpha = 0.15f)))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Transit Delivery Charge (டெலிவரி கட்டணம்):",
-                            color = LyoColors.TextSecondary,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            text = if (cartDeliveryFee == 0.0) "FREE" else "₹${cartDeliveryFee.toInt()}",
-                            color = if (cartDeliveryFee == 0.0) LyoColors.VegGreen else Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("டெலிவரி: ", color = LyoColors.TextSecondary, fontSize = 9.5.sp)
+                            Text(if (cartDeliveryFee == 0.0) "இலவசம்" else "₹${cartDeliveryFee.toInt()}", color = if (cartDeliveryFee == 0.0) LyoColors.VegGreen else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
 
-                    if (viewModel.repository.gstEnabled) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "GST (${viewModel.repository.gstRate}%):",
-                                color = LyoColors.TextSecondary,
-                                fontSize = 11.sp
-                            )
-                            Text(
-                                text = "₹${(cartSubtotal * (viewModel.repository.gstRate / 100.0)).toInt()}",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (viewModel.repository.gstEnabled) {
+                            Box(modifier = Modifier.width(1.dp).height(10.dp).background(Color.White.copy(alpha = 0.15f)))
+                            
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("GST: ", color = LyoColors.TextSecondary, fontSize = 9.5.sp)
+                                Text("₹${(cartSubtotal * (viewModel.repository.gstRate / 100.0)).toInt()}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "💳 Payment Mode / பணம் செலுத்தும் முறை:",
                         color = LyoColors.AmberYellow,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf("CASH" to "💵 Cash (COD)", "UPI" to "📱 UPI Payment").forEach { (methodId, label) ->
                             val isSelected = selectedPaymentMethod == methodId
@@ -7306,29 +7721,29 @@ fun LyoAiChatbotSection(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isSelected) LyoColors.AccentOrange.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.05f))
+                                    .background(if (isSelected) LyoColors.AccentOrange.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.04f))
                                     .border(
                                         1.dp,
-                                        if (isSelected) LyoColors.AccentOrange else Color.White.copy(alpha = 0.1f),
+                                        if (isSelected) LyoColors.AccentOrange else Color.White.copy(alpha = 0.08f),
                                         RoundedCornerShape(6.dp)
                                     )
                                     .clickable {
                                         viewModel.selectedPaymentMethod.value = methodId
                                     }
-                                    .padding(vertical = 6.dp),
+                                    .padding(vertical = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
                                     color = if (isSelected) Color.White else Color.LightGray,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.5.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
                     Text(
                         text = if (isBelowMin) {
@@ -7336,15 +7751,15 @@ fun LyoAiChatbotSection(
                         } else {
                             "ஆர்டரை நொடியில் முடிக்க உடனே ஆர்டர் செய்ய இங்கே கிளிக் செய்யவும்"
                         },
-                        color = if (isBelowMin) Color(0xFFFCA5A5) else Color.White.copy(alpha = 0.6f),
-                        fontSize = 10.sp
+                        color = if (isBelowMin) Color(0xFFFCA5A5) else Color.White.copy(alpha = 0.55f),
+                        fontSize = 9.sp
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
                             onClick = {
@@ -7354,63 +7769,67 @@ fun LyoAiChatbotSection(
                                 containerColor = Color(0xFF1E293B),
                                 contentColor = Color.White
                             ),
-                            border = BorderStroke(1.dp, Color(0x33FFFFFF)),
-                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 10.dp)
+                            contentPadding = PaddingValues(vertical = 6.dp)
                         ) {
                             Text(
                                 text = "GO TO CHECKOUT 💳",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
+                                fontSize = 10.sp
                             )
                         }
 
                         if (isInstantPlacingOrder) {
                             Box(
                                 modifier = Modifier
-                                    .weight(1.5f)
-                                    .height(40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF22C55E)),
+                                    .weight(1.4f)
+                                    .height(32.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF10B981)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 androidx.compose.material3.CircularProgressIndicator(
                                     color = Color.White,
-                                    modifier = Modifier.size(16.dp),
+                                    modifier = Modifier.size(14.dp),
                                     strokeWidth = 2.dp
                                 )
                             }
                         } else {
                             Button(
                                  onClick = {
-                                    if (viewModel.currentUser.value == null) {
+                                    val usr = viewModel.currentUser.value
+                                    val savedAddrs = viewModel.savedAddresses.value
+                                    val defaultAddr = savedAddrs.find { it.isDefault }
+                                    val finalAddress = defaultAddr?.addressLine ?: usr?.address ?: ""
+                                    val finalLat = defaultAddr?.latitude ?: usr?.lat ?: 0.0
+                                    val finalLng = defaultAddr?.longitude ?: usr?.lng ?: 0.0
+
+                                    if (usr == null) {
                                         Toast.makeText(context, "Please login first to place an order! 🔐", Toast.LENGTH_LONG).show()
                                         viewModel.navigationTrigger.value = "LOGIN"
                                     } else if (isBelowMin) {
                                         Toast.makeText(context, "மன்னிக்கவும்! குறைந்தபட்ச ஆர்டர் மதிப்பு ₹${activeVendorVal?.minOrderAmount?.toInt()} தேவை. கார்ட்டில் மேலும் உணவுகளை சேர்க்கவும்!", Toast.LENGTH_LONG).show()
+                                    } else if (finalLat == 0.0 || finalLng == 0.0 || finalAddress.isBlank()) {
+                                        Toast.makeText(context, "தயவுசெய்து உங்கள் முகவரியை Map-ல் select பண்ணவும் அல்லது GPS Auto-detect பயன்படுத்தவும் — இது இல்லாமல் டெலிவரி நபர் உங்கள் வீட்டைக் கண்டுபிடிக்க முடியாது!", Toast.LENGTH_LONG).show()
                                     } else {
-                                        val usr = viewModel.currentUser.value
-                                        if (usr == null || usr.lat == 0.0 || usr.lng == 0.0 || usr.address.isBlank()) {
-                                            Toast.makeText(context, "தயவுசெய்து உங்கள் முகவரியை Map-ல் select பண்ணவும் அல்லது GPS Auto-detect பயன்படுத்தவும் — இது இல்லாமல் டெலிவரி நபர் உங்கள் வீட்டைக் கண்டுபிடிக்க முடியாது!", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            showPlaceOrderConfirm = true
-                                        }
+                                        showPlaceOrderConfirm = true
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isBelowMin) Color(0xFF374151) else Color(0xFF22C55E),
+                                    containerColor = if (isBelowMin) Color(0xFF374151) else Color(0xFF10B981),
                                     contentColor = if (isBelowMin) Color.LightGray else Color.White
                                 ),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 enabled = true,
-                                modifier = Modifier.weight(1.5f),
-                                contentPadding = PaddingValues(vertical = 10.dp)
+                                modifier = Modifier.weight(1.4f),
+                                contentPadding = PaddingValues(vertical = 6.dp)
                             ) {
                                 Text(
                                     text = if (isBelowMin) "⚠️ BELOW MIN ORDER" else "⚡ CHATBOT FAST ORDER 🚀",
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 11.sp
+                                    fontSize = 10.sp
                                 )
                             }
                         }
@@ -7646,11 +8065,13 @@ fun LyoAiChatbotSection(
                         onClick = {
                             showPlaceOrderConfirm = false
                             val usr = viewModel.currentUser.value
+                            val savedAddrs = viewModel.savedAddresses.value
+                            val defaultAddr = savedAddrs.find { it.isDefault }
                             if (usr != null) {
                                 viewModel.proceedToCheckout(
-                                    address = usr.address,
-                                    lat = usr.lat,
-                                    lng = usr.lng
+                                    address = defaultAddr?.addressLine ?: usr.address,
+                                    lat = defaultAddr?.latitude ?: usr.lat,
+                                    lng = defaultAddr?.longitude ?: usr.lng
                                 ) { generatedOrderId ->
                                     viewModel.selectedTabState.value = "TRACKER"
                                     Toast.makeText(context, "சாட்பாட் மூலமாக ஆர்டர் வெற்றிகரமாக சமர்ப்பிக்கப்பட்டது! 🛵", Toast.LENGTH_LONG).show()

@@ -58,12 +58,18 @@ object LyoFirebaseHelper {
              * credentials sourced from the BuildConfig fields (FIREBASE_API_KEY, FIREBASE_APP_ID,
              * FIREBASE_PROJECT_ID, FIREBASE_DATABASE_URL, FIREBASE_STORAGE_BUCKET) belong here.
              */
+            val apiKey = if (com.example.BuildConfig.FIREBASE_API_KEY.isNotBlank()) com.example.BuildConfig.FIREBASE_API_KEY else "AIzaSyDKJX-GtZbaaDLLFfCjZuisJsNWscNpxpU"
+            val appId = if (com.example.BuildConfig.FIREBASE_APP_ID.isNotBlank()) com.example.BuildConfig.FIREBASE_APP_ID else "1:368208047268:android:e67b072862449f8a034a31"
+            val projectId = if (com.example.BuildConfig.FIREBASE_PROJECT_ID.isNotBlank()) com.example.BuildConfig.FIREBASE_PROJECT_ID else "lyo-food-delivery"
+            val databaseUrl = if (com.example.BuildConfig.FIREBASE_DATABASE_URL.isNotBlank()) com.example.BuildConfig.FIREBASE_DATABASE_URL else "https://lyo-food-delivery-default-rtdb.asia-southeast1.firebasedatabase.app"
+            val storageBucket = if (com.example.BuildConfig.FIREBASE_STORAGE_BUCKET.isNotBlank()) com.example.BuildConfig.FIREBASE_STORAGE_BUCKET else "lyo-food-delivery.firebasestorage.app"
+
             val options = FirebaseOptions.Builder()
-                .setApiKey(com.example.BuildConfig.FIREBASE_API_KEY)
-                .setApplicationId(com.example.BuildConfig.FIREBASE_APP_ID)
-                .setProjectId(com.example.BuildConfig.FIREBASE_PROJECT_ID)
-                .setDatabaseUrl(com.example.BuildConfig.FIREBASE_DATABASE_URL)
-                .setStorageBucket(com.example.BuildConfig.FIREBASE_STORAGE_BUCKET)
+                .setApiKey(apiKey)
+                .setApplicationId(appId)
+                .setProjectId(projectId)
+                .setDatabaseUrl(databaseUrl)
+                .setStorageBucket(storageBucket)
                 .setGcmSenderId("368208047268")
                 .build()
 
@@ -184,12 +190,29 @@ object LyoFirebaseHelper {
     }
 
     // For Auth
+    suspend fun getUidByPhone(phone: String): String? = withContext(Dispatchers.IO) {
+        val dbInstance = firestore ?: return@withContext null
+        try {
+            val querySnapshot = dbInstance.collection("users")
+                .whereEqualTo("phone", phone.trim())
+                .limit(1)
+                .get()
+                .await()
+            if (!querySnapshot.isEmpty) {
+                querySnapshot.documents.firstOrNull()?.id
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting UID by phone: ${e.message}")
+            null
+        }
+    }
+
     suspend fun registerInFirebase(user: User, plaintextPassword: String? = null): Boolean = withContext(Dispatchers.IO) {
         val authInstance = auth ?: return@withContext false
         val dbInstance = firestore ?: return@withContext false
         
-        // Core design: we use the SHA-256 hashed password for Firebase Auth so it is secure, robust,
-        // and can be auto-authenticated anytime using the password hash stored in the local Room DB.
         val actualAuthPassword = if (!plaintextPassword.isNullOrBlank()) {
             if (plaintextPassword.length == 64 && plaintextPassword.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
                 plaintextPassword
@@ -202,38 +225,49 @@ object LyoFirebaseHelper {
 
         try {
             val email = "${user.phone.trim()}@lyofoods.in"
-            val targetPassword = actualAuthPassword ?: return@withContext false
-            
-            var uid = user.phone
-            try {
-                // Create Firebase Auth user
-                val result = authInstance.createUserWithEmailAndPassword(email, targetPassword).await()
-                uid = result.user?.uid ?: user.phone
-                Log.d(TAG, "FirebaseAuth createUserWithEmailAndPassword succeeded for ${user.phone}")
-            } catch (authEx: Exception) {
-                Log.w(TAG, "FirebaseAuth user creation failed, checking if already in use: ${authEx.message}")
-                if (authEx is com.google.firebase.auth.FirebaseAuthUserCollisionException || 
-                    authEx.message?.contains("already in use") == true || 
-                    authEx.message?.contains("collision") == true) {
-                    try {
-                        // Sign in with the expected password hash to verify or reuse existing auth account
-                        val signInResult = authInstance.signInWithEmailAndPassword(email, targetPassword).await()
-                        uid = signInResult.user?.uid ?: user.phone
-                        Log.d(TAG, "Successfully signed in existing auth user to synchronize registration")
-                    } catch (signInEx: Exception) {
-                        Log.e(TAG, "Could not sign in existing auth user: ${signInEx.message}. Proceeding with default uid.")
-                        uid = authInstance.currentUser?.uid ?: user.phone
+            var uid = authInstance.currentUser?.let {
+                if (it.email?.lowercase() == email.lowercase()) it.uid else null
+            }
+            if (uid == null) {
+                uid = getUidByPhone(user.phone)
+            }
+
+            if (uid == null && actualAuthPassword != null) {
+                try {
+                    // Create Firebase Auth user
+                    val result = authInstance.createUserWithEmailAndPassword(email, actualAuthPassword).await()
+                    uid = result.user?.uid
+                    Log.d(TAG, "FirebaseAuth createUserWithEmailAndPassword succeeded for ${user.phone}")
+                } catch (authEx: Exception) {
+                    Log.w(TAG, "FirebaseAuth user creation failed, checking if already in use: ${authEx.message}")
+                    if (authEx is com.google.firebase.auth.FirebaseAuthUserCollisionException || 
+                        authEx.message?.contains("already in use") == true || 
+                        authEx.message?.contains("collision") == true) {
+                        try {
+                            // Sign in with the expected password to verify or reuse existing auth account
+                            val signInResult = authInstance.signInWithEmailAndPassword(email, actualAuthPassword).await()
+                            uid = signInResult.user?.uid
+                            Log.d(TAG, "Successfully signed in existing auth user to synchronize registration")
+                        } catch (signInEx: Exception) {
+                            Log.e(TAG, "Could not sign in existing auth user: ${signInEx.message}")
+                            throw signInEx
+                        }
+                    } else {
+                        throw authEx
                     }
-                } else {
-                    throw authEx
                 }
             }
-            
+
+            if (uid == null) {
+                throw Exception("Failed to retrieve or generate UID for user ${user.phone}")
+            }
+
             // Save details to Firestore
             val userMap = mutableMapOf<String, Any>(
                 "uid" to uid,
                 "phone" to user.phone,
                 "name" to user.name,
+                "username" to user.phone, // Default username
                 "email" to user.email,
                 "address" to user.address,
                 "lat" to user.lat,
@@ -242,51 +276,34 @@ object LyoFirebaseHelper {
                 "role" to user.role,
                 "vehicleNo" to user.vehicleNo,
                 "isActiveRider" to user.isActiveRider,
+                "isActive" to true,
                 "salaryType" to user.salaryType,
-                "salaryRate" to user.salaryRate
+                "salaryRate" to user.salaryRate,
+                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
             )
-            if (actualAuthPassword != null) {
-                userMap["passwordHash"] = actualAuthPassword
+            // Only add createdAt if it's a new registration or not existing in doc
+            val docRef = dbInstance.collection("users").document(uid)
+            val docExists = docRef.get().await().exists()
+            if (!docExists) {
+                userMap["createdAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
             }
             
-            dbInstance.collection("users").document(user.phone).set(userMap, SetOptions.merge()).await()
+            docRef.set(userMap, SetOptions.merge()).await()
+            
             if (user.role == "ADMIN") {
                 dbInstance.collection("admins").document(uid).set(mapOf("phone" to user.phone)).await()
                 Log.d(TAG, "Registered admin sync successful for UID: $uid")
             }
-            Log.d(TAG, "Registered user ${user.phone} successfully on Firebase and Firestore")
+            Log.d(TAG, "Registered/Updated user ${user.phone} successfully on Firebase and Firestore with UID: $uid")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Firebase registration failed: ${e.message}", e)
-            try {
-                // If user already exists in Auth or error, try to save in Firestore anyway
-                val userMap = mutableMapOf<String, Any>(
-                    "phone" to user.phone,
-                    "name" to user.name,
-                    "email" to user.email,
-                    "address" to user.address,
-                    "lat" to user.lat,
-                    "lng" to user.lng,
-                    "isWhatsAppOptIn" to user.isWhatsAppOptIn,
-                    "role" to user.role,
-                    "vehicleNo" to user.vehicleNo,
-                    "isActiveRider" to user.isActiveRider,
-                    "salaryType" to user.salaryType,
-                    "salaryRate" to user.salaryRate
-                )
-                if (actualAuthPassword != null) {
-                    userMap["passwordHash"] = actualAuthPassword
-                }
-                dbInstance.collection("users").document(user.phone).set(userMap, SetOptions.merge()).await()
-                true
-            } catch (ex: Exception) {
-                false
-            }
+            Log.e(TAG, "Firebase registration/update failed: ${e.message}", e)
+            throw e
         }
     }
 
     suspend fun loginInFirebase(phone: String, pass: String): User? = withContext(Dispatchers.IO) {
-        val authInstance = auth
+        val authInstance = auth ?: return@withContext null
         val dbInstance = firestore ?: return@withContext null
         try {
             val email = "${phone.trim()}@lyofoods.in"
@@ -298,28 +315,141 @@ object LyoFirebaseHelper {
                 hashPassword(pass)
             }
             
-            // Fetch profile details from Firestore
-            val doc = dbInstance.collection("users").document(phone.trim()).get().await()
-            if (doc.exists()) {
-                val dbPasswordHash = doc.getString("passwordHash")
-                
-                // If password hash is stored in Firestore, verify it directly!
-                if (!dbPasswordHash.isNullOrBlank()) {
-                    if (dbPasswordHash != hashed) {
-                        Log.e(TAG, "Password mismatch in Firestore passwordHash verification!")
-                        return@withContext null
-                    }
-                    Log.d(TAG, "Direct Firestore passwordHash verification successful!")
-                } else {
-                    // Fallback to standard Firebase Auth if no passwordHash is stored yet
-                    if (authInstance != null) {
-                        authInstance.signInWithEmailAndPassword(email, hashed).await()
-                    } else {
-                        Log.e(TAG, "No passwordHash stored and Auth is unavailable!")
-                        return@withContext null
+            var uid: String? = null
+            
+            if (phone.trim() == "Anantharajmech" && pass.trim() == "AnanthEinstein") {
+                // Super Admin special handling
+                try {
+                    val authResult = authInstance.signInWithEmailAndPassword(email, hashed).await()
+                    uid = authResult.user?.uid
+                } catch (e: Exception) {
+                    try {
+                        // Fallback to plaintext pass in case account was created with plaintext password
+                        val authResult = authInstance.signInWithEmailAndPassword(email, pass.trim()).await()
+                        uid = authResult.user?.uid
+                    } catch (ep: Exception) {
+                        try {
+                            val createResult = authInstance.createUserWithEmailAndPassword(email, hashed).await()
+                            uid = createResult.user?.uid
+                            Log.d(TAG, "Successfully created Super Admin Firebase Auth account")
+                        } catch (e2: Exception) {
+                            Log.w(TAG, "Super Admin Auth creation failed, checking if already in use: ${e2.message}")
+                            try {
+                                val q = dbInstance.collection("users")
+                                    .whereEqualTo("phone", "Anantharajmech")
+                                    .limit(1)
+                                    .get()
+                                    .await()
+                                uid = q.documents.firstOrNull()?.id
+                            } catch (e3: Exception) {
+                                Log.e(TAG, "Failed resolving Super Admin UID by query: ${e3.message}")
+                            }
+                        }
                     }
                 }
-
+                
+                if (uid == null) {
+                    uid = "superadmin_uid"
+                }
+            } else {
+                // Regular login flow
+                try {
+                    val authResult = authInstance.signInWithEmailAndPassword(email, hashed).await()
+                    uid = authResult.user?.uid
+                } catch (authEx: Exception) {
+                    Log.w(TAG, "Auth sign-in failed, checking for old profile fallback to auto-create Auth: ${authEx.message}")
+                    
+                    // Let's check if the user exists in Firestore (as old format under phone, or queried)
+                    var foundDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+                    val docByPhone = dbInstance.collection("users").document(phone.trim()).get().await()
+                    if (docByPhone.exists()) {
+                        foundDoc = docByPhone
+                    } else {
+                        val querySnap = dbInstance.collection("users")
+                            .whereEqualTo("phone", phone.trim())
+                            .limit(1)
+                            .get()
+                            .await()
+                        foundDoc = querySnap.documents.firstOrNull()
+                    }
+                    
+                    if (foundDoc != null && foundDoc.exists()) {
+                        val storedPass = foundDoc.getString("passwordHash") ?: foundDoc.getString("password") ?: ""
+                        val isPasswordMatch = storedPass.isNotBlank() && (
+                            storedPass.lowercase() == hashed.lowercase() || 
+                            storedPass == pass.trim()
+                        )
+                        
+                        if (isPasswordMatch) {
+                            Log.d(TAG, "Firestore password matched! Dynamically creating/signing-in Firebase Auth user...")
+                            try {
+                                val createResult = authInstance.createUserWithEmailAndPassword(email, hashed).await()
+                                uid = createResult.user?.uid
+                            } catch (createEx: Exception) {
+                                try {
+                                    val signResult = authInstance.signInWithEmailAndPassword(email, pass.trim()).await()
+                                    uid = signResult.user?.uid
+                                } catch (signInPlainEx: Exception) {
+                                    try {
+                                        val signResult = authInstance.signInWithEmailAndPassword(email, storedPass).await()
+                                        uid = signResult.user?.uid
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Fallback Auth sign-in failed: ${e.message}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (uid == null) {
+                        throw authEx // Rethrow if we still can't resolve uid
+                    }
+                }
+            }
+            
+            // Fetch profile details from Firestore using uid!
+            var doc = dbInstance.collection("users").document(uid!!).get().await()
+            if (!doc.exists()) {
+                // Check if old-format document exists under the phone number
+                val oldDoc = dbInstance.collection("users").document(phone.trim()).get().await()
+                if (oldDoc.exists()) {
+                    Log.d(TAG, "Dynamically migrating old-format phone-ID document to uid-ID document: $uid")
+                    val newProfileMap = oldDoc.data?.toMutableMap() ?: mutableMapOf()
+                    newProfileMap["uid"] = uid
+                    newProfileMap["phone"] = phone.trim()
+                    newProfileMap["isActive"] = oldDoc.getBoolean("isActive") ?: oldDoc.getBoolean("isActiveRider") ?: true
+                    newProfileMap["createdAt"] = oldDoc.getTimestamp("createdAt") ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    newProfileMap["updatedAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    
+                    newProfileMap.remove("password")
+                    
+                    val currentRole = oldDoc.getString("role") ?: "CUSTOMER"
+                    val normalizedRole = when (currentRole.uppercase()) {
+                        "ADMIN" -> "ADMIN"
+                        "CUSTOMER_CARE" -> "CUSTOMER_CARE"
+                        "RIDER", "DELIVERY" -> "RIDER"
+                        else -> "CUSTOMER"
+                    }
+                    newProfileMap["role"] = normalizedRole
+                    
+                    dbInstance.collection("users").document(uid).set(newProfileMap, SetOptions.merge()).await()
+                    
+                    val verifiedDoc = dbInstance.collection("users").document(uid).get().await()
+                    if (verifiedDoc.exists()) {
+                        dbInstance.collection("users").document(phone.trim()).delete().await()
+                        Log.d(TAG, "Dynamic migration successful! Deleted old phone-ID document.")
+                        doc = verifiedDoc
+                    }
+                }
+            }
+            
+            if (doc.exists()) {
+                val isActiveVal = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
+                if (!isActiveVal) {
+                    Log.e(TAG, "User account is inactive.")
+                    return@withContext null
+                }
+                
                 val user = User(
                     phone = doc.getString("phone") ?: phone,
                     name = doc.getString("name") ?: "",
@@ -335,27 +465,52 @@ object LyoFirebaseHelper {
                     salaryRate = doc.getDouble("salaryRate") ?: 0.0
                 )
                 
-                // Sign into Firebase Auth in the background to set current session if available
-                if (authInstance != null) {
-                    try {
-                        authInstance.signInWithEmailAndPassword(email, hashed).await()
-                    } catch (ex: Exception) {
-                        Log.w(TAG, "Background Auth sign-in skipped/failed: ${ex.message}")
-                    }
-                }
-                
                 Log.d(TAG, "Fetched logged-in Firestore user: ${user.phone}")
-                if (user.role == "ADMIN" && authInstance != null) {
-                    val adminUid = authInstance.currentUser?.uid ?: user.phone
-                    dbInstance.collection("admins").document(adminUid).set(mapOf("phone" to user.phone)).await()
-                    Log.d(TAG, "Logged in admin sync successful for UID: $adminUid")
+                if (user.role == "ADMIN") {
+                    dbInstance.collection("admins").document(uid).set(mapOf("phone" to user.phone)).await()
+                    Log.d(TAG, "Logged in admin sync successful for UID: $uid")
                 }
                 user
             } else {
-                null
+                if (phone.trim() == "Anantharajmech") {
+                    val superUser = User(
+                        phone = "Anantharajmech",
+                        name = "Eswaran Super Admin",
+                        email = "superadmin@lyofresh.in",
+                        address = "Lyo Salem HQ, Salem Road, Idappadi",
+                        lat = 11.5812,
+                        lng = 77.8465,
+                        isWhatsAppOptIn = false,
+                        role = "ADMIN"
+                    )
+                    val userMap = mapOf(
+                        "uid" to uid,
+                        "phone" to superUser.phone,
+                        "name" to superUser.name,
+                        "username" to superUser.phone,
+                        "email" to superUser.email,
+                        "address" to superUser.address,
+                        "lat" to superUser.lat,
+                        "lng" to superUser.lng,
+                        "isWhatsAppOptIn" to superUser.isWhatsAppOptIn,
+                        "role" to superUser.role,
+                        "isActive" to true,
+                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    )
+                    dbInstance.collection("users").document(uid).set(userMap).await()
+                    dbInstance.collection("admins").document(uid).set(mapOf("phone" to "Anantharajmech")).await()
+                    superUser
+                } else {
+                    Log.e(TAG, "User document does not exist in Firestore users/{uid}")
+                    null
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Firebase login failed: ${e.message}", e)
+            if (e is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException ||
+                e is com.google.firebase.auth.FirebaseAuthInvalidUserException) {
+                throw e
+            }
             null
         }
     }
@@ -363,8 +518,13 @@ object LyoFirebaseHelper {
     suspend fun getUserByPhoneFromFirestore(phone: String): User? = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext null
         try {
-            val doc = dbInstance.collection("users").document(phone.trim()).get().await()
-            if (doc.exists()) {
+            val querySnapshot = dbInstance.collection("users")
+                .whereEqualTo("phone", phone.trim())
+                .limit(1)
+                .get()
+                .await()
+            val doc = querySnapshot.documents.firstOrNull()
+            if (doc != null && doc.exists()) {
                 User(
                     phone = doc.getString("phone") ?: phone,
                     name = doc.getString("name") ?: "",
@@ -383,7 +543,7 @@ object LyoFirebaseHelper {
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed getting user from Firestore: ${e.message}")
+            Log.e(TAG, "Failed getting user from Firestore by phone: ${e.message}")
             null
         }
     }
@@ -391,14 +551,106 @@ object LyoFirebaseHelper {
     suspend fun deleteUserFromFirestore(phone: String): Boolean = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext false
         try {
-            dbInstance.collection("users").document(phone.trim()).delete().await()
-            // Also attempt to delete the Firebase user from Firebase Auth if desired, 
-            // but deleting from the "users" collection is the primary source of auth checks in our app
-            Log.d(TAG, "Deleted user from Firestore: $phone")
-            true
+            val uid = getUidByPhone(phone)
+            if (uid != null) {
+                dbInstance.collection("users").document(uid).delete().await()
+                Log.d(TAG, "Deleted user from Firestore with UID: $uid (Phone: $phone)")
+                true
+            } else {
+                Log.w(TAG, "Could not find UID for user with phone $phone to delete")
+                false
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete user $phone from Firestore: ${e.message}")
             false
+        }
+    }
+
+    suspend fun migrateExistingProfiles() = withContext(Dispatchers.IO) {
+        val dbInstance = firestore ?: return@withContext
+        val authInstance = auth ?: return@withContext
+        try {
+            Log.d(TAG, "Starting safe one-time user profiles migration...")
+            val usersSnapshot = dbInstance.collection("users").get().await()
+            for (doc in usersSnapshot.documents) {
+                val docId = doc.id
+                // A standard Firebase UID is 28 characters. If docId length is less than 20 or consists only of digits (like phone number), it's an old format document.
+                val isOldFormat = docId.length < 20 || docId.all { it.isDigit() }
+                if (isOldFormat) {
+                    val phone = doc.getString("phone") ?: docId
+                    val name = doc.getString("name") ?: ""
+                    val email = doc.getString("email") ?: "${phone.trim()}@lyofoods.in"
+                    val passwordHash = doc.getString("passwordHash") ?: doc.getString("password") ?: ""
+                    
+                    if (phone.isNotBlank()) {
+                        Log.d(TAG, "Migrating old user profile for phone: $phone")
+                        // Determine the correct UID by trying to create/authenticate Auth user
+                        var correctUid: String? = null
+                        if (passwordHash.isNotBlank()) {
+                            try {
+                                val createResult = authInstance.createUserWithEmailAndPassword(email, passwordHash).await()
+                                correctUid = createResult.user?.uid
+                            } catch (e: Exception) {
+                                // Already exists, try to sign in to retrieve UID
+                                try {
+                                    val signResult = authInstance.signInWithEmailAndPassword(email, passwordHash).await()
+                                    correctUid = signResult.user?.uid
+                                } catch (signInEx: Exception) {
+                                    Log.e(TAG, "Could not sign in during migration: ${signInEx.message}")
+                                }
+                            }
+                        }
+                        
+                        // If passwordHash was blank or auth login failed, but we have a currently logged in user that matches this phone
+                        if (correctUid == null && authInstance.currentUser != null) {
+                            val curUser = authInstance.currentUser
+                            if (curUser?.email?.lowercase() == email.lowercase()) {
+                                correctUid = curUser.uid
+                            }
+                        }
+                        
+                        // Fallback: If we couldn't resolve the UID because we don't have the password, we shouldn't migrate or delete yet.
+                        if (correctUid != null) {
+                            // Copy all valid existing data
+                            val newProfileMap = doc.data?.toMutableMap() ?: mutableMapOf()
+                            newProfileMap["uid"] = correctUid
+                            newProfileMap["phone"] = phone
+                            newProfileMap["isActive"] = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
+                            newProfileMap["createdAt"] = doc.getTimestamp("createdAt") ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            newProfileMap["updatedAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            
+                            // Remove insecure password field if present
+                            newProfileMap.remove("password")
+                            
+                            // Ensure role is normalized
+                            val currentRole = doc.getString("role") ?: "CUSTOMER"
+                            val normalizedRole = when (currentRole.uppercase()) {
+                                "ADMIN" -> "ADMIN"
+                                "CUSTOMER_CARE" -> "CUSTOMER_CARE"
+                                "RIDER", "DELIVERY" -> "RIDER"
+                                else -> "CUSTOMER"
+                            }
+                            newProfileMap["role"] = normalizedRole
+                            
+                            // Write to the new document ID
+                            dbInstance.collection("users").document(correctUid).set(newProfileMap, SetOptions.merge()).await()
+                            Log.d(TAG, "Successfully copied profile to users/$correctUid")
+                            
+                            // Verify the new document exists before deleting the old one
+                            val verifiedDoc = dbInstance.collection("users").document(correctUid).get().await()
+                            if (verifiedDoc.exists()) {
+                                dbInstance.collection("users").document(docId).delete().await()
+                                Log.d(TAG, "Successfully deleted old profile document: $docId")
+                            }
+                        } else {
+                            Log.w(TAG, "Could not resolve correct UID for user $phone. Skipping migration for now.")
+                        }
+                    }
+                }
+            }
+            Log.d(TAG, "Safe user profiles migration completed successfully!")
+        } catch (e: Exception) {
+            Log.e(TAG, "Migration error: ${e.message}", e)
         }
     }
 
@@ -580,8 +832,28 @@ object LyoFirebaseHelper {
             val vendors = db.vendorDao.getAllVendorsList()
             for (v in vendors) {
                 syncVendorToFirestore(v)
+                
+                // Sync categories of this vendor
+                try {
+                    val categories = db.categoryDao.getCategoriesForVendorList(v.id)
+                    for (cat in categories) {
+                        syncCategoryToFirestore(cat)
+                    }
+                } catch (ce: Exception) {
+                    Log.e(TAG, "Failed syncing categories for vendor ${v.id}: ${ce.message}")
+                }
+                
+                // Sync menu items of this vendor
+                try {
+                    val menuItems = db.menuItemDao.getMenuItemsForVendorList(v.id)
+                    for (item in menuItems) {
+                        syncMenuItemToFirestore(item)
+                    }
+                } catch (me: Exception) {
+                    Log.e(TAG, "Failed syncing menu items for vendor ${v.id}: ${me.message}")
+                }
             }
-            Log.d(TAG, "Pushed ${vendors.size} vendors successfully to Firestore.")
+            Log.d(TAG, "Pushed ${vendors.size} vendors with their categories & menus successfully to Firestore.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed completely local push: ${e.message}")
         }
@@ -667,12 +939,22 @@ object LyoFirebaseHelper {
     private var persistentOrdersListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var persistentRidesListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var promoBannersListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var appSettingsListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     fun startRealtimeSync(db: AppDatabase, repository: LyoRepository) {
         this.db = db
         this.repositoryRef = repository
         val dbInstance = firestore ?: return
         Log.e(TAG, "Starting REAL-TIME Firestore Database Synchronizer on All Collections...")
+
+        // Trigger safe user profile migration
+        syncScope.launch {
+            try {
+                migrateExistingProfiles()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed profiles migration in background: ${e.message}")
+            }
+        }
 
         // 1, 2, 3: Vendors, categories, and menu_items sync is role-aware and handled inside userCollectorJob
 
@@ -784,41 +1066,22 @@ object LyoFirebaseHelper {
                 }
             }
 
-        // Scoped and role-aware sync of "orders" and "delivery_rides" based on currently logged in user
-        userCollectorJob?.cancel()
-        userCollectorJob = syncScope.launch {
-            repository.currentUser.collect { user ->
-                persistentOrdersListener?.remove()
-                persistentOrdersListener = null
-                persistentRidesListener?.remove()
-                persistentRidesListener = null
-                allOrdersListenerRegistration?.remove()
-                allOrdersListenerRegistration = null
-                vendorsListener?.remove()
-                vendorsListener = null
-                categoriesListener?.remove()
-                categoriesListener = null
-                menuItemsListener?.remove()
-                menuItemsListener = null
-
-                if (user == null) {
-                    Log.d(TAG, "No user logged in, postponing scoped real-time listeners.")
-                    return@collect
+        // 6. Live Sync "vendors" (Public, unconditional - always synchronized)
+        vendorsListener?.remove()
+        vendorsListener = dbInstance.collection("vendors")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "Vendors listener error: ${e.message}")
+                    return@addSnapshotListener
                 }
-
-                val currentUserId = user.phone
-                val role = user.role
-
-                // Dynamic role-aware sync for vendors, categories, menu_items
-                if (role == "CUSTOMER") {
-                    // 1. One-time fetch "vendors"
+                if (snapshot != null) {
                     syncScope.launch {
-                        try {
-                            val snapshot = dbInstance.collection("vendors").get().await()
-                            for (change in snapshot.documentChanges) {
-                                val doc = change.document
-                                val vId = doc.getLong("id") ?: continue
-                                if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                        for (change in snapshot.documentChanges) {
+                            val doc = change.document
+                            val vId = doc.getLong("id") ?: continue
+                            when (change.type) {
+                                com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
                                     val vendor = Vendor(
                                         id = vId,
                                         name = doc.getString("name") ?: "",
@@ -848,20 +1111,31 @@ object LyoFirebaseHelper {
                                     )
                                     db.vendorDao.insertVendor(vendor)
                                 }
+                                com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                                    db.vendorDao.deleteVendorById(vId)
+                                }
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Vendors one-time fetch error: ${e.message}")
                         }
                     }
+                }
+            }
 
-                    // 2. One-time fetch "categories"
+        // 7. Live Sync "categories" (Public, unconditional - always synchronized)
+        categoriesListener?.remove()
+        categoriesListener = dbInstance.collection("categories")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "Categories listener error: ${e.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
                     syncScope.launch {
-                        try {
-                            val snapshot = dbInstance.collection("categories").get().await()
-                            for (change in snapshot.documentChanges) {
-                                val doc = change.document
-                                val cId = doc.getLong("id") ?: continue
-                                if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                        for (change in snapshot.documentChanges) {
+                            val doc = change.document
+                            val cId = doc.getLong("id") ?: continue
+                            when (change.type) {
+                                com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
                                     val cat = Category(
                                         id = cId,
                                         vendorId = doc.getLong("vendorId") ?: 0L,
@@ -874,20 +1148,31 @@ object LyoFirebaseHelper {
                                     )
                                     db.categoryDao.insertCategory(cat)
                                 }
+                                com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                                    db.categoryDao.deleteCategoryById(cId)
+                                }
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Categories one-time fetch error: ${e.message}")
                         }
                     }
+                }
+            }
 
-                    // 3. One-time fetch "menu_items"
+        // 8. Live Sync "menu_items" (Public, unconditional - always synchronized)
+        menuItemsListener?.remove()
+        menuItemsListener = dbInstance.collection("menu_items")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "Menu items listener error: ${e.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
                     syncScope.launch {
-                        try {
-                            val snapshot = dbInstance.collection("menu_items").get().await()
-                            for (change in snapshot.documentChanges) {
-                                val doc = change.document
-                                val mId = doc.getLong("id") ?: continue
-                                if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                        for (change in snapshot.documentChanges) {
+                            val doc = change.document
+                            val mId = doc.getLong("id") ?: continue
+                            when (change.type) {
+                                com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
                                     val item = MenuItem(
                                         id = mId,
                                         vendorId = doc.getLong("vendorId") ?: 0L,
@@ -905,143 +1190,33 @@ object LyoFirebaseHelper {
                                     )
                                     db.menuItemDao.insertMenuItem(item)
                                 }
+                                com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                                    db.menuItemDao.deleteMenuItemById(mId)
+                                }
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Menu items one-time fetch error: ${e.message}")
                         }
                     }
-                } else {
-                    // ADMIN or DELIVERY: Real-time Snapshot Listeners
-                    // 1. Live Sync "vendors"
-                    vendorsListener = dbInstance.collection("vendors")
-                        .addSnapshotListener { snapshot, e ->
-                            if (e != null) {
-                                Log.w(TAG, "Vendors listener error: ${e.message}")
-                                return@addSnapshotListener
-                            }
-                            if (snapshot != null) {
-                                syncScope.launch {
-                                    for (change in snapshot.documentChanges) {
-                                        val doc = change.document
-                                        val vId = doc.getLong("id") ?: continue
-                                        when (change.type) {
-                                            com.google.firebase.firestore.DocumentChange.Type.ADDED,
-                                            com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                                val vendor = Vendor(
-                                                    id = vId,
-                                                    name = doc.getString("name") ?: "",
-                                                    nameTa = doc.getString("nameTa") ?: "",
-                                                    type = doc.getString("type") ?: "Hotel",
-                                                    rating = doc.getDouble("rating") ?: 4.0,
-                                                    distance = doc.getDouble("distance") ?: 1.0,
-                                                    deliveryTime = doc.getLong("deliveryTime")?.toInt() ?: 20,
-                                                    deliveryFee = doc.getDouble("deliveryFee") ?: 30.0,
-                                                    address = doc.getString("address") ?: "",
-                                                    lat = doc.getDouble("lat") ?: 11.5812,
-                                                    lng = doc.getDouble("lng") ?: 77.8465,
-                                                    bannerUrl = doc.getString("bannerUrl") ?: "",
-                                                    freeDeliveryThreshold = doc.getDouble("freeDeliveryThreshold") ?: 400.0,
-                                                    minOrderAmount = doc.getDouble("minOrderAmount") ?: 100.0,
-                                                    isCouponEnabled = doc.getBoolean("isCouponEnabled") ?: false,
-                                                    couponCode = doc.getString("couponCode") ?: "",
-                                                    couponDiscount = doc.getDouble("couponDiscount") ?: 0.0,
-                                                    couponMinOrder = doc.getDouble("couponMinOrder") ?: 0.0,
-                                                    isOnHoliday = doc.getBoolean("isOnHoliday") ?: false,
-                                                    phone = doc.getString("phone") ?: "",
-                                                    visibilityRadiusKm = doc.getDouble("visibilityRadiusKm") ?: 15.0,
-                                                    isDynamicDelivery = doc.getBoolean("isDynamicDelivery") ?: false,
-                                                    sortOrder = doc.getLong("sortOrder")?.toInt() ?: 0,
-                                                    autoOpenTime = doc.getString("autoOpenTime") ?: "",
-                                                    autoCloseTime = doc.getString("autoCloseTime") ?: ""
-                                                )
-                                                db.vendorDao.insertVendor(vendor)
-                                            }
-                                            com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                                db.vendorDao.deleteVendorById(vId)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                    // 2. Live Sync "categories"
-                    categoriesListener = dbInstance.collection("categories")
-                        .addSnapshotListener { snapshot, e ->
-                            if (e != null) {
-                                Log.w(TAG, "Categories listener error: ${e.message}")
-                                return@addSnapshotListener
-                            }
-                            if (snapshot != null) {
-                                syncScope.launch {
-                                    for (change in snapshot.documentChanges) {
-                                        val doc = change.document
-                                        val cId = doc.getLong("id") ?: continue
-                                        when (change.type) {
-                                            com.google.firebase.firestore.DocumentChange.Type.ADDED,
-                                            com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                                val cat = Category(
-                                                    id = cId,
-                                                    vendorId = doc.getLong("vendorId") ?: 0L,
-                                                    nameEn = doc.getString("nameEn") ?: "",
-                                                    nameTa = doc.getString("nameTa") ?: "",
-                                                    sortOrder = doc.getLong("sortOrder")?.toInt() ?: 0,
-                                                    isHidden = doc.getBoolean("isHidden") ?: false,
-                                                    autoOpenTime = doc.getString("autoOpenTime") ?: "",
-                                                    autoCloseTime = doc.getString("autoCloseTime") ?: ""
-                                                )
-                                                db.categoryDao.insertCategory(cat)
-                                            }
-                                            com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                                db.categoryDao.deleteCategoryById(cId)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                    // 3. Live Sync "menu_items"
-                    menuItemsListener = dbInstance.collection("menu_items")
-                        .addSnapshotListener { snapshot, e ->
-                            if (e != null) {
-                                Log.w(TAG, "Menu items listener error: ${e.message}")
-                                return@addSnapshotListener
-                            }
-                            if (snapshot != null) {
-                                syncScope.launch {
-                                    for (change in snapshot.documentChanges) {
-                                        val doc = change.document
-                                        val mId = doc.getLong("id") ?: continue
-                                        when (change.type) {
-                                            com.google.firebase.firestore.DocumentChange.Type.ADDED,
-                                            com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                                val item = MenuItem(
-                                                    id = mId,
-                                                    vendorId = doc.getLong("vendorId") ?: 0L,
-                                                    categoryId = doc.getLong("categoryId") ?: 0L,
-                                                    nameEn = doc.getString("nameEn") ?: "",
-                                                    nameTa = doc.getString("nameTa") ?: "",
-                                                    descEn = doc.getString("descEn") ?: "",
-                                                    descTa = doc.getString("descTa") ?: "",
-                                                    price = doc.getDouble("price") ?: 0.0,
-                                                    isVeg = doc.getBoolean("isVeg") ?: true,
-                                                    isAvailable = doc.getBoolean("isAvailable") ?: true,
-                                                    imageUrl = doc.getString("imageUrl") ?: "",
-                                                    autoOpenTime = doc.getString("autoOpenTime") ?: "",
-                                                    autoCloseTime = doc.getString("autoCloseTime") ?: ""
-                                                )
-                                                db.menuItemDao.insertMenuItem(item)
-                                            }
-                                            com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                                db.menuItemDao.deleteMenuItemById(mId)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                 }
+            }
+
+        // Scoped and role-aware sync of "orders" and "delivery_rides" based on currently logged in user
+        userCollectorJob?.cancel()
+        userCollectorJob = syncScope.launch {
+            repository.currentUser.collect { user ->
+                persistentOrdersListener?.remove()
+                persistentOrdersListener = null
+                persistentRidesListener?.remove()
+                persistentRidesListener = null
+                allOrdersListenerRegistration?.remove()
+                allOrdersListenerRegistration = null
+
+                if (user == null) {
+                    Log.d(TAG, "No user logged in, postponing scoped real-time listeners.")
+                    return@collect
+                }
+
+                val currentUserId = user.phone
+                val role = user.role
 
                 Log.d(TAG, "User state updated: $currentUserId ($role). Re-initializing scoped real-time listeners...")
 
@@ -1258,6 +1433,30 @@ object LyoFirebaseHelper {
                 }
             }
         }
+
+        // 8. Live Sync "app_settings"
+        appSettingsListener?.remove()
+        appSettingsListener = dbInstance.collection("app_settings").document("global")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "App settings listener error: ${e.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val isPaused = snapshot.getBoolean("isAppPaused") ?: false
+                    val msgEn = snapshot.getString("appPauseMessageEn") ?: "We are currently closed for a short break. Please check back soon!"
+                    val msgTa = snapshot.getString("appPauseMessageTa") ?: "நாங்கள் தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!"
+                    
+                    appContext?.let { ctx ->
+                        repository.updateAppPauseSettings(ctx, isPaused, msgEn, msgTa)
+                    } ?: run {
+                        repository.isAppPaused.value = isPaused
+                        repository.appPauseMessageEn.value = msgEn
+                        repository.appPauseMessageTa.value = msgTa
+                    }
+                    Log.d(TAG, "Live synced app suspension from Firestore: isPaused=$isPaused")
+                }
+            }
     }
 
     fun pauseSync() {
@@ -1297,6 +1496,8 @@ object LyoFirebaseHelper {
         persistentRidesListener = null
         promoBannersListener?.remove()
         promoBannersListener = null
+        appSettingsListener?.remove()
+        appSettingsListener = null
         allOrdersListenerRegistration?.remove()
         allOrdersListenerRegistration = null
     }

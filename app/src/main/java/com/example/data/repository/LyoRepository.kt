@@ -34,6 +34,46 @@ class LyoRepository(private val db: AppDatabase) {
     val activeLiveOrder = MutableStateFlow<Order?>(null)
     val maxStoreDistanceRadius = MutableStateFlow<Double>(15.0)
 
+    // App Suspension Config
+    val isAppPaused = MutableStateFlow(false)
+    val appPauseMessageEn = MutableStateFlow("")
+    val appPauseMessageTa = MutableStateFlow("")
+
+    fun initAppPauseSettings(context: android.content.Context) {
+        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+        isAppPaused.value = prefs.getBoolean("is_app_paused", false)
+        appPauseMessageEn.value = prefs.getString("app_pause_message_en", "We are currently closed for a short break. Please check back soon!") ?: "We are currently closed for a short break. Please check back soon!"
+        appPauseMessageTa.value = prefs.getString("app_pause_message_ta", "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!") ?: "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!"
+    }
+
+    fun updateAppPauseSettings(context: android.content.Context, paused: Boolean, msgEn: String, msgTa: String) {
+        isAppPaused.value = paused
+        appPauseMessageEn.value = msgEn
+        appPauseMessageTa.value = msgTa
+        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("is_app_paused", paused)
+            .putString("app_pause_message_en", msgEn)
+            .putString("app_pause_message_ta", msgTa)
+            .apply()
+
+        // Also sync to Firestore live config!
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val settingsMap = mapOf(
+                    "isAppPaused" to paused,
+                    "appPauseMessageEn" to msgEn,
+                    "appPauseMessageTa" to msgTa
+                )
+                dbInstance.collection("app_settings").document("global").set(settingsMap, com.google.firebase.firestore.SetOptions.merge())
+                Log.d("LyoRepository", "Synced app suspension to Firestore: paused=$paused")
+            } catch (e: Exception) {
+                Log.w("LyoRepository", "Error syncing app suspension to Firestore: ${e.message}")
+            }
+        }
+    }
+
     init {
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             currentUser.map { it?.phone }.distinctUntilChanged().collectLatest { phone ->
@@ -69,8 +109,8 @@ class LyoRepository(private val db: AppDatabase) {
                                 Log.d("LyoRepository", "Auto-synced current user from DB: is_active=${updatedUser.isActiveRider}")
                             }
                         } else {
-                            currentUser.value = null
-                            Log.d("LyoRepository", "Current user was deleted, logging out automatically.")
+                            // Safer: do not set currentUser.value = null spontaneously to prevent accidental logouts during DB sync / migrations
+                            Log.w("LyoRepository", "Current user $phone was not found in local DB. Keeping in-memory session active to prevent accidental logout.")
                         }
                     }
                 } else {
@@ -119,7 +159,7 @@ class LyoRepository(private val db: AppDatabase) {
     }
 
     // Flow listings from DB
-    val allVendors: Flow<List<Vendor>> = db.vendorDao.getAllVendors().map { list -> list.distinctBy { it.name.trim().lowercase() } }
+    val allVendors: Flow<List<Vendor>> = db.vendorDao.getAllVendors()
     val allPromoBanners: Flow<List<PromoBanner>> = db.promoBannerDao.getAllPromoBanners()
     val activeDeliveryRides: Flow<List<DeliveryRide>> = db.deliveryRideDao.getActiveRides()
     val allDeliveryRides: Flow<List<DeliveryRide>> = db.deliveryRideDao.getAllRidesFlow()
@@ -186,15 +226,22 @@ class LyoRepository(private val db: AppDatabase) {
             } catch (e: Exception) {
                 Log.e("LyoRepository", "Local background user backup failed: ${e.message}")
             }
+
+            // Save password hash locally for offline login verification
+            if (!plaintextPassword.isNullOrBlank()) {
+                try {
+                    val hash = LyoFirebaseHelper.hashPassword(plaintextPassword)
+                    val sharedPrefs = context.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
+                    sharedPrefs.edit().putString("pass_hash_${user.phone}", hash).apply()
+                    Log.d("LyoRepository", "Saved offline password hash for phone: ${user.phone}")
+                } catch (e: Exception) {
+                    Log.e("LyoRepository", "Failed to save offline password hash: ${e.message}")
+                }
+            }
         }
 
-        // Fire and forget Firestore/FirebaseAuth registration in background to avoid blocking the UI thread or local DB
-        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-            try {
-                LyoFirebaseHelper.registerInFirebase(user, plaintextPassword)
-            } catch (e: Exception) {
-                Log.e("LyoRepository", "Firebase Firestore background register deferred: ${e.message}")
-            }
+        if (LyoFirebaseHelper.isInitialized) {
+            LyoFirebaseHelper.registerInFirebase(user, plaintextPassword)
         }
     }
 
@@ -597,10 +644,25 @@ class LyoRepository(private val db: AppDatabase) {
 
         for (u in seedUsers) {
             userDao.insertUser(u)
+            val seedPass = if (u.phone == "Anantharajmech") "AnanthEinstein" else null
+            
+            // Save password hash locally for offline login verification during seeding
+            if (seedPass != null) {
+                LyoFirebaseHelper.appContext?.let { context ->
+                    try {
+                        val hash = LyoFirebaseHelper.hashPassword(seedPass)
+                        val sharedPrefs = context.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
+                        sharedPrefs.edit().putString("pass_hash_${u.phone}", hash).apply()
+                    } catch (e: Exception) {
+                        Log.e("LyoRepository", "Failed to save offline password hash during seed: ${e.message}")
+                    }
+                }
+            }
+            
             if (LyoFirebaseHelper.isInitialized) {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        LyoFirebaseHelper.registerInFirebase(u, null)
+                        LyoFirebaseHelper.registerInFirebase(u, seedPass)
                     } catch (e: Exception) {
                         Log.e("LyoRepository", "Field seeding registration for ${u.phone} failed: ${e.message}")
                     }
@@ -1201,10 +1263,14 @@ class LyoRepository(private val db: AppDatabase) {
         db.menuItemDao.deleteMenuItemsByVendor(vendor.id)
         db.categoryDao.deleteCategoriesByVendor(vendor.id)
         db.vendorDao.deleteVendor(vendor)
-        try {
-            LyoFirebaseHelper.deleteVendorFromFirestore(vendor.id)
-        } catch (e: Exception) {
-            Log.e("LyoRepository", "Firestore deleteVendor background deferred: ${e.message}")
+        
+        // Fire and forget Firestore delete in background to avoid blocking the UI thread or local DB
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
+            try {
+                LyoFirebaseHelper.deleteVendorFromFirestore(vendor.id)
+            } catch (e: Exception) {
+                Log.e("LyoRepository", "Firestore deleteVendor background deferred: ${e.message}")
+            }
         }
     }
 

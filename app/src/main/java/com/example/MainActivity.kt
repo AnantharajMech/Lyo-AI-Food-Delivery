@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.example.data.database.AppDatabase
+import com.example.data.database.User
 import com.example.data.repository.LyoRepository
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
     val db = AppDatabase.getInstance(applicationContext)
     val lyoRepository = LyoRepository(db).apply {
         initGstSettings(applicationContext)
+        initAppPauseSettings(applicationContext)
     }
 
     // Perform all heavy operations (Firebase init, local backup restore, real-time sync) off the main thread to prevent main thread freeze/deadlock
@@ -89,99 +92,161 @@ class MainActivity : ComponentActivity() {
         }
         val startPhone = remember { sharedPrefs.getString("logged_user_phone", null) }
 
+        val permissionsLauncher = rememberLauncherForActivityResult(
+          contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+        ) { _ -> }
+
         // Robust single-flow splash and session recovery
         LaunchedEffect(Unit) {
-          val startTime = System.currentTimeMillis()
-          
-          if (startPhone != null) {
-            var recoverySuccessful = false
-            try {
-              // Read from local database only - 100% offline, lightning-fast
-              val user = lyoRepository.findUserLocallyOnly(startPhone)
-              if (user != null) {
-                // Verify or re-establish Firebase Auth session
-                val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-                var isAuthSessionValid = false
-                
-                // If Firebase Auth already has a non-null currentUser, check if it matches startPhone and verify token
-                val firebaseUser = auth.currentUser
-                if (firebaseUser != null) {
-                  val expectedEmail = "${startPhone.trim()}@lyofoods.in"
-                  if (firebaseUser.email?.lowercase() == expectedEmail.lowercase()) {
-                    try {
-                      // Try to fetch id token (forcing refresh) to verify session validity
-                      firebaseUser.getIdToken(true).await()
-                      isAuthSessionValid = true
-                      android.util.Log.d("MainActivity", "Firebase Auth session verified successfully via token")
-                    } catch (tokenEx: Exception) {
-                      android.util.Log.w("MainActivity", "Firebase getIdToken failed, will attempt re-auth: ${tokenEx.message}")
-                    }
-                  }
-                }
-                
-                // If not verified yet, but we have stored password hash, re-authenticate
-                if (!isAuthSessionValid) {
-                  val storedHash = sharedPrefs.getString("logged_user_password_hash", null)
-                  if (storedHash != null) {
-                    try {
-                      val email = "${startPhone.trim()}@lyofoods.in"
-                      auth.signInWithEmailAndPassword(email, storedHash).await()
-                      isAuthSessionValid = true
-                      android.util.Log.d("MainActivity", "Firebase Auth session re-established via stored password hash")
-                    } catch (signInEx: Exception) {
-                      android.util.Log.e("MainActivity", "Firebase signInWithEmailAndPassword failed during recovery: ${signInEx.message}")
-                    }
-                  }
-                }
-                
-                if (isAuthSessionValid) {
-                  lyoRepository.currentUser.value = user
-                  recoverySuccessful = true
-                  android.util.Log.d("MainActivity", "Successfully recovered user session: ${user.phone}")
-                  
-                  // Trigger background retry for any pending local synced orders when auth session is restored!
-                  CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                      lyoRepository.retryPendingSyncs()
-                    } catch (syncEx: Exception) {
-                      android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
-                    }
-                  }
-                }
-              }
-            } catch (e: Exception) {
-              android.util.Log.e("MainActivity", "Error during session recovery: ${e.message}")
-            }
-            
-            if (!recoverySuccessful) {
-              android.util.Log.w("MainActivity", "Firebase Auth session recovery failed. Clearing session and redirecting to login.")
-              sharedPrefs.edit()
-                .remove("logged_user_phone")
-                .remove("logged_user_password_hash")
-                .apply()
-              lyoRepository.currentUser.value = null
-              currentRoute = "LOGIN"
-            }
+          val permissions = mutableListOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+          )
+          if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
+          }
+          try {
+            permissionsLauncher.launch(permissions.toTypedArray())
+          } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to launch permissions: ${e.message}")
           }
 
-          // Ensure the splash screen stays visible for at least 2000ms total for visual elegance
+          val startTime = System.currentTimeMillis()
+          val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+          
+          // a. Wait for Firebase Auth state to finish resolving only if we have a saved user phone
+          var firebaseUser = auth.currentUser
+          if (firebaseUser == null && startPhone != null) {
+              var elapsedWait = 0L
+              while (auth.currentUser == null && elapsedWait < 1500L) {
+                  delay(100L)
+                  elapsedWait += 100L
+              }
+              firebaseUser = auth.currentUser
+          }
+
+          var recoverySuccessful = false
+          var errorMessage: String? = null
+
+          if (firebaseUser != null) {
+              // c. If an authenticated user exists, read exactly users/{auth.currentUser.uid}
+              val uid = firebaseUser.uid
+              try {
+                  val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                  val doc = dbInstance.collection("users").document(uid).get().await()
+                  
+                  // d. Confirm that the document exists
+                  if (doc.exists()) {
+                      // e. Confirm isActive === true
+                      val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
+                      if (isActive) {
+                          // f. Read and validate the role
+                          val role = doc.getString("role") ?: "CUSTOMER"
+                          val phone = doc.getString("phone") ?: ""
+                          
+                          val user = User(
+                              phone = phone,
+                              name = doc.getString("name") ?: "",
+                              email = doc.getString("email") ?: "",
+                              address = doc.getString("address") ?: "",
+                              lat = doc.getDouble("lat") ?: 11.5812,
+                              lng = doc.getDouble("lng") ?: 77.8465,
+                              isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                              role = role,
+                              vehicleNo = doc.getString("vehicleNo") ?: "",
+                              isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                              salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                              salaryRate = doc.getDouble("salaryRate") ?: 0.0
+                          )
+                          
+                          // Save/update locally
+                          lyoRepository.userDao.insertUser(user)
+                          lyoRepository.currentUser.value = user
+                          recoverySuccessful = true
+                          
+                          // g. Route the user to the correct dashboard based on role
+                          currentRoute = when (role) {
+                              "ADMIN" -> "ADMIN_DASHBOARD"
+                              "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
+                              "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                              else -> "CUSTOMER_DASHBOARD"
+                          }
+                          android.util.Log.d("MainActivity", "Successfully recovered user session for UID: $uid, Role: $role")
+                          
+                          // Trigger background retry for any pending local synced orders
+                          CoroutineScope(Dispatchers.IO).launch {
+                              try {
+                                  lyoRepository.retryPendingSyncs()
+                              } catch (syncEx: Exception) {
+                                  android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
+                              }
+                          }
+                      } else {
+                          errorMessage = "Your account is inactive. Please contact the administrator. (உங்கள் கணக்கு முடக்கப்பட்டுள்ளது!)"
+                      }
+                  } else {
+                      // i. Show specific error when the profile document is genuinely missing
+                      errorMessage = "Your user profile is missing in the system. (உங்கள் சுயவிவரம் காணப்படவில்லை!)"
+                  }
+              } catch (e: Exception) {
+                  // h. Do not log out the user merely because Firestore temporarily fails due to network, cache, or timeout
+                  android.util.Log.e("MainActivity", "Temporary Firestore error during session recovery: ${e.message}. Falling back to local cache.")
+                  
+                  val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
+                  if (cachedUser != null) {
+                      lyoRepository.currentUser.value = cachedUser
+                      recoverySuccessful = true
+                      currentRoute = when (cachedUser.role) {
+                          "ADMIN" -> "ADMIN_DASHBOARD"
+                          "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
+                          "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                          else -> "CUSTOMER_DASHBOARD"
+                      }
+                  } else {
+                      errorMessage = "Network or cache error: Could not verify user profile. (${e.localizedMessage})"
+                  }
+              }
+              
+              if (!recoverySuccessful) {
+                  if (errorMessage != null) {
+                      android.widget.Toast.makeText(applicationContext, errorMessage, android.widget.Toast.LENGTH_LONG).show()
+                  }
+                  auth.signOut()
+                  sharedPrefs.edit()
+                      .remove("logged_user_phone")
+                      .remove("logged_user_password_hash")
+                      .apply()
+                  lyoRepository.currentUser.value = null
+                  currentRoute = "CUSTOMER_DASHBOARD"
+              }
+          } else {
+              // b. If there is no authenticated user, show the customer dashboard by default
+              sharedPrefs.edit()
+                  .remove("logged_user_phone")
+                  .remove("logged_user_password_hash")
+                  .apply()
+              lyoRepository.currentUser.value = null
+              currentRoute = "CUSTOMER_DASHBOARD"
+          }
+
+          // Ensure the splash screen stays visible for at least 450ms total for visual elegance and high speed
           val elapsed = System.currentTimeMillis() - startTime
-          val remainingDelay = (2000L - elapsed).coerceAtLeast(0L)
+          val remainingDelay = (450L - elapsed).coerceAtLeast(0L)
           delay(remainingDelay)
 
-          // Navigate directly
-          val currentUserVal = lyoRepository.currentUser.value
-          if (currentUserVal != null) {
-            currentRoute = when (currentUserVal.role) {
-              "ADMIN" -> "ADMIN_DASHBOARD"
-              "DELIVERY" -> "DELIVERY_DASHBOARD"
-              else -> "CUSTOMER_DASHBOARD"
-            }
-          } else {
-            // Only fall back to CUSTOMER_DASHBOARD if we didn't redirect to LOGIN due to failed session recovery
-            if (currentRoute == "SPLASH") {
-              currentRoute = "CUSTOMER_DASHBOARD"
-            }
+          // Navigate directly if not already set by session recovery
+          if (currentRoute == "SPLASH") {
+              val currentUserVal = lyoRepository.currentUser.value
+              if (currentUserVal != null) {
+                  currentRoute = when (currentUserVal.role) {
+                      "ADMIN" -> "ADMIN_DASHBOARD"
+                      "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
+                      "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                      else -> "CUSTOMER_DASHBOARD"
+                  }
+              } else {
+                  currentRoute = "CUSTOMER_DASHBOARD"
+              }
           }
         }
 
@@ -391,6 +456,9 @@ class MainActivity : ComponentActivity() {
                     sharedPrefs.edit().remove("logged_user_phone").apply()
                     authViewModel.logout()
                     currentRoute = "LOGIN"
+                  },
+                  onNavigateToAdmin = {
+                    currentRoute = "ADMIN_DASHBOARD"
                   }
                 )
               }
@@ -476,6 +544,9 @@ class MainActivity : ComponentActivity() {
                     sharedPrefs.edit().remove("logged_user_phone").apply()
                     authViewModel.logout()
                     currentRoute = "LOGIN"
+                  },
+                  onSwitchToCustomer = {
+                    currentRoute = "CUSTOMER_DASHBOARD"
                   }
                 )
               }

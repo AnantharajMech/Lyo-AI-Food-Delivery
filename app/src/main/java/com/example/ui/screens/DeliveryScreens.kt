@@ -455,18 +455,23 @@ fun DeliveryPartnerDashboardScreen(
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
+                                        .heightIn(min = 44.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(if (isSelected) btnColor.copy(alpha = 0.25f) else Color(0x0FFFFFFF))
                                         .border(1.dp, if (isSelected) btnColor else Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
                                         .clickable { activeHudTheme = code }
-                                        .padding(vertical = 8.dp),
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = label,
                                         color = if (isSelected) btnColor else Color.White.copy(alpha = 0.7f),
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                        lineHeight = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -497,20 +502,23 @@ fun DeliveryPartnerDashboardScreen(
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
+                                        .heightIn(min = 44.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(if (isSelected) themeColor.copy(alpha = 0.15f) else Color(0x0FFFFFFF))
                                         .border(1.dp, if (isSelected) themeColor else Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
                                         .clickable { activeVehicleClass = code }
-                                        .padding(vertical = 8.dp),
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = label,
                                         color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-                                        fontSize = 9.sp,
+                                        fontSize = 10.sp,
                                         lineHeight = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -1619,18 +1627,21 @@ fun DeliveryJobCard(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Quick suggestion chips with horizontal scroll and maxLines=1 to prevent wrapping
+                        // Quick suggestion chips with equal weight and min-height to prevent wrapping/overflow
                         val suggestions = listOf("வழியில் வருகிறேன் 🏍️", "5 நிமிடம் ⏳", "கடையில் காத்திருக்கிறேன் 🏪")
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             suggestions.forEach { suggestion ->
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(Color(0x3338BDF8))
+                                        .border(1.dp, Color.Transparent, RoundedCornerShape(8.dp))
                                         .clickable {
                                             scope.launch {
                                                 com.example.data.repository.LyoFirebaseHelper.sendOrderMessage(
@@ -1642,14 +1653,18 @@ fun DeliveryJobCard(
                                                 android.widget.Toast.makeText(context, "செய்தி அனுப்பப்பட்டது", android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                         }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = suggestion, 
-                                        fontSize = 11.sp, 
+                                        fontSize = 10.sp, 
                                         color = Color(0xFF38BDF8), 
                                         fontWeight = FontWeight.Bold,
-                                        maxLines = 1
+                                        lineHeight = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -1779,10 +1794,11 @@ fun DeliveryJobCard(
                         
                         // ETA calculation: 1km takes ~2.5 mins
                         val etaMinutes = (distanceToCust * 2.5).toInt().coerceAtLeast(1)
-                        // Simple timezone/formatted string
-                        val etaTime = java.time.LocalTime.now().plusMinutes(etaMinutes.toLong())
-                        val formatter = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
-                        val etaString = etaTime.format(formatter)
+                        // Simple timezone/formatted string compatible with API 24
+                        val calendar = java.util.Calendar.getInstance()
+                        calendar.add(java.util.Calendar.MINUTE, etaMinutes)
+                        val formatter = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
+                        val etaString = formatter.format(calendar.time)
 
                         Column(
                             modifier = Modifier
