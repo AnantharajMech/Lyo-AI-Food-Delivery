@@ -17,6 +17,9 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 object LyoNotificationHelper {
 
@@ -41,8 +44,45 @@ object LyoNotificationHelper {
 
     fun showPushNotification(context: Context, title: String, message: String) {
         try {
+            // Save to local Room database for in-app history (Notification Center)
+            try {
+                val db = com.example.data.database.AppDatabase.getInstance(context)
+                // Generate a unique ID based on the title and message hash to prevent duplicate notifications
+                val hashId = "notif_" + (title + message).hashCode().toString()
+                val notificationItem = com.example.data.database.LyoNotification(
+                    id = hashId,
+                    title = title,
+                    message = message,
+                    timestamp = System.currentTimeMillis(),
+                    isRead = false
+                )
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        db.promoBannerDao.insertNotification(notificationItem)
+                    } catch (dbEx: Exception) {
+                        android.util.Log.e("LyoNotification", "Error saving notification to DB: ${dbEx.message}")
+                    }
+                }
+            } catch (dbEx: Exception) {
+                android.util.Log.e("LyoNotification", "Failed to access DB: ${dbEx.message}")
+            }
+
             createNotificationChannel(context)
             
+            // Intercept and log test notifications
+            try {
+                val regex = Regex("#(\\d+)")
+                val match = regex.find(title + " " + message)
+                if (match != null) {
+                    val orderId = match.groupValues[1].toLongOrNull()
+                    if (orderId != null) {
+                        com.example.data.repository.LyoLiveTestTracker.logNotification(orderId, title, message, "PASS")
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("LyoNotification", "Error logging test notification: ${e.message}")
+            }
+
             val intent = Intent(context, com.example.MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
@@ -98,117 +138,138 @@ object LyoNotificationHelper {
         }
     }
 
-    fun generateOrderPdfAndShare(context: Context, order: Order, items: List<OrderItem>) {
+    fun generateOrderPdfAndShare(
+        context: Context,
+        order: Order,
+        items: List<OrderItem>,
+        customerName: String,
+        customerPhone: String,
+        customerAddress: String
+    ) {
         try {
+            val canvasWidth = 380f
+            val canvasHeight = (500f + (items.size * 25f) + (if (order.couponDiscount > 0) 25f else 0f)).coerceAtLeast(620f)
             val pdfDocument = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 dimensions
+            val pageInfo = PdfDocument.PageInfo.Builder(canvasWidth.toInt(), canvasHeight.toInt(), 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas: Canvas = page.canvas
 
             val paint = Paint()
             val textPaint = Paint().apply {
-                color = Color.BLACK
-                textSize = 12f
+                color = Color.rgb(15, 23, 42) // Slate 900
+                textSize = 9.5f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             }
             val titlePaint = Paint().apply {
                 color = Color.rgb(249, 115, 22) // Lyo Orange #F97316
-                textSize = 24f
+                textSize = 15f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val subTitlePaint = Paint().apply {
                 color = Color.rgb(30, 41, 59) // Slate 800
-                textSize = 14f
+                textSize = 10.5f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
+            val headerPaint = Paint().apply {
+                color = Color.rgb(15, 23, 42)
+                textSize = 9.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val linePaint = Paint().apply {
+                color = Color.rgb(226, 232, 240) // Slate 200
+                strokeWidth = 1f
+                style = Paint.Style.STROKE
+            }
 
-            var y = 50f
+            var y = 35f
 
-            // 1. Header Banner
-            canvas.drawRect(0f, 0f, 595f, 100f, Paint().apply { color = Color.rgb(241, 245, 249) })
-            canvas.drawText("LYO FOODS - DIGITAL INVOICE RECEIPT", 40f, 60f, titlePaint)
-            y = 130f
+            // 1. Header
+            canvas.drawText("Lyo AI Food Delivery", 20f, y, titlePaint)
+            y += 14f
+            canvas.drawText("PREMIUM INVOICE RECEIPT", 20f, y, Paint().apply { color = Color.rgb(100, 116, 139); textSize = 8f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
+            y += 12f
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, Paint().apply { color = Color.rgb(249, 115, 22); strokeWidth = 1.5f })
+            y += 20f
 
             val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
             val formattedDate = sdf.format(Date(order.timestamp))
 
             // 2. Order Metadata Info
-            canvas.drawText("Order ID: #LYO-ORDER-${order.id}", 40f, y, subTitlePaint)
-            y += 20f
-            canvas.drawText("Date: $formattedDate", 40f, y, textPaint)
-            y += 20f
-            canvas.drawText("Status: ${order.status}", 40f, y, textPaint)
-            y += 30f
-
-            // 3. Customer & Address Box
-            canvas.drawRect(40f, y, 555f, y + 80f, Paint().apply { color = Color.rgb(248, 250, 252); style = Paint.Style.FILL })
-            canvas.drawRect(40f, y, 555f, y + 80f, Paint().apply { color = Color.rgb(226, 232, 240); style = Paint.Style.STROKE; strokeWidth = 1f })
+            canvas.drawText("Bill No: #LYO-ORDER-${order.id}", 20f, y, subTitlePaint)
+            y += 16f
+            canvas.drawText("Date & Time: $formattedDate", 20f, y, textPaint)
+            y += 16f
+            canvas.drawText("Customer: $customerName", 20f, y, textPaint)
+            y += 16f
+            canvas.drawText("Phone: $customerPhone", 20f, y, textPaint)
+            y += 16f
             
-            val boxY = y + 20f
-            canvas.drawText("CUSTOMER BILLING INFO:", 50f, boxY, Paint().apply { color = Color.BLACK; textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
-            canvas.drawText("Name: Lyo Customer", 50f, boxY + 16f, textPaint)
-            canvas.drawText("Phone: ${order.userId}", 50f, boxY + 32f, textPaint)
-            canvas.drawText("Address: Coordinates (${order.customerLat}, ${order.customerLng})", 50f, boxY + 48f, textPaint)
-            y += 100f
+            // Wrap address to avoid clipping
+            canvas.drawText("Delivery Address:", 20f, y, textPaint)
+            y += 14f
+            val addressLines = customerAddress.chunked(45)
+            for (line in addressLines) {
+                canvas.drawText(line, 25f, y, Paint().apply { color = Color.rgb(71, 85, 105); textSize = 9f })
+                y += 14f
+            }
+            y += 10f
 
-            // 4. Products Table Headers
-            canvas.drawText("ITEM DESCRIPTION", 40f, y, Paint().apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
-            canvas.drawText("QTY", 400f, y, Paint().apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
-            canvas.drawText("PRICE", 480f, y, Paint().apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
-            
-            y += 5f
-            canvas.drawLine(40f, y, 555f, y, Paint().apply { color = Color.GRAY; strokeWidth = 1f })
-            y += 20f
+            // 3. Products Table Headers
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 15f
+            canvas.drawText("QTY", 20f, y, headerPaint)
+            canvas.drawText("ITEM DESCRIPTION", 60f, y, headerPaint)
+            canvas.drawText("PRICE", canvasWidth - 65f, y, headerPaint)
+            y += 6f
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 18f
 
-            // 5. Products List
+            // 4. Products List
             if (items.isEmpty()) {
-                canvas.drawText("Custom Lyo Foods Delicacy Platter", 40f, y, textPaint)
-                canvas.drawText("1", 400f, y, textPaint)
-                canvas.drawText("₹${order.subtotal.toInt()}", 480f, y, textPaint)
+                canvas.drawText("1", 20f, y, textPaint)
+                canvas.drawText("Standard Culinary Feast Platter", 60f, y, textPaint)
+                canvas.drawText("₹${order.subtotal.toInt()}", canvasWidth - 65f, y, textPaint)
                 y += 20f
             } else {
                 for (item in items) {
-                    canvas.drawText(item.nameEn, 40f, y, textPaint)
-                    canvas.drawText(item.quantity.toString(), 400f, y, textPaint)
-                    canvas.drawText("₹${(item.price * item.quantity).toInt()}", 480f, y, textPaint)
+                    canvas.drawText(item.quantity.toString(), 20f, y, textPaint)
+                    val displayName = item.nameEn
+                    if (displayName.length > 25) {
+                        canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, textPaint)
+                    } else {
+                        canvas.drawText(displayName, 60f, y, textPaint)
+                    }
+                    canvas.drawText("₹${(item.price * item.quantity).toInt()}", canvasWidth - 65f, y, textPaint)
                     y += 20f
                 }
             }
 
-            y += 10f
-            canvas.drawLine(40f, y, 555f, y, Paint().apply { color = Color.LTGRAY; strokeWidth = 1f })
-            y += 20f
-
-            // 6. Subtotals Block
-            canvas.drawText("Subtotal:", 380f, y, textPaint)
-            canvas.drawText("₹${order.subtotal.toInt()}", 480f, y, textPaint)
+            // 5. Subtotals Block
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
             y += 18f
-            canvas.drawText("Delivery Fee:", 380f, y, textPaint)
-            canvas.drawText("₹${order.deliveryFee.toInt()}", 480f, y, textPaint)
-            y += 18f
-            canvas.drawText("Tip added:", 380f, y, textPaint)
-            canvas.drawText("₹${order.tipAmount.toInt()}", 480f, y, textPaint)
-            y += 18f
+            canvas.drawText("Subtotal:", 180f, y, textPaint)
+            canvas.drawText("₹${order.subtotal.toInt()}", canvasWidth - 65f, y, textPaint)
+            y += 15f
+            canvas.drawText("Delivery Fee:", 180f, y, textPaint)
+            canvas.drawText("₹${order.deliveryFee.toInt()}", canvasWidth - 65f, y, textPaint)
+            y += 15f
             if (order.couponDiscount > 0) {
-                canvas.drawText("Discount Code applied:", 380f, y, Paint().apply { color = Color.rgb(34, 197, 94); textSize = 11f })
-                canvas.drawText("-₹${order.couponDiscount.toInt()}", 480f, y, Paint().apply { color = Color.rgb(34, 197, 94); strokeWidth = 1f })
-                y += 18f
+                canvas.drawText("Discounts:", 180f, y, Paint().apply { color = Color.rgb(22, 163, 74); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
+                canvas.drawText("-₹${order.couponDiscount.toInt()}", canvasWidth - 65f, y, Paint().apply { color = Color.rgb(22, 163, 74); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
+                y += 15f
             }
             
-            canvas.drawLine(380f, y, 555f, y, Paint().apply { color = Color.GRAY; strokeWidth = 1f })
-            y += 20f
+            canvas.drawLine(180f, y, canvasWidth - 20f, y, linePaint)
+            y += 18f
 
-            // 7. Grande Total Summary
-            val grandPaint = Paint().apply {
-                color = Color.BLACK
-                textSize = 14f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            }
-            canvas.drawText("Total Payable:", 380f, y, grandPaint)
-            canvas.drawText("₹${order.totalAmount.toInt()}", 480f, y, grandPaint)
+            // 6. Grand Total
+            canvas.drawText("Grand Total:", 180f, y, headerPaint)
+            canvas.drawText("₹${order.totalAmount.toInt()}", canvasWidth - 65f, y, headerPaint)
+            y += 22f
 
-            y += 40f
-            canvas.drawText("Secure Delivery OTP Authorization Code: ${order.otpCode}", 40f, y, grandPaint)
+            canvas.drawText("Payment Method: Cash on Delivery", 20f, y, Paint().apply { color = Color.rgb(15, 23, 42); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
+            y += 22f
+            canvas.drawText("Thank you for ordering with Lyo AI Food Delivery! 🙏", 20f, y, Paint().apply { color = Color.rgb(71, 85, 105); textSize = 8.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC) })
 
             pdfDocument.finishPage(page)
 
@@ -222,40 +283,35 @@ object LyoNotificationHelper {
 
             // Build Message Text
             val textBuilder = StringBuilder()
-            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("📝 *LYO FOODS — DIGITAL INVOICE RECEIPT*\n")
-            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("🧾 *ஆர்டர் ஐடி (Order ID):* #LYO-ORDER-${order.id}\n")
-            textBuilder.append("📅 *தேதி/நேரம் (Date):* $formattedDate\n")
-            textBuilder.append("👤 *வாடிக்கையாளர் (Customer):* Lyo Customer\n")
-            textBuilder.append("📍 *இருப்பிடம் (Coordinates):* (${order.customerLat}, ${order.customerLng})\n")
-            textBuilder.append("📞 *தொடர்புக்கு (Contact):* ${order.userId}\n")
-            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("🛍️ *உணவு விவரங்கள் (Items Ordered):*\n")
-            if (items.isEmpty()) {
-                textBuilder.append("   • Standard Lyo Deluxe Platter x1\n")
+            val cleanItemsStr = if (items.isEmpty()) {
+                "   • 1 × Standard Platter — ₹${order.subtotal.toInt()}"
             } else {
-                for (item in items) {
-                    textBuilder.append("   • ${item.nameEn} (x${item.quantity}) — ₹${(item.price * item.quantity).toInt()}\n")
-                }
+                items.joinToString("\n") { "   • ${it.quantity} × ${it.nameEn} — ₹${(it.price * it.quantity).toInt()}" }
             }
+            val discountText = if (order.couponDiscount > 0) "\n🎁 *Discounts:* -₹${order.couponDiscount.toInt()}" else ""
+            
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("💵 *கட்டண விவரங்கள் (Bill Summary):*\n")
-            textBuilder.append("   • உணவுத் தொகை (Subtotal): ₹${order.subtotal.toInt()}\n")
-            textBuilder.append("   • விநியோகக் கட்டணம் (Delivery): ₹${order.deliveryFee.toInt()}\n")
-            textBuilder.append("   • கூடுதல் டிப் (Driver Tip): ₹${order.tipAmount.toInt()}\n")
-            if (order.couponDiscount > 0) {
-                textBuilder.append("   • தள்ளுபடி (Coupon Savings): -₹${order.couponDiscount.toInt()}\n")
-            }
+            textBuilder.append("🛍️  *LYO AI FOOD DELIVERY — INVOICE*\n")
+            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
+            textBuilder.append("🆔 *Order ID:* #${order.id}\n")
+            textBuilder.append("📅 *Order Date & Time:* $formattedDate\n")
+            textBuilder.append("👤 *Customer Name:* $customerName\n")
+            textBuilder.append("📱 *Customer Phone:* $customerPhone\n")
+            textBuilder.append("📍 *Delivery Address:* $customerAddress\n")
+            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
+            textBuilder.append("*Ordered Items:*\n")
+            textBuilder.append(cleanItemsStr).append("\n")
+            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
+            textBuilder.append("💵 *Payment Details:*\n")
+            textBuilder.append("   • Subtotal: ₹${order.subtotal.toInt()}\n")
+            textBuilder.append("   • Delivery Fee: ₹${order.deliveryFee.toInt()}$discountText\n")
             textBuilder.append("---------------------------------------\n")
-            textBuilder.append("💰 *மொத்தத் தொகை (Grand Total):* *₹${order.totalAmount.toInt()}*\n")
-            textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("🛵 *விநியோக நபர் (Rider):* Live Tracker Rider\n")
-            textBuilder.append("🔑 *டெலிவரி ஓடிபி (Delivery OTP):* *${order.otpCode}*\n")
+            textBuilder.append("💰 *Grand Total:* *₹${order.totalAmount.toInt()}*\n")
+            textBuilder.append("💳 *Payment Method:* Cash on Delivery\n")
+            textBuilder.append("🔑 *Delivery OTP:* *${order.otpCode}*\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-            textBuilder.append("எங்களது சேவையைப் பயன்படுத்தியதற்கு நன்றி! 🙏 — *Lyo Foods*\n")
+            textBuilder.append("Thank you for choosing Lyo AI Food Delivery! 🙏\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━")
-
             val messageText = textBuilder.toString()
 
             val authority = "com.example.fileprovider"
@@ -265,7 +321,7 @@ object LyoNotificationHelper {
                 type = "application/pdf"
                 putExtra(Intent.EXTRA_STREAM, fileUri)
                 putExtra(Intent.EXTRA_TEXT, messageText)
-                putExtra(Intent.EXTRA_SUBJECT, "Lyo Order Invoice #${order.id}")
+                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Food Delivery Invoice #${order.id}")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 `package` = "com.whatsapp"
             }
@@ -280,6 +336,265 @@ object LyoNotificationHelper {
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "Failed to compile Invoice PDF: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun generateKitchenKotPdfAndShare(context: Context, order: Order, items: List<OrderItem>, customerName: String) {
+        try {
+            val canvasWidth = 380f
+            val canvasHeight = (420f + (items.size * 35f)).coerceAtLeast(550f)
+            val pdfDocument = PdfDocument()
+            val pageInfo = PdfDocument.PageInfo.Builder(canvasWidth.toInt(), canvasHeight.toInt(), 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas: Canvas = page.canvas
+
+            val linePaint = Paint().apply {
+                color = Color.BLACK
+                strokeWidth = 2f
+                style = Paint.Style.STROKE
+            }
+            val titlePaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 16f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val boldLargePaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 13f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val boldTextPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 10.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val normalTextPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 10f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            }
+            val italicTextPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 9f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+            }
+
+            var y = 35f
+
+            // 1. Header
+            canvas.drawText("Lyo AI Food Delivery", 20f, y, titlePaint)
+            y += 14f
+            canvas.drawText("KITCHEN ORDER TICKET (KOT)", 20f, y, boldTextPaint)
+            y += 10f
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 22f
+
+            // 2. Metadata
+            val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+            val formattedDate = sdf.format(Date(order.timestamp))
+
+            canvas.drawText("STORE: ${order.vendorName}", 20f, y, boldTextPaint)
+            y += 18f
+            canvas.drawText("ORDER ID: #LYO-ORDER-${order.id}", 20f, y, boldTextPaint)
+            y += 18f
+            canvas.drawText("TIME: $formattedDate", 20f, y, normalTextPaint)
+            y += 20f
+
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 22f
+
+            // 3. Products Header
+            canvas.drawText("QTY", 20f, y, boldLargePaint)
+            canvas.drawText("ITEM NAME", 60f, y, boldLargePaint)
+            y += 8f
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 22f
+
+            // 4. Products List
+            var totalItemsCount = 0
+            if (items.isEmpty()) {
+                canvas.drawText("1x", 20f, y, boldLargePaint)
+                canvas.drawText("Standard Culinary Platter", 60f, y, boldLargePaint)
+                y += 16f
+                canvas.drawText("Notes: Fresh Preparation", 60f, y, italicTextPaint)
+                y += 22f
+                totalItemsCount = 1
+            } else {
+                for (item in items) {
+                    canvas.drawText("${item.quantity}x", 20f, y, boldLargePaint)
+                    val displayName = item.nameEn
+                    if (displayName.length > 25) {
+                        canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, boldLargePaint)
+                    } else {
+                        canvas.drawText(displayName, 60f, y, boldLargePaint)
+                    }
+                    y += 16f
+                    canvas.drawText("Notes: Fresh Preparation", 60f, y, italicTextPaint)
+                    y += 22f
+                    totalItemsCount += item.quantity
+                }
+            }
+
+            canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)
+            y += 22f
+
+            // 5. Ticket Summary
+            canvas.drawText("TOTAL ITEMS: $totalItemsCount", 20f, y, boldLargePaint)
+            y += 20f
+            canvas.drawText("KITCHEN COPY - DO NOT DELIVER", 20f, y, Paint().apply { color = Color.BLACK; textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
+
+            pdfDocument.finishPage(page)
+
+            // Save PDF
+            val file = File(context.cacheDir, "lyo_kot_${order.id}.pdf")
+            val outputStream = FileOutputStream(file)
+            pdfDocument.writeTo(outputStream)
+            outputStream.flush()
+            outputStream.close()
+            pdfDocument.close()
+
+            val authority = "com.example.fileprovider"
+            val fileUri: Uri = FileProvider.getUriForFile(context, authority, file)
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, fileUri)
+                putExtra(Intent.EXTRA_SUBJECT, "Lyo KOT Ticket #${order.id}")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            context.startActivity(Intent.createChooser(shareIntent, "Print/Share Lyo KOT via"))
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Failed to compile KOT PDF: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun generateTestReportPdfAndShare(context: Context, reports: List<com.example.data.repository.TestOrderReport>) {
+        try {
+            val pdfDocument = PdfDocument()
+            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas: Canvas = page.canvas
+
+            val paint = Paint()
+            val textPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 9f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            }
+            val titlePaint = Paint().apply {
+                color = Color.rgb(249, 115, 22)
+                textSize = 18f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val subTitlePaint = Paint().apply {
+                color = Color.rgb(30, 41, 59)
+                textSize = 12f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val headerPaint = Paint().apply {
+                color = Color.rgb(51, 65, 85)
+                textSize = 10f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+
+            var y = 40f
+
+            canvas.drawRect(0f, 0f, 595f, 80f, Paint().apply { color = Color.rgb(241, 245, 249) })
+            canvas.drawText("Lyo AI Food Delivery - System Test Report", 40f, 45f, titlePaint)
+            canvas.drawText("5-Customer Concurrent Multi-Device Live Order Flow", 40f, 65f, Paint().apply { color = Color.GRAY; textSize = 11f })
+            y = 110f
+
+            val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+            sdf.timeZone = java.util.TimeZone.getTimeZone("GMT+5:30")
+            canvas.drawText("Report Timestamp: ${sdf.format(Date())} IST", 40f, y, textPaint)
+            y += 20f
+
+            val headers = listOf("Cust", "Order ID", "Shop", "Rider", "Placement Time", "Status", "A B C D E F")
+            val cols = listOf(40f, 80f, 150f, 240f, 320f, 440f, 500f)
+
+            canvas.drawLine(40f, y, 555f, y, Paint().apply { color = Color.GRAY; strokeWidth = 1f })
+            y += 15f
+            for (i in headers.indices) {
+                canvas.drawText(headers[i], cols[i], y, headerPaint)
+            }
+            y += 5f
+            canvas.drawLine(40f, y, 555f, y, Paint().apply { color = Color.GRAY; strokeWidth = 1f })
+            y += 20f
+
+            for (i in reports.indices) {
+                val rep = reports[i]
+                canvas.drawText(rep.customerName, cols[0], y, textPaint)
+                canvas.drawText(if (rep.orderId > 0L) "#${rep.orderId}" else "Pending", cols[1], y, textPaint)
+                canvas.drawText(rep.shopName, cols[2], y, textPaint)
+                canvas.drawText(rep.riderName, cols[3], y, textPaint)
+                canvas.drawText(rep.placementTimeStr.substringBefore(" IST"), cols[4], y, textPaint)
+                
+                val statusPaint = Paint().apply {
+                    color = when (rep.finalStatus) {
+                        "PASS" -> Color.rgb(22, 163, 74)
+                        "IN PROGRESS" -> Color.rgb(217, 119, 6)
+                        else -> Color.rgb(100, 116, 139)
+                    }
+                    textSize = 9f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                canvas.drawText(rep.finalStatus, cols[5], y, statusPaint)
+
+                val chk = rep.checklist
+                val chkStr = "${chk["A"]} ${chk["B"]} ${chk["C"]} ${chk["D"]} ${chk["E"]} ${chk["F"]}"
+                val processedChkStr = chkStr.replace("NOT TESTED", "N").replace("PASS", "P").replace("IN PROGRESS", "I")
+                canvas.drawText(processedChkStr, cols[6], y, textPaint)
+
+                y += 20f
+            }
+
+            y += 10f
+            canvas.drawLine(40f, y, 555f, y, Paint().apply { color = Color.LTGRAY; strokeWidth = 1f })
+            y += 30f
+
+            for (i in reports.indices) {
+                val rep = reports[i]
+                if (rep.orderId == 0L) continue
+
+                canvas.drawText("Order Slot #${i + 1}: ${rep.customerName} (${rep.customerPhone})", 40f, y, subTitlePaint)
+                y += 15f
+                canvas.drawText("Order ID: #${rep.orderId} | Store: ${rep.shopName} | Items: ${rep.itemsText} | Total: ₹${rep.price.toInt()}", 40f, y, textPaint)
+                y += 12f
+                canvas.drawText("Acceptance: ${rep.adminAcceptanceTimeStr} | Rider Assign: ${rep.riderAssignmentTimeStr} | Completed: ${rep.completionTimeStr}", 40f, y, textPaint)
+                y += 12f
+                canvas.drawText("GPS Coordinates: ${rep.gpsCoordinatesLog}", 40f, y, textPaint)
+                y += 12f
+                canvas.drawText("Notifications: ${rep.notificationLogsStr}", 40f, y, textPaint)
+                y += 25f
+
+                if (y > 780f) {
+                    break
+                }
+            }
+
+            pdfDocument.finishPage(page)
+
+            val file = File(context.cacheDir, "lyo_system_test_report.pdf")
+            val outputStream = FileOutputStream(file)
+            pdfDocument.writeTo(outputStream)
+            outputStream.close()
+            pdfDocument.close()
+
+            val authority = "com.example.fileprovider"
+            val uri = FileProvider.getUriForFile(context, authority, file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Food Delivery Live Test Report")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Share Lyo Test Report PDF"))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Error exporting PDF: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }

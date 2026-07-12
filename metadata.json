@@ -1,5 +1,5 @@
 {
-  "name": "Lyo AI",
+  "name": "Lyo AI Food Delivery",
   "description": "Reimagined with advanced color psychology and cognitive design, Lyo AI offers a pristine, trusted, and futuristic food delivery and optimized fleet dispatch experience.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

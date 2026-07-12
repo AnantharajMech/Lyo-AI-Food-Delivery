@@ -42,6 +42,298 @@ import com.example.ui.viewmodels.AdminViewModel
 import kotlinx.coroutines.flow.Flow
 import com.example.data.repository.LyoFirebaseHelper
 import android.util.Log
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.material3.TextFieldColors
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonElevation
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+
+// Overrides for Light Operational Theme (AdminScreens)
+private val LocalTextColor = staticCompositionLocalOf<Color?> { null }
+
+private object AdminThemeColors {
+    val DarkCyanBg = LyoColors.DarkCyanBg
+    val CardSlate = LyoColors.CardSlate
+    val AccentOrange = LyoColors.AccentOrange
+    val AmberYellow = LyoColors.AmberYellow
+    val GlassBorder = LyoColors.GlassBorder
+    val TranslucentSlate = LyoColors.TranslucentSlate
+    val TranslucentBlack = LyoColors.TranslucentBlack
+    val TextPrimary = LyoColors.TextPrimary
+    val TextSecondary = LyoColors.TextSecondary
+    val VegGreen = LyoColors.VegGreen
+    val NonVegRed = LyoColors.NonVegRed
+    val WarningYellow = LyoColors.WarningYellow
+    val LiveCyan = LyoColors.LiveCyan
+}
+
+@Composable
+private fun Color(color: Long): Color {
+    return androidx.compose.ui.graphics.Color(color)
+}
+
+@Composable
+private fun Color(color: Int): Color {
+    return androidx.compose.ui.graphics.Color(color)
+}
+
+@Composable
+private fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+    style: TextStyle = LocalTextStyle.current
+) {
+    val overrideColor = LocalTextColor.current
+    val finalColor = when {
+        overrideColor != null -> overrideColor
+        else -> color
+    }
+    androidx.compose.material3.Text(
+        text = text,
+        modifier = modifier,
+        color = finalColor,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
+
+@Composable
+private fun Text(
+    text: androidx.compose.ui.text.AnnotatedString,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+    style: TextStyle = LocalTextStyle.current
+) {
+    val overrideColor = LocalTextColor.current
+    val finalColor = when {
+        overrideColor != null -> overrideColor
+        else -> color
+    }
+    androidx.compose.material3.Text(
+        text = text,
+        modifier = modifier,
+        color = finalColor,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
+
+@Composable
+private fun Icon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current
+) {
+    val finalTint = tint
+    androidx.compose.material3.Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        tint = finalTint
+    )
+}
+
+@Composable
+private fun Icon(
+    painter: Painter,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current
+) {
+    val finalTint = tint
+    androidx.compose.material3.Icon(
+        painter = painter,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        tint = finalTint
+    )
+}
+
+@Composable
+private fun OutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    prefix: @Composable (() -> Unit)? = null,
+    suffix: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+    singleLine: Boolean = false,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    minLines: Int = 1,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
+) {
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = enabled,
+        readOnly = readOnly,
+        textStyle = textStyle.copy(color = LyoColors.TextPrimary),
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        prefix = prefix,
+        suffix = suffix,
+        supportingText = supportingText,
+        isError = isError,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        singleLine = singleLine,
+        maxLines = maxLines,
+        minLines = minLines,
+        interactionSource = interactionSource,
+        shape = shape,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = LyoColors.TextPrimary,
+            unfocusedTextColor = LyoColors.TextPrimary,
+            focusedBorderColor = LyoColors.AmberYellow,
+            unfocusedBorderColor = LyoColors.GlassBorder,
+            focusedLabelColor = LyoColors.AmberYellow,
+            unfocusedLabelColor = LyoColors.TextSecondary
+        )
+    )
+}
+
+@Composable
+private fun Button(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = ButtonDefaults.shape,
+    colors: ButtonColors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+    elevation: ButtonElevation? = ButtonDefaults.buttonElevation(),
+    border: BorderStroke? = null,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    content: @Composable RowScope.() -> Unit
+) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = shape,
+        colors = colors,
+        elevation = elevation,
+        border = border,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource
+    ) {
+        CompositionLocalProvider(LocalTextColor provides Color.White) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun TextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = ButtonDefaults.textShape,
+    colors: ButtonColors = ButtonDefaults.textButtonColors(contentColor = LyoColors.AccentOrange),
+    elevation: ButtonElevation? = null,
+    border: BorderStroke? = null,
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    content: @Composable RowScope.() -> Unit
+) {
+    androidx.compose.material3.TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = shape,
+        colors = colors,
+        elevation = elevation,
+        border = border,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource
+    ) {
+        CompositionLocalProvider(LocalTextColor provides LyoColors.AccentOrange) {
+            content()
+        }
+    }
+}
 
 @Composable
 fun AdminDashboardScreen(
@@ -69,6 +361,9 @@ fun AdminDashboardScreen(
     var dispatchOrderItemsState by remember { mutableStateOf<List<com.example.data.database.OrderItem>>(emptyList()) }
     var dispatchRiderNameState by remember { mutableStateOf("") }
     var dispatchRiderPhoneState by remember { mutableStateOf("") }
+    var dispatchCustomerNameState by remember { mutableStateOf("") }
+    var dispatchCustomerPhoneState by remember { mutableStateOf("") }
+    var dispatchCustomerAddressState by remember { mutableStateOf("") }
     var confirmRiderToAssign by remember { mutableStateOf<com.example.data.database.User?>(null) }
     var confirmStatusChangeOrder by remember { mutableStateOf<Pair<com.example.data.database.Order, String>?>(null) }
 
@@ -78,6 +373,7 @@ fun AdminDashboardScreen(
             "ACCEPTED" -> "ஏற்கப்பட்டது (ACCEPTED)"
             "PREPARING" -> "சமையலறையில் தயாரிக்கப்படுகிறது (PREPARING)"
             "READY_FOR_PICKUP" -> "விநியோகிக்க தயாராக உள்ளது (READY FOR PICKUP)"
+            "CANCELLED" -> "ரத்து செய்யப்பட்டது (CANCELLED)"
             else -> status
         }
         AlertDialog(
@@ -174,6 +470,46 @@ fun AdminDashboardScreen(
         Triple("Magudanchavadi High Road, Salem", 11.5801, 77.8490)
     )
 
+    var showLogoutConfirmation by remember { mutableStateOf(false) }
+
+    if (showLogoutConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirmation = false },
+            title = {
+                androidx.compose.material3.Text(
+                    text = "வெளியேறவும் (Logout Confirmation)",
+                    color = Color(0xFF172033),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                androidx.compose.material3.Text(
+                    text = "நிர்வாகி பேனலில் இருந்து வெளியேற விரும்புகிறீர்களா?\n\nAre you sure you want to log out from the Admin Panel?",
+                    color = Color(0xFF64748B),
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutConfirmation = false
+                        onLogoutClick()
+                        android.widget.Toast.makeText(context, "Logged out successfully", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    androidx.compose.material3.Text("YES, LOGOUT", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutConfirmation = false }) {
+                    androidx.compose.material3.Text("CANCEL", color = Color(0xFF64748B), fontSize = 13.sp)
+                }
+            },
+            containerColor = Color.White
+        )
+    }
+
     LyoBackground {
         Column(
             modifier = Modifier
@@ -185,47 +521,86 @@ fun AdminDashboardScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp, 12.dp),
+                    .padding(20.dp, 12.dp)
+                    .background(LyoColors.CardSlate, RoundedCornerShape(12.dp))
+                    .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(12.dp))
+                    .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "CONSOLE PORTAL",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
-                        color = LyoColors.AccentOrange,
-                        letterSpacing = 1.5.sp
-                    )
-                    Text(
-                        text = "Lyo Supply Administration",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                }
-
-                if (onSwitchToCustomer != null) {
-                    IconButton(
-                        onClick = onSwitchToCustomer,
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Lyo AI Food Delivery Custom Logo Icon / Avatar
+                    Box(
                         modifier = Modifier
-                            .padding(end = 8.dp)
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color(0x1AFFFFFF))
+                            .background(LyoColors.VegGreen),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Store, contentDescription = "Storefront", tint = LyoColors.AmberYellow, modifier = Modifier.size(18.dp))
+                        androidx.compose.material3.Text(
+                            text = "Lyo",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        androidx.compose.material3.Text(
+                            text = "Lyo AI Food Delivery",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = LyoColors.TextPrimary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Text(
+                                text = "Admin Panel",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LyoColors.TextSecondary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            // Online Status Dot
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(LyoColors.VegGreen)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            androidx.compose.material3.Text(
+                                text = "ONLINE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = LyoColors.VegGreen
+                            )
+                        }
                     }
                 }
 
-                IconButton(
-                    onClick = onLogoutClick,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x1AFFFFFF))
-                ) {
-                    Icon(Icons.Filled.Logout, contentDescription = "logout", tint = Color.White, modifier = Modifier.size(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onSwitchToCustomer != null) {
+                        IconButton(
+                            onClick = onSwitchToCustomer,
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(LyoColors.CardSlate)
+                        ) {
+                            Icon(Icons.Filled.Store, contentDescription = "Storefront", tint = LyoColors.AmberYellow, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { showLogoutConfirmation = true },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(LyoColors.CardSlate)
+                    ) {
+                        Icon(Icons.Filled.Logout, contentDescription = "logout", tint = LyoColors.NonVegRed, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
 
@@ -234,12 +609,13 @@ fun AdminDashboardScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0x1FFFFFFF))
+                    .background(LyoColors.CardSlate)
                     .padding(4.dp)
                     .horizontalScroll(rememberScrollState())
             ) {
                 val tabs = mutableListOf(
                     "ANALYTICS" to "Analytics",
+                    "LIVE_TEST" to "Live Test 🧪",
                     "SMART_MENU" to "Smart Menu 🤖",
                     "VENDORS" to "Stores",
                     "BANNERS" to "Banners",
@@ -256,7 +632,7 @@ fun AdminDashboardScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSel) LyoColors.AccentOrange else Color.Transparent)
+                            .background(if (isSel) Color(0xFF15803D) else Color.Transparent)
                             .clickable {
                                 activeTab = tabId
                                 viewModel.selectedAdminVendor.value = null
@@ -264,7 +640,9 @@ fun AdminDashboardScreen(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = if (isSel) Color.White else LyoColors.TextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        CompositionLocalProvider(LocalTextColor provides (if (isSel) Color.White else Color(0xFF64748B))) {
+                            Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -280,6 +658,10 @@ fun AdminDashboardScreen(
                 when (activeTab) {
                 "ANALYTICS" -> {
                     AnalyticsDashboardTab(viewModel = viewModel)
+                }
+
+                "LIVE_TEST" -> {
+                    LiveTestMonitorTab(viewModel = viewModel)
                 }
 
                 "SMART_MENU" -> {
@@ -1073,6 +1455,18 @@ fun AdminDashboardScreen(
 
                 "LOGISTICS" -> {
                     // LIVE ORDER EVENTS MONITORING - DISPATCH COORDINATION
+                    var logisticsSubTab by remember { mutableStateOf("ACTIVE") }
+                    val filteredOrders = remember(orders, logisticsSubTab) {
+                        orders.filter { ord ->
+                            when (logisticsSubTab) {
+                                "ACTIVE" -> ord.status != "DELIVERED" && ord.status != "CANCELLED"
+                                "COMPLETED" -> ord.status == "DELIVERED"
+                                "CANCELLED" -> ord.status == "CANCELLED"
+                                else -> true
+                            }
+                        }
+                    }
+
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1081,7 +1475,7 @@ fun AdminDashboardScreen(
                     ) {
                         item {
                             Text(
-                                text = "SYSTEM ORDER TRAFFIC (${orders.size} active)",
+                                text = "SYSTEM ORDER TRAFFIC (${filteredOrders.size} listed)",
                                 color = LyoColors.TextSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1089,15 +1483,49 @@ fun AdminDashboardScreen(
                             )
                         }
 
-                        if (orders.isEmpty()) {
-                            item {
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    Text("No orders placed yet across user dashboards.", color = LyoColors.TextSecondary)
+                        // SEGMENTED CONTROL FOR ACTIVE / COMPLETED / CANCELLED ORDERS
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val subTabs = listOf(
+                                    Triple("ACTIVE", "Active", "செயலில்"),
+                                    Triple("COMPLETED", "Completed", "முடிந்தது"),
+                                    Triple("CANCELLED", "Cancelled", "ரத்து")
+                                )
+                                subTabs.forEach { tab ->
+                                    val isSelected = logisticsSubTab == tab.first
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) LyoColors.AccentOrange else Color(0x11FFFFFF))
+                                            .border(1.dp, if (isSelected) LyoColors.AccentOrange else Color(0x22FFFFFF), RoundedCornerShape(8.dp))
+                                            .clickable { logisticsSubTab = tab.first }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(text = tab.second, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(text = tab.third, color = Color.White.copy(alpha = 0.6f), fontSize = 10.5.sp)
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        items(orders, key = { it.id }) { ord ->
+                        if (filteredOrders.isEmpty()) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                                    Text("No orders match this status classification.", color = LyoColors.TextSecondary)
+                                }
+                            }
+                        }
+
+                        items(filteredOrders, key = { it.id }) { ord ->
                             val matchedRide = activeRides.firstOrNull { it.orderId == ord.id }
                             Box(modifier = Modifier.padding(vertical = 8.dp)) {
                                 GlassCard(
@@ -1111,7 +1539,20 @@ fun AdminDashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column {
-                                                Text("Order ID: #LYO-${ord.id}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                                    Text("Order ID: #LYO-${ord.id}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                                    if (com.example.data.repository.LyoLiveTestTracker.isTestOrder(ord)) {
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(4.dp))
+                                                                .background(Color(0xFF8B5CF6))
+                                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("🧪 TEST ORDER", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
                                                 Text("From customer phone: ${ord.userId}", color = LyoColors.TextSecondary, fontSize = 12.sp)
                                                 Text("Store: ${ord.vendorName}", color = LyoColors.TextSecondary, fontSize = 12.sp)
                                             }
@@ -1332,31 +1773,53 @@ fun AdminDashboardScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            if (ord.status != "DELIVERED") {
+                                            if (ord.status != "DELIVERED" && ord.status != "CANCELLED") {
                                                 val nextStatus = when (ord.status) {
                                                     "PENDING" -> "ACCEPTED"
                                                     "ACCEPTED" -> "PREPARING"
                                                     "PREPARING" -> "READY_FOR_PICKUP"
                                                     else -> "READY_FOR_PICKUP"
                                                 }
-                                                if (ord.status != "READY_FOR_PICKUP" && ord.status != "OUT_FOR_DELIVERY") {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    if (ord.status != "READY_FOR_PICKUP" && ord.status != "OUT_FOR_DELIVERY") {
+                                                        Button(
+                                                            onClick = {
+                                                                confirmStatusChangeOrder = ord to nextStatus
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.weight(1f)
+                                                        ) {
+                                                            Text("MARK $nextStatus", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    } else {
+                                                        Text(
+                                                            text = "Rider Transit Active",
+                                                            color = LyoColors.TextSecondary,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Medium,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+
+                                                    // Cancel Button
                                                     Button(
                                                         onClick = {
-                                                            confirmStatusChangeOrder = ord to nextStatus
+                                                            confirmStatusChangeOrder = ord to "CANCELLED"
                                                         },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
-                                                        shape = RoundedCornerShape(8.dp)
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        modifier = Modifier.weight(1f)
                                                     ) {
-                                                        Text("MARK $nextStatus", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        Text("CANCEL ORDER ரத்து", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                                     }
-                                                } else {
-                                                    Text(
-                                                        text = "Rider Transit Active",
-                                                        color = LyoColors.TextSecondary,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
                                                 }
+                                            } else if (ord.status == "CANCELLED") {
+                                                Text("Cancelled (ரத்து செய்யப்பட்டது)", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             } else {
                                                 Text("Completed Cargo Secured", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             }
@@ -1404,7 +1867,11 @@ fun AdminDashboardScreen(
                                             onClick = {
                                                 coroutineScope.launch {
                                                     val items = viewModel.getOrderItems(ord.id)
-                                                    LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items)
+                                                    val customerUser = viewModel.repository.findUser(ord.userId)
+                                                    val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                                    val customerPhone = customerUser?.phone?.ifBlank { null } ?: ord.userId
+                                                    val customerAddress = customerUser?.address?.ifBlank { null } ?: "Coordinates (${ord.customerLat}, ${ord.customerLng})"
+                                                    LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items, customerName, customerPhone, customerAddress)
                                                  }
                                              },
                                              colors = ButtonDefaults.buttonColors(containerColor = Color(0x1F22C55E)),
@@ -1438,7 +1905,7 @@ fun AdminDashboardScreen(
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
                                                          append("👨‍🍳 *LYO FRESH — KITCHEN ORDER (KOT)* 👨‍🍳\n")
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                                         append("🏪 *உணவகம் (Shop):* ${vendor?.name ?: "Lyo Partner"}\n")
+                                                         append("🏪 *உணவகம் (Shop):* ${vendor?.name ?: "Lyo AI Food Delivery Partner"}\n")
                                                          append("📦 *ஆர்டர் ஐடி (Order ID):* #Lyo-${ord.id}\n")
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
                                                          append("*தயாரிக்க வேண்டிய உணவுகள் (Items):*\n")
@@ -1479,12 +1946,45 @@ fun AdminDashboardScreen(
                                              )
                                          }
 
-                                         Spacer(modifier = Modifier.height(8.dp))
+                                         Button(
+                                              onClick = {
+                                                  coroutineScope.launch {
+                                                      val items = viewModel.getOrderItems(ord.id)
+                                                      val customerUser = viewModel.repository.findUser(ord.userId)
+                                                      val customerName = customerUser?.name ?: "Lyo AI Food Delivery Customer"
+                                                      LyoNotificationHelper.generateKitchenKotPdfAndShare(context, ord, items, customerName)
+                                                  }
+                                              },
+                                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                                              shape = RoundedCornerShape(10.dp),
+                                              modifier = Modifier.fillMaxWidth()
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.Filled.Receipt,
+                                                  contentDescription = null,
+                                                  tint = Color.White,
+                                                  modifier = Modifier.size(16.dp)
+                                              )
+                                              Spacer(modifier = Modifier.width(8.dp))
+                                              Text(
+                                                  text = "KOT அச்சிடு (Print KOT PDF)",
+                                                  color = Color.White,
+                                                  fontSize = 11.sp,
+                                                  fontWeight = FontWeight.Bold
+                                              )
+                                          }
+
+                                          Spacer(modifier = Modifier.height(8.dp))
+                                          Spacer(modifier = Modifier.height(8.dp))
                                          Button(
                                              onClick = {
                                                  coroutineScope.launch {
                                                      val items = viewModel.getOrderItems(ord.id)
-                                                     LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items)
+                                                     val customerUser = viewModel.repository.findUser(ord.userId)
+                                                     val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                                     val customerPhone = customerUser?.phone?.ifBlank { null } ?: ord.userId
+                                                     val customerAddress = customerUser?.address?.ifBlank { null } ?: "Coordinates (${ord.customerLat}, ${ord.customerLng})"
+                                                     LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items, customerName, customerPhone, customerAddress)
                                                  }
                                              },
                                              colors = ButtonDefaults.buttonColors(containerColor = Color(0x1FFFF980)),
@@ -1559,107 +2059,300 @@ fun AdminDashboardScreen(
 
                         if (showClassificationsDialog) {
                             val context = androidx.compose.ui.platform.LocalContext.current
-                            var classificationsOrderState by remember {
-                                val sharedPrefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
-                                val saved = sharedPrefs.getString("category_custom_order", null)
-                                val list = if (saved != null) {
-                                    saved.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                                } else {
-                                    listOf("Restaurant", "Cafe", "Hotel", "Bakery", "Snack Shop", "Dhaba")
-                                }
-                                mutableStateOf(list)
-                            }
+                            val coroutineScope = rememberCoroutineScope()
+                            val globalCategoriesFlow = remember { viewModel.repository.categoryDao.getCategoriesForVendor(-1L) }
+                            val globalCategories by globalCategoriesFlow.collectAsState(initial = emptyList())
+
+                            val newCatNameEn by viewModel.newCategoryNameEn.collectAsState()
+                            val newCatNameTa by viewModel.newCategoryNameTa.collectAsState()
+                            val newCatIconKey by viewModel.newCategoryIconKey.collectAsState()
+                            val newCatAccentColor by viewModel.newCategoryAccentColor.collectAsState()
+                            val newCatIsActive by viewModel.newCategoryIsActive.collectAsState()
+                            val newCatSortOrder by viewModel.newCategorySortOrder.collectAsState()
 
                             AlertDialog(
                                 onDismissRequest = { showClassificationsDialog = false },
                                 title = {
                                     Text(
-                                        "முகப்பு கேட்டகிரி வரிசை (Home Categories)",
+                                        "முகப்பு கேட்டகிரி மேலாண்மை (Home Categories)",
                                         color = Color.White,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.ExtraBold
                                     )
                                 },
                                 text = {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                        // Section 1: Add Category Form
                                         Text(
-                                            "முகப்புப் பக்கத்தில் கடைகளின் வகைப்பாடுகள் காட்டும் வரிசையை மாற்றிக் கொள்ளுங்கள்:",
-                                            color = Color.LightGray,
+                                            "சேர் / ADD NEW CLASSIFICATION",
+                                            color = Color(0xFFFF7A1A),
+                                            fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
-                                            modifier = Modifier.padding(bottom = 12.dp)
+                                            modifier = Modifier.padding(bottom = 8.dp)
                                         )
 
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            classificationsOrderState.forEachIndexed { index, name ->
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .background(Color(0xFF1E293B))
-                                                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(name, color = Color.White,  fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        OutlinedTextField(
+                                            value = newCatNameEn,
+                                            onValueChange = { viewModel.newCategoryNameEn.value = it },
+                                            label = { Text("English Name (e.g., Chinese)", fontSize = 11.sp) },
+                                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                unfocusedBorderColor = Color(0xFF334155),
+                                                focusedBorderColor = Color(0xFFFF7A1A),
+                                                unfocusedLabelColor = Color.LightGray,
+                                                focusedLabelColor = Color(0xFFFF7A1A)
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                            singleLine = true
+                                        )
 
-                                                    Row {
-                                                        IconButton(
-                                                            onClick = {
-                                                                if (index > 0) {
-                                                                    val newList = classificationsOrderState.toMutableList()
-                                                                    val temp = newList[index]
-                                                                    newList[index] = newList[index - 1]
-                                                                    newList[index - 1] = temp
-                                                                    classificationsOrderState = newList
-                                                                }
-                                                            },
-                                                            modifier = Modifier.size(24.dp)
-                                                        ) {
-                                                            Icon(Icons.Filled.ArrowUpward, contentDescription = "Move Up", tint = Color.White, modifier = Modifier.size(16.dp))
-                                                        }
+                                        OutlinedTextField(
+                                            value = newCatNameTa,
+                                            onValueChange = { viewModel.newCategoryNameTa.value = it },
+                                            label = { Text("Tamil Name (e.g., சைனீஸ்)", fontSize = 11.sp) },
+                                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                unfocusedBorderColor = Color(0xFF334155),
+                                                focusedBorderColor = Color(0xFFFF7A1A),
+                                                unfocusedLabelColor = Color.LightGray,
+                                                focusedLabelColor = Color(0xFFFF7A1A)
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                            singleLine = true
+                                        )
 
-                                                        IconButton(
-                                                            onClick = {
-                                                                if (index < classificationsOrderState.size - 1) {
-                                                                    val newList = classificationsOrderState.toMutableList()
-                                                                    val temp = newList[index]
-                                                                    newList[index] = newList[index + 1]
-                                                                    newList[index + 1] = temp
-                                                                    classificationsOrderState = newList
-                                                                }
-                                                            },
-                                                            modifier = Modifier.size(24.dp)
-                                                        ) {
-                                                            Icon(Icons.Filled.ArrowDownward, contentDescription = "Move Down", tint = Color.White, modifier = Modifier.size(16.dp))
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(
-                                        onClick = {
-                                            val sharedPrefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
-                                            sharedPrefs.edit().putString("category_custom_order", classificationsOrderState.joinToString(",")).apply()
-                                            android.widget.Toast.makeText(context, "கேட்டகிரி வரிசை வெற்றிகரமாக சேமிக்கப்பட்டது! 🎉", android.widget.Toast.LENGTH_LONG).show()
-                                            showClassificationsDialog = false
-                                        }
-                                    ) {
-                                        Text("சேமி (SAVE)", color = LyoColors.VegGreen, fontWeight = FontWeight.Bold)
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showClassificationsDialog = false }) {
-                                        Text("மூடு (CLOSE)", color = Color.White)
-                                    }
-                                },
-                                containerColor = Color(0xFF0F172A),
-                                titleContentColor = Color.White,
-                                textContentColor = Color.LightGray
-                            )
-                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                         ) {
+                                             OutlinedTextField(
+                                                 value = newCatSortOrder,
+                                                 onValueChange = { viewModel.newCategorySortOrder.value = it },
+                                                 label = { Text("Sort Order", fontSize = 11.sp) },
+                                                 textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                                                 colors = OutlinedTextFieldDefaults.colors(
+                                                     unfocusedBorderColor = Color(0xFF334155),
+                                                     focusedBorderColor = Color(0xFFFF7A1A),
+                                                     unfocusedLabelColor = Color.LightGray
+                                                 ),
+                                                 modifier = Modifier.width(100.dp),
+                                                 singleLine = true
+                                             )
+
+                                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                                 Text("Active", color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(end = 6.dp))
+                                                 Switch(
+                                                     checked = newCatIsActive,
+                                                     onCheckedChange = { viewModel.newCategoryIsActive.value = it },
+                                                     colors = SwitchDefaults.colors(
+                                                         checkedThumbColor = Color(0xFF22C55E),
+                                                         checkedTrackColor = Color(0x3322C55E)
+                                                     )
+                                                 )
+                                             }
+                                         }
+
+                                         // Icon Picker
+                                         Text(
+                                             "ஐகான் தேர்வு / CHOOSE ICON",
+                                             color = Color.LightGray,
+                                             fontSize = 11.sp,
+                                             fontWeight = FontWeight.Bold,
+                                             modifier = Modifier.padding(bottom = 6.dp)
+                                         )
+                                         Row(
+                                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                         ) {
+                                             val iconOptions = listOf("Restaurant", "Coffee", "LocalDining", "Cake", "LocalPizza", "Store", "Icecream", "Fastfood")
+                                             iconOptions.forEach { iconName ->
+                                                 val isSelected = newCatIconKey.equals(iconName, ignoreCase = true)
+                                                 Box(
+                                                     modifier = Modifier
+                                                         .size(34.dp)
+                                                         .clip(RoundedCornerShape(8.dp))
+                                                         .background(if (isSelected) Color(0xFFFF7A1A) else Color(0xFF1E293B))
+                                                         .border(1.dp, if (isSelected) Color.White else Color.Transparent, RoundedCornerShape(8.dp))
+                                                         .clickable { viewModel.newCategoryIconKey.value = iconName },
+                                                     contentAlignment = Alignment.Center
+                                                 ) {
+                                                     Icon(
+                                                         imageVector = getIconForCategoryKey(iconName),
+                                                         contentDescription = iconName,
+                                                         tint = if (isSelected) Color.White else Color.LightGray,
+                                                         modifier = Modifier.size(16.dp)
+                                                     )
+                                                 }
+                                             }
+                                         }
+
+                                         // Accent Glow Color
+                                         Text(
+                                             "வண்ணம் / CHOOSE GLOW COLOR",
+                                             color = Color.LightGray,
+                                             fontSize = 11.sp,
+                                             fontWeight = FontWeight.Bold,
+                                             modifier = Modifier.padding(bottom = 6.dp)
+                                         )
+                                         Row(
+                                             modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                         ) {
+                                             val colorOptions = listOf("#16C7E8", "#FF7A1A", "#16A56B", "#D94A52", "#A855F7", "#EC4899", "#EAB308")
+                                             colorOptions.forEach { hexColor ->
+                                                 val isSelected = newCatAccentColor.equals(hexColor, ignoreCase = true)
+                                                 val colorObj = Color(android.graphics.Color.parseColor(hexColor))
+                                                 Box(
+                                                     modifier = Modifier
+                                                         .size(28.dp)
+                                                         .clip(CircleShape)
+                                                         .background(colorObj)
+                                                         .border(2.dp, if (isSelected) Color.White else Color.Transparent, CircleShape)
+                                                         .clickable { viewModel.newCategoryAccentColor.value = hexColor }
+                                                 )
+                                             }
+                                         }
+
+                                         Button(
+                                             onClick = {
+                                                 viewModel.createCategory(-1L, onSuccess = {
+                                                     android.widget.Toast.makeText(context, "கேட்டகிரி சேர்க்கப்பட்டது! 🎉", android.widget.Toast.LENGTH_SHORT).show()
+                                                 }, onError = { err ->
+                                                     android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+                                                 })
+                                             },
+                                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A1A)),
+                                             modifier = Modifier.fillMaxWidth().height(36.dp),
+                                             shape = RoundedCornerShape(8.dp)
+                                         ) {
+                                             Text("CREATE CLASSIFICATION", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                         }
+
+                                         Spacer(modifier = Modifier.height(16.dp))
+                                         Divider(color = Color(0xFF334155))
+                                         Spacer(modifier = Modifier.height(16.dp))
+
+                                         // Section 2: Current List
+                                         Text(
+                                             "தற்போதுள்ள கேட்டகிரிகள் / CURRENT SYSTEM CATEGORIES",
+                                             color = Color(0xFF16C7E8),
+                                             fontWeight = FontWeight.Bold,
+                                             fontSize = 12.sp,
+                                             modifier = Modifier.padding(bottom = 8.dp)
+                                         )
+
+                                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                             globalCategories.sortedBy { it.sortOrder }.forEach { cat ->
+                                                 Row(
+                                                     modifier = Modifier
+                                                         .fillMaxWidth()
+                                                         .clip(RoundedCornerShape(10.dp))
+                                                         .background(Color(0xFF1E293B))
+                                                         .border(1.dp, if (cat.isActive) Color(0x3316C7E8) else Color.Transparent, RoundedCornerShape(10.dp))
+                                                         .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                     horizontalArrangement = Arrangement.SpaceBetween,
+                                                     verticalAlignment = Alignment.CenterVertically
+                                                 ) {
+                                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                         val catColor = try { Color(android.graphics.Color.parseColor(cat.accentColor)) } catch(e: Exception) { Color(0xFF16C7E8) }
+                                                         Box(
+                                                             modifier = Modifier
+                                                                 .size(36.dp)
+                                                                 .clip(RoundedCornerShape(8.dp))
+                                                                 .background(catColor.copy(alpha = 0.15f))
+                                                                 .border(1.dp, catColor, RoundedCornerShape(8.dp)),
+                                                             contentAlignment = Alignment.Center
+                                                         ) {
+                                                             Icon(
+                                                                 imageVector = getIconForCategoryKey(cat.iconKey),
+                                                                 contentDescription = cat.nameEn,
+                                                                 tint = catColor,
+                                                                 modifier = Modifier.size(18.dp)
+                                                             )
+                                                         }
+                                                         Spacer(modifier = Modifier.width(8.dp))
+                                                         Column {
+                                                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                 Text(cat.nameEn, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                                 Spacer(modifier = Modifier.width(6.dp))
+                                                                 Box(
+                                                                     modifier = Modifier
+                                                                         .size(6.dp)
+                                                                         .background(if (cat.isActive) Color(0xFF22C55E) else Color(0xFFEF4444), CircleShape)
+                                                                 )
+                                                             }
+                                                             Text(cat.nameTa, color = Color.LightGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                             Text("Sort Order: ${cat.sortOrder}", color = Color.Gray, fontSize = 9.sp)
+                                                         }
+                                                     }
+
+                                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                         IconButton(
+                                                             onClick = {
+                                                                 coroutineScope.launch {
+                                                                     viewModel.repository.categoryDao.updateCategory(cat.copy(sortOrder = cat.sortOrder - 1))
+                                                                 }
+                                                             },
+                                                             modifier = Modifier.size(24.dp)
+                                                         ) {
+                                                             Icon(Icons.Filled.ArrowUpward, contentDescription = "Up", tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                                         }
+                                                         IconButton(
+                                                             onClick = {
+                                                                 coroutineScope.launch {
+                                                                     viewModel.repository.categoryDao.updateCategory(cat.copy(sortOrder = cat.sortOrder + 1))
+                                                                 }
+                                                             },
+                                                             modifier = Modifier.size(24.dp)
+                                                         ) {
+                                                             Icon(Icons.Filled.ArrowDownward, contentDescription = "Down", tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                                         }
+                                                         IconButton(
+                                                             onClick = {
+                                                                 coroutineScope.launch {
+                                                                     viewModel.repository.categoryDao.updateCategory(cat.copy(isActive = !cat.isActive))
+                                                                 }
+                                                             },
+                                                             modifier = Modifier.size(24.dp)
+                                                         ) {
+                                                             Icon(
+                                                                 imageVector = if (cat.isActive) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                                                 contentDescription = "Toggle Active",
+                                                                 tint = if (cat.isActive) Color(0xFF22C55E) else Color.Gray,
+                                                                 modifier = Modifier.size(16.dp)
+                                                             )
+                                                         }
+                                                         IconButton(
+                                                             onClick = {
+                                                                 coroutineScope.launch {
+                                                                     viewModel.repository.categoryDao.deleteCategory(cat)
+                                                                 }
+                                                             },
+                                                             modifier = Modifier.size(24.dp)
+                                                         ) {
+                                                             Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                                         }
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 },
+                                 confirmButton = {
+                                     TextButton(
+                                         onClick = {
+                                             showClassificationsDialog = false
+                                         }
+                                     ) {
+                                         Text("முடிந்தது (DONE)", color = LyoColors.VegGreen, fontWeight = FontWeight.Bold)
+                                     }
+                                 },
+                                 containerColor = Color(0xFF0F172A),
+                                 titleContentColor = Color.White,
+                                 textContentColor = Color.LightGray
+                             )
+                         }
 
                         LazyColumn(
                             modifier = Modifier
@@ -1676,7 +2369,8 @@ fun AdminDashboardScreen(
                                         onClick = { activeTab = "ONBOARDING" },
                                         colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
                                         shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1.1f)
+                                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                                     ) {
                                         Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
@@ -1684,7 +2378,9 @@ fun AdminDashboardScreen(
                                             text = "புதிய உணவகம்",
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
+                                            fontSize = 11.sp,
+                                            lineHeight = 13.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                         )
                                     }
 
@@ -1693,7 +2389,8 @@ fun AdminDashboardScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
                                         border = BorderStroke(1.dp, Color(0xFF334155)),
                                         shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(0.9f)
+                                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                                     ) {
                                         Icon(Icons.Filled.Sort, contentDescription = null, tint = LyoColors.AccentOrange, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
@@ -1701,7 +2398,9 @@ fun AdminDashboardScreen(
                                             text = "முகப்பு கேட்டகிரி",
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
+                                            fontSize = 11.sp,
+                                            lineHeight = 13.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                         )
                                     }
                                 }
@@ -1738,7 +2437,41 @@ fun AdminDashboardScreen(
                                                     maxLines = 1,
                                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                                 )
-                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    val st = item.status
+                                                    val (stColor, label) = when (st) {
+                                                        "ACTIVE" -> LyoColors.VegGreen to "ACTIVE"
+                                                        "DRAFT" -> Color.Gray to "DRAFT"
+                                                        "PAUSED" -> LyoColors.AmberYellow to "PAUSED"
+                                                        "ARCHIVED" -> Color.LightGray to "ARCHIVED"
+                                                        "REJECTED" -> Color.Red to "REJECTED"
+                                                        "REVIEW_REQUIRED" -> LyoColors.NonVegRed to "REVIEW REQUIRED"
+                                                        "READY_TO_PUBLISH" -> Color.Cyan to "READY TO PUBLISH"
+                                                        else -> LyoColors.AccentOrange to st
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(stColor.copy(alpha = 0.2f))
+                                                            .border(0.5.dp, stColor, RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(label, color = stColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                    if (item.isOnHoliday) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(4.dp))
+                                                                .background(Color.Red.copy(alpha = 0.2f))
+                                                                .border(0.5.dp, Color.Red, RoundedCornerShape(4.dp))
+                                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("HOLIDAY/CLOSED", color = Color.Red, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
                                                     text = "Category: ${item.type} • Order Rank: ${item.sortOrder}",
                                                     color = LyoColors.TextSecondary,
@@ -1820,6 +2553,7 @@ fun AdminDashboardScreen(
                         var editLat by remember(partner.id) { mutableStateOf(partner.lat) }
                         var editLng by remember(partner.id) { mutableStateOf(partner.lng) }
                         var editSortOrder by remember(partner.id) { mutableStateOf(partner.sortOrder.toString()) }
+                        var editStatus by remember(partner.id) { mutableStateOf(partner.status) }
 
                         LaunchedEffect(partner) {
                             isCouponEnabled = partner.isCouponEnabled
@@ -1842,6 +2576,7 @@ fun AdminDashboardScreen(
                             editLat = partner.lat
                             editLng = partner.lng
                             editSortOrder = partner.sortOrder.toString()
+                            editStatus = partner.status
                         }
 
                         LaunchedEffect(selectedImageUriStr) {
@@ -2039,6 +2774,38 @@ fun AdminDashboardScreen(
                                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                                         )
+
+                                        Text("Store Lifecycle Status:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val statusList = listOf("DRAFT", "REVIEW_REQUIRED", "READY_TO_PUBLISH", "ACTIVE", "PAUSED", "REJECTED", "ARCHIVED")
+                                        LazyRow(
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            items(statusList) { st ->
+                                                val isSelected = editStatus == st
+                                                val stColor = when (st) {
+                                                    "ACTIVE" -> LyoColors.VegGreen
+                                                    "DRAFT" -> Color.Gray
+                                                    "PAUSED" -> LyoColors.AmberYellow
+                                                    "ARCHIVED" -> Color.LightGray
+                                                    "REJECTED" -> Color.Red
+                                                    "REVIEW_REQUIRED" -> LyoColors.NonVegRed
+                                                    "READY_TO_PUBLISH" -> Color.Cyan
+                                                    else -> LyoColors.AccentOrange
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(if (isSelected) stColor.copy(alpha = 0.3f) else Color(0x15FFFFFF))
+                                                        .border(1.dp, if (isSelected) stColor else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                                                        .clickable { editStatus = st }
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text(st, color = if (isSelected) Color.White else Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
 
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -2637,22 +3404,69 @@ fun AdminDashboardScreen(
                                         ) {
                                             Button(
                                                 onClick = {
+                                                    val uRole = currentUser?.role ?: ""
+                                                    val uPhone = currentUser?.phone ?: ""
+                                                    val isUserAdmin = uRole == "ADMIN"
+
+                                                    // 1. Manager / assigned shop check
+                                                    if (!isUserAdmin) {
+                                                        val cleanUPhone = uPhone.replace(Regex("[^0-9]"), "")
+                                                        val cleanVPhone = partner.phone.replace(Regex("[^0-9]"), "")
+                                                        val isAssigned = cleanUPhone.isNotBlank() && cleanVPhone.isNotBlank() && (cleanUPhone.endsWith(cleanVPhone) || cleanVPhone.endsWith(cleanUPhone))
+                                                        if (!isAssigned) {
+                                                            android.widget.Toast.makeText(context, "⚠️ நீங்கள் உங்கள் சொந்த கடையில் மட்டுமே மாற்றம் செய்ய முடியும்! (Manager must only edit/publish their own assigned shop)", android.widget.Toast.LENGTH_LONG).show()
+                                                            return@Button
+                                                        }
+                                                    }
+
+                                                    // 2. Field validations
+                                                    val nameVal = editName.trim()
+                                                    val addrVal = editAddress.trim()
+                                                    val phoneVal = editPhone.trim()
+                                                    val openVal = editAutoOpenTime.trim()
+                                                    val closeVal = editAutoCloseTime.trim()
+
+                                                    if (nameVal.isBlank()) {
+                                                        android.widget.Toast.makeText(context, "⚠️ கடையின் பெயர் தேவை! (Store Name is required)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+                                                    if (addrVal.isBlank()) {
+                                                        android.widget.Toast.makeText(context, "⚠️ முகவரி தேவை! (Address is required)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+                                                    if (phoneVal.isBlank()) {
+                                                        android.widget.Toast.makeText(context, "⚠️ தொலைபேசி எண் தேவை! (Phone number is required)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+                                                    if (openVal.isBlank() || closeVal.isBlank()) {
+                                                        android.widget.Toast.makeText(context, "⚠️ திறக்கும் மற்றும் மூடும் நேரம் தேவை! (Opening and Closing times are required)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+
+                                                    // 3. Active menu item check
+                                                    val activeItemsCount = itemsList.count { it.isAvailable }
+                                                    if (activeItemsCount == 0 && editStatus == "ACTIVE") {
+                                                        android.widget.Toast.makeText(context, "⚠️ உணவகத்தை வெளியிட (Active செய்ய) குறைந்தது ஒரு மெனு ஐட்டமாவது (Active Menu Item) இருக்க வேண்டும்!", android.widget.Toast.LENGTH_LONG).show()
+                                                        return@Button
+                                                    }
+
                                                     val updated = partner.copy(
-                                                        name = editName.trim(),
+                                                        name = nameVal,
                                                         type = editType,
-                                                        address = editAddress.trim(),
+                                                        address = addrVal,
                                                         isOnHoliday = editIsOnHoliday,
-                                                        autoOpenTime = editAutoOpenTime.trim(),
-                                                        autoCloseTime = editAutoCloseTime.trim(),
+                                                        autoOpenTime = openVal,
+                                                        autoCloseTime = closeVal,
                                                         deliveryFee = editDeliveryFee.toDoubleOrNull() ?: partner.deliveryFee,
                                                         minOrderAmount = editMinOrder.toDoubleOrNull() ?: partner.minOrderAmount,
                                                         bannerUrl = editBannerUrl.trim(),
-                                                        phone = editPhone.trim(),
+                                                        phone = phoneVal,
                                                         visibilityRadiusKm = editVisibilityRadiusKm,
                                                         lat = editLat,
                                                         lng = editLng,
                                                         sortOrder = editSortOrder.toIntOrNull() ?: partner.sortOrder,
-                                                        isDynamicDelivery = editIsDynamicDelivery
+                                                        isDynamicDelivery = editIsDynamicDelivery,
+                                                        status = editStatus
                                                     )
                                                     val localContext = context
                                                     viewModel.updateVendor(updated) {
@@ -3880,7 +4694,7 @@ fun AdminDashboardScreen(
                         )
 
                         // 1. Registered active riders in the platform
-                        val activePlatformRiders = riders.filter { it.role == "DELIVERY" && it.isActiveRider }.distinctBy { it.phone }
+                        val activePlatformRiders = riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && it.isActiveRider && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
                         if (activePlatformRiders.isNotEmpty()) {
                             Divider(
                                 color = Color.White.copy(alpha = 0.2f),
@@ -4011,7 +4825,14 @@ fun AdminDashboardScreen(
                          // Action 1: Send Customer Invoice PDF
                          Button(
                              onClick = {
-                                 LyoNotificationHelper.generateOrderPdfAndShare(context, ord, dispatchOrderItemsState)
+                                 LyoNotificationHelper.generateOrderPdfAndShare(
+                                     context = context,
+                                     order = ord,
+                                     items = dispatchOrderItemsState,
+                                     customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Food Delivery Customer" },
+                                     customerPhone = dispatchCustomerPhoneState.ifBlank { ord.userId },
+                                     customerAddress = dispatchCustomerAddressState.ifBlank { "Coordinates (${ord.customerLat}, ${ord.customerLng})" }
+                                 )
                              },
                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D)),
                              shape = RoundedCornerShape(10.dp),
@@ -4032,7 +4853,7 @@ fun AdminDashboardScreen(
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
                                          append("👨‍🍳 *LYO FRESH — KITCHEN ORDER (KOT)* 👨‍🍳\n")
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                         append("🏪 *உணவகம் (Shop):* ${dispatchVendorState?.name ?: "Lyo Partner"}\n")
+                                         append("🏪 *உணவகம் (Shop):* ${dispatchVendorState?.name ?: "Lyo AI Food Delivery Partner"}\n")
                                          append("📦 *ஆர்டர் ஐடி (Order ID):* #Lyo-${ord.id}\n")
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
                                          append("*தயாரிக்க வேண்டிய உணவுகள் (Items):*\n")
@@ -4066,9 +4887,30 @@ fun AdminDashboardScreen(
                              Icon(Icons.Filled.ReceiptLong, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                              Spacer(modifier = Modifier.width(8.dp))
                              Text("SEND KOT TO STORE OWNER", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                         }
-                     }
-                 },
+                          }
+                          
+                          Spacer(modifier = Modifier.height(10.dp))
+                          
+                          // Action 3: Print KOT (Premium Printable PDF with large kitchen typography)
+                          Button(
+                              onClick = {
+                                  try {
+                                      val customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Food Delivery Customer" }
+                                      LyoNotificationHelper.generateKitchenKotPdfAndShare(context, ord, dispatchOrderItemsState, customerName)
+                                  } catch (e: Exception) {
+                                      e.printStackTrace()
+                                  }
+                              },
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                              shape = RoundedCornerShape(10.dp),
+                              modifier = Modifier.fillMaxWidth()
+                          ) {
+                              Icon(Icons.Filled.Receipt, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                              Spacer(modifier = Modifier.width(8.dp))
+                              Text("PRINT KOT (PREMIUM PDF)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                          }
+                      }
+                  },
                  confirmButton = {
                      LyoButton(
                          text = "ALL DONE (முடிந்தது)",
@@ -4115,6 +4957,9 @@ fun AdminDashboardScreen(
                                  dispatchOrderItemsState = items
                                  dispatchRiderNameState = rdr.name
                                  dispatchRiderPhoneState = rdr.phone
+                                 dispatchCustomerNameState = customer?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                 dispatchCustomerPhoneState = customer?.phone?.ifBlank { null } ?: order.userId
+                                 dispatchCustomerAddressState = customer?.address?.ifBlank { null } ?: "Coordinates (${order.customerLat}, ${order.customerLng})"
                                  showDispatchConfirmDialog = true
                                  // AUTOMATIC TRIGGER 1: WhatsApp messages to Customer and Restaurant Owner KOT
                                  val settings = com.example.WhatsAppHelper.getSettings(context)
@@ -4671,7 +5516,7 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                             Row(
                                 modifier = Modifier
                                     .weight(1.2f)
-                                    .height(38.dp)
+                                    .heightIn(min = 38.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(Color(0x1522C55E))
                                     .border(1.dp, Color(0x3322C55E), RoundedCornerShape(10.dp))
@@ -4683,7 +5528,8 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                                             finalPhone,
                                             "Hello ${rider.name}, Lyo Fresh Admin here. Are you available for pickup?"
                                         )
-                                    },
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
@@ -4693,12 +5539,14 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                                     tint = Color(0xFF22C55E),
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Chat / வாட்ஸ்அப்",
                                     color = Color(0xFF22C55E),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                             }
 
@@ -4706,11 +5554,12 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                             Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp)
+                                    .heightIn(min = 38.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(Color(0x1538BDF8))
                                     .border(1.dp, Color(0x3338BDF8), RoundedCornerShape(10.dp))
-                                    .clickable { riderToEdit = rider },
+                                    .clickable { riderToEdit = rider }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
@@ -4720,12 +5569,14 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                                     tint = Color(0xFF38BDF8),
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Edit / திருத்து",
                                     color = Color(0xFF38BDF8),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                             }
 
@@ -4733,11 +5584,12 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                             Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp)
+                                    .heightIn(min = 38.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(Color(0x12EF4444))
                                     .border(1.dp, Color(0x26EF4444), RoundedCornerShape(10.dp))
-                                    .clickable { riderToDelete = rider },
+                                    .clickable { riderToDelete = rider }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
@@ -4747,12 +5599,14 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                                     tint = LyoColors.NonVegRed,
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Delete / நீக்கு",
                                     color = LyoColors.NonVegRed,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                             }
                         }
@@ -5324,7 +6178,7 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "As Super Admin Anantharajmech (Eswaran), you can manage and create custom secondary helper admin logins with distinct password codes to operate the supply portal simultaneously.",
+                    text = "As Super Admin Anantharajmech (Anantharaj), you can manage and create custom secondary helper admin logins with distinct password codes to operate the supply portal simultaneously.",
                     fontSize = 11.sp,
                     color = Color.LightGray.copy(alpha = 0.8f),
                     lineHeight = 15.sp
@@ -5504,7 +6358,7 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = if (isSuper) "Eswaran Super Admin (Anantharajmech)" else "${admin.name} (${admin.phone})",
+                                    text = if (isSuper) "Anantharaj Super Admin (Anantharajmech)" else "${admin.name} (${admin.phone})",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
@@ -5942,78 +6796,164 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
                         fontWeight = FontWeight.Bold
                     )
 
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                localIsPaused = true
-                                localMsgEn = "We are closed today for holiday. Will resume service tomorrow! Thank you."
-                                localMsgTa = "இன்று விடுமுறை காரணமாக சேவை கிடையாது. நாளை முதல் வழக்கம் போல் செயல்படும்! நன்றி."
-                                viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
-                                android.widget.Toast.makeText(context, "🔴 இன்று ஒரு நாள் மட்டும் விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for Today Only)", android.widget.Toast.LENGTH_LONG).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (localIsPaused && localMsgTa.contains("இன்று விடுமுறை")) LyoColors.AccentOrange else Color(0x15FFFFFF)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("1 Day (இன்று)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Button(
+                                onClick = {
+                                    localIsPaused = true
+                                    localMsgEn = "We are closed today for holiday. Will resume service tomorrow! Thank you."
+                                    localMsgTa = "இன்று விடுமுறை காரணமாக சேவை கிடையாது. நாளை முதல் வழக்கம் போல் செயல்படும்! நன்றி."
+                                    viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
+                                    android.widget.Toast.makeText(context, "🔴 இன்று ஒரு நாள் மட்டும் விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for Today Only)", android.widget.Toast.LENGTH_LONG).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (localIsPaused && localMsgTa.contains("இன்று விடுமுறை")) LyoColors.AccentOrange else Color(0x15FFFFFF)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Today,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "1 Day (இன்று)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        lineHeight = 13.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    localIsPaused = true
+                                    localMsgEn = "We are currently on a short leave for 2 days. Service will resume shortly. Thank you."
+                                    localMsgTa = "நாங்கள் 2 நாட்களுக்கு விடுப்பில் உள்ளோம். service விரைவில் மீண்டும் தொடங்கும். நன்றி."
+                                    viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
+                                    android.widget.Toast.makeText(context, "🔴 2 நாட்களுக்கு விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for 2 Days)", android.widget.Toast.LENGTH_LONG).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (localIsPaused && localMsgTa.contains("2 நாட்களுக்கு")) LyoColors.AccentOrange else Color(0x15FFFFFF)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.DateRange,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "2 Days (2 நாட்கள்)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        lineHeight = 13.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
                         }
 
-                        Button(
-                            onClick = {
-                                localIsPaused = true
-                                localMsgEn = "We are currently on a short leave for 2 days. Service will resume shortly. Thank you."
-                                localMsgTa = "நாங்கள் 2 நாட்களுக்கு விடுப்பில் உள்ளோம். service விரைவில் மீண்டும் தொடங்கும். நன்றி."
-                                viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
-                                android.widget.Toast.makeText(context, "🔴 2 நாட்களுக்கு விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for 2 Days)", android.widget.Toast.LENGTH_LONG).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (localIsPaused && localMsgTa.contains("2 நாட்களுக்கு")) LyoColors.AccentOrange else Color(0x15FFFFFF)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("2 Days (2 நாட்கள்)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
+                            Button(
+                                onClick = {
+                                    localIsPaused = true
+                                    localMsgEn = "We are currently on a short leave for 3 days. Thank you for your patience."
+                                    localMsgTa = "நாங்கள் 3 நாட்களுக்கு விடுப்பில் உள்ளோம். உங்கள் பொறுமைக்கு நன்றி."
+                                    viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
+                                    android.widget.Toast.makeText(context, "🔴 3 நாட்களுக்கு விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for 3 Days)", android.widget.Toast.LENGTH_LONG).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (localIsPaused && localMsgTa.contains("3 நாட்களுக்கு")) LyoColors.AccentOrange else Color(0x15FFFFFF)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Event,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "3 Days (3 நாட்கள்)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        lineHeight = 13.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
 
-                        Button(
-                            onClick = {
-                                localIsPaused = true
-                                localMsgEn = "We are currently on a short leave for 3 days. Thank you for your patience."
-                                localMsgTa = "நாங்கள் 3 நாட்களுக்கு விடுப்பில் உள்ளோம். உங்கள் பொறுமைக்கு நன்றி."
-                                viewModel.updateAppPauseSettings(context, true, localMsgEn, localMsgTa)
-                                android.widget.Toast.makeText(context, "🔴 3 நாட்களுக்கு விடுமுறைக்காக தற்காலிகமாக நிறுத்தப்பட்டது! (Paused for 3 Days)", android.widget.Toast.LENGTH_LONG).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (localIsPaused && localMsgTa.contains("3 நாட்களுக்கு")) LyoColors.AccentOrange else Color(0x15FFFFFF)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                        ) {
-                            Text("3 Days (3 நாட்கள்)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-
-                        Button(
-                            onClick = {
-                                localIsPaused = false
-                                viewModel.updateAppPauseSettings(context, false, localMsgEn, localMsgTa)
-                                android.widget.Toast.makeText(context, "🟢 கடை வெற்றிகரமாக மீண்டும் ஆன் செய்யப்பட்டது! (System Online & Resumed)", android.widget.Toast.LENGTH_LONG).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (!localIsPaused) LyoColors.VegGreen else Color(0x15FFFFFF)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                        ) {
-                            Text("Resume (ஆன் செய்க)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White)
+                            Button(
+                                onClick = {
+                                    localIsPaused = false
+                                    viewModel.updateAppPauseSettings(context, false, localMsgEn, localMsgTa)
+                                    android.widget.Toast.makeText(context, "🟢 கடை வெற்றிகரமாக மீண்டும் ஆன் செய்யப்பட்டது! (System Online & Resumed)", android.widget.Toast.LENGTH_LONG).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (!localIsPaused) LyoColors.VegGreen else Color(0x15FFFFFF)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Resume (ஆன் செய்க)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White,
+                                        lineHeight = 13.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -6051,19 +6991,17 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
                         )
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.updateAppPauseSettings(context, localIsPaused, localMsgEn, localMsgTa)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                viewModel.updateAppPauseSettings(context, localIsPaused, localMsgEn, localMsgTa)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Save Configurations (சேமி)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
+                        Text("Save Configurations (சேமி)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }
@@ -6105,7 +7043,7 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
                     FirebaseKeyRow(label = "Security API Secret Key", value = com.example.BuildConfig.FIREBASE_API_KEY, isSecret = true)
                     FirebaseKeyRow(label = "Database URL", value = com.example.BuildConfig.FIREBASE_DATABASE_URL)
                     FirebaseKeyRow(label = "Storage Bucket Node", value = com.example.BuildConfig.FIREBASE_STORAGE_BUCKET)
-                    FirebaseKeyRow(label = "Messaging Sender ID", value = "368208047268")
+                    FirebaseKeyRow(label = "Messaging Sender ID", value = "604469873807")
                 }
             }
         }
@@ -6298,19 +7236,51 @@ fun AnalyticsDashboardTab(viewModel: AdminViewModel) {
     val vendors by viewModel.allVendors.collectAsState()
     val riders by viewModel.allRiders.collectAsState()
     val customers by viewModel.allCustomers.collectAsState()
+    val menuItems by viewModel.allMenuItems.collectAsState()
 
-    val completedOrders = orders.filter { it.status == "DELIVERED" }
-    val pendingOrders = orders.filter { it.status != "DELIVERED" && it.status != "CANCELLED" }
+    var selectedRange by remember { mutableStateOf("ALL") }
+
+    val now = System.currentTimeMillis()
+    val filteredOrdersByDate = remember(orders, selectedRange) {
+        when (selectedRange) {
+            "TODAY" -> {
+                val cal = java.util.Calendar.getInstance()
+                cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                cal.set(java.util.Calendar.MINUTE, 0)
+                cal.set(java.util.Calendar.SECOND, 0)
+                cal.set(java.util.Calendar.MILLISECOND, 0)
+                orders.filter { it.timestamp >= cal.timeInMillis }
+            }
+            "7_DAYS" -> {
+                orders.filter { it.timestamp >= now - (7 * 24 * 60 * 60 * 1000L) }
+            }
+            "30_DAYS" -> {
+                orders.filter { it.timestamp >= now - (30 * 24 * 60 * 60 * 1000L) }
+            }
+            else -> orders
+        }
+    }
+
+    val completedOrders = filteredOrdersByDate.filter { it.status == "DELIVERED" }
+    val pendingOrders = filteredOrdersByDate.filter { it.status != "DELIVERED" && it.status != "CANCELLED" }
     
     val totalRevenue = completedOrders.sumOf { it.totalAmount }
     val platformEarned = totalRevenue * 0.15
 
-    val hotVendor = if (orders.isNotEmpty() && vendors.isNotEmpty()) {
-        val group = orders.groupBy { it.vendorId }
+    val hotVendor = if (filteredOrdersByDate.isNotEmpty() && vendors.isNotEmpty()) {
+        val group = filteredOrdersByDate.groupBy { it.vendorId }
         val maxId = group.maxByOrNull { it.value.size }?.key
         vendors.find { it.id == maxId }?.name ?: "—"
     } else {
         "—"
+    }
+
+    val lowStockCount = menuItems.count { !it.isAvailable }
+    val missingMetadataCount = vendors.count { 
+        it.phone.isBlank() || it.address.isBlank() || it.nameTa.isBlank() || (it.lat == 11.5812 && it.lng == 77.8465)
+    }
+    val pendingRiderVerifications = customers.count { 
+        (it.role == "DELIVERY" || it.role == "RIDER") && !it.isActiveRider 
     }
 
     LazyColumn(
@@ -6334,6 +7304,77 @@ fun AnalyticsDashboardTab(viewModel: AdminViewModel) {
                     color = Color.LightGray,
                     lineHeight = 15.sp
                 )
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    "ALL" to "All Time",
+                    "TODAY" to "Today",
+                    "7_DAYS" to "7 Days",
+                    "30_DAYS" to "30 Days"
+                ).forEach { (key, label) ->
+                    val isSel = selectedRange == key
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSel) LyoColors.AccentOrange else Color(0x15FFFFFF))
+                            .clickable { selectedRange = key }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSel) Color.White else Color.LightGray,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        if (lowStockCount > 0 || missingMetadataCount > 0 || pendingRiderVerifications > 0) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = Color(0x33EF4444)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "⚠️ SYSTEM WARNINGS & PENDING ACTIONS",
+                            color = Color(0xFFFCA5A5),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        if (lowStockCount > 0) {
+                            Text(
+                                "• Low Stock Warning: $lowStockCount menu items are marked unavailable (out of stock).",
+                                color = Color.White,
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (missingMetadataCount > 0) {
+                            Text(
+                                "• Missing Venue Metadata: $missingMetadataCount stores have incomplete address, phone, Tamil localization or map pins.",
+                                color = Color.White,
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (pendingRiderVerifications > 0) {
+                            Text(
+                                "• Rider Approvals Needed: $pendingRiderVerifications delivery agents are currently inactive, awaiting admin verification.",
+                                color = Color.White,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -7696,6 +8737,175 @@ fun ChatInterfaceSection(
     val selectedStoreId by viewModel.selectedStoreIdForSmartMenu.collectAsState()
     val selectedStore = vendors.find { it.id == selectedStoreId }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val missingWords by viewModel.missingDictionaryWords.collectAsState()
+    val selectedStoreHasBackup by viewModel.selectedStoreHasBackup.collectAsState()
+    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+    var showMissingWordsDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedStoreId) {
+        selectedStoreId?.let { id ->
+            viewModel.checkIfBackupExists(id)
+        }
+    }
+
+    if (showRestoreConfirmDialog && selectedStore != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRestoreConfirmDialog = false },
+            title = {
+                Text(
+                    text = "மீட்டமைப்பை உறுதிப்படுத்துக 🔄",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "நீங்கள் உறுதியாக இந்த கடையின் கடைசியாக பேக்கப் எடுக்கப்பட்ட மெனுவை மீட்டமைக்க விரும்புகிறீர்களா?\n\nஎச்சரிக்கை: இது தற்போதைய கடையின் மெனுவை முழுமையாக அழித்து புதிய தரவை எழுதும்.",
+                    color = Color.LightGray,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRestoreConfirmDialog = false
+                        viewModel.restoreLastMenuBackup(
+                            selectedStore.id,
+                            onSuccess = {
+                                android.widget.Toast.makeText(context, "Menu restored successfully! 🎉", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { err ->
+                                android.widget.Toast.makeText(context, "Restore failed: $err ❌", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen)
+                ) {
+                    Text("ஆம் (Yes, Restore)", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreConfirmDialog = false }) {
+                    Text("ரத்து செய் (Cancel)", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showMissingWordsDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showMissingWordsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Translate,
+                        contentDescription = null,
+                        tint = LyoColors.AmberYellow,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Missing Dictionary Words 📖",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "The following English/Tamil terms were parsed but not found in the bilingual dictionary. They have been logged for future translation enhancements:",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                    
+                    if (missingWords.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No missing words logged! All terms matched the dictionary. ✨", color = LyoColors.VegGreen, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E293B))
+                                .padding(8.dp)
+                        ) {
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(missingWords.size) { index ->
+                                    val word = missingWords[index]
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(word.word, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        val df = java.text.SimpleDateFormat("MMM dd HH:mm", java.util.Locale.getDefault())
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0x33FFCCAA))
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(df.format(java.util.Date(word.firstSeenAt)), color = Color(0xFFFFCCAA), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    HorizontalDivider(color = Color(0x1FFFFFFF), thickness = 0.5.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (missingWords.isNotEmpty()) {
+                        Button(
+                            onClick = {
+                                viewModel.clearMissingWords()
+                                showMissingWordsDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                        ) {
+                            Text("Clear Log 🧹", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+                    Button(
+                        onClick = { showMissingWordsDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange)
+                    ) {
+                        Text("Close", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -7878,6 +9088,128 @@ fun ChatInterfaceSection(
                         }
                     }
                 }
+            }
+        }
+
+        if (selectedStore != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        text = "💾 MENU BACKUP & RECOVERY (பேக்கப் & ரீஸ்டோர்)",
+                        color = LyoColors.LiveCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Backup button
+                        FilledTonalButton(
+                            onClick = {
+                                viewModel.createManualMenuBackup(
+                                    selectedStore.id,
+                                    selectedStore.name,
+                                    onSuccess = {
+                                        android.widget.Toast.makeText(context, "Menu backed up to cloud successfully! 💾🎉", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                    onFailure = { err ->
+                                        android.widget.Toast.makeText(context, "Backup failed: $err ❌", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0x1F22C55E),
+                                contentColor = Color(0xFF22C55E)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                                Icon(Icons.Filled.CloudUpload, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Backup Menu", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        
+                        // Restore button
+                        FilledTonalButton(
+                            onClick = {
+                                showRestoreConfirmDialog = true
+                            },
+                            enabled = selectedStoreHasBackup,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (selectedStoreHasBackup) Color(0x1F38BDF8) else Color(0x0FFFFFFF),
+                                contentColor = if (selectedStoreHasBackup) Color(0xFF38BDF8) else Color.Gray
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                                Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(if (selectedStoreHasBackup) "Restore Menu" else "No Cloud Backup", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dictionary warnings collapsible section
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .clickable { showMissingWordsDialog = true },
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = BorderStroke(1.dp, if (missingWords.isNotEmpty()) LyoColors.AmberYellow.copy(alpha = 0.4f) else Color(0x1FFFFFFF)),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        imageVector = Icons.Filled.Translate,
+                        contentDescription = null,
+                        tint = if (missingWords.isNotEmpty()) LyoColors.AmberYellow else Color.Gray,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Bilingual Dictionary Log", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text(
+                            text = if (missingWords.isNotEmpty()) "${missingWords.size} words need translation review" else "All terms translated successfully!",
+                            color = if (missingWords.isNotEmpty()) LyoColors.AmberYellow else Color.Gray,
+                            fontSize = 8.sp
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Filled.ArrowForward,
+                    contentDescription = "view",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(14.dp)
+                )
             }
         }
 
@@ -8447,6 +9779,13 @@ fun InteractivePreviewSection(
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
     var showEditMetaDialog by remember { mutableStateOf(false) }
+    val priceChangeChecked by viewModel.priceChangeChecked.collectAsState()
+    val moveCategoryChecked by viewModel.moveCategoryChecked.collectAsState()
+    val addTamilNameChecked by viewModel.addTamilNameChecked.collectAsState()
+    val removeNeedsReviewLineChecked by viewModel.removeNeedsReviewLineChecked.collectAsState()
+    val saveDraftChecked by viewModel.saveDraftChecked.collectAsState()
+    val closeReopenChecked by viewModel.closeReopenChecked.collectAsState()
+
     var editName by remember { mutableStateOf("") }
     var editNameTa by remember { mutableStateOf("") }
     var editBusinessType by remember { mutableStateOf("") }
@@ -8463,6 +9802,8 @@ fun InteractivePreviewSection(
     var editItemNameTa by remember { mutableStateOf("") }
     var editItemPrice by remember { mutableStateOf("") }
     var editItemMeatType by remember { mutableStateOf("") }
+    var editItemCategory by remember { mutableStateOf("") }
+    var editItemNeedsReview by remember { mutableStateOf(false) }
 
     var showAddItemDialog by remember { mutableStateOf(false) }
     var targetCategoryForNewItem by remember { mutableStateOf("") }
@@ -8580,10 +9921,10 @@ fun InteractivePreviewSection(
                             }
                         },
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0x3338BDF8)),
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        contentPadding = PaddingValues(0.dp)
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("📍 USE CURRENT GPS LOCATION (இருப்பிடத்தை பெறுக)", fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                        Text("📍 USE CURRENT GPS LOCATION (இருப்பிடத்தை பெறுக)", fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -8656,7 +9997,61 @@ fun InteractivePreviewSection(
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Text("Category / Meat Type:", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    androidx.compose.material3.OutlinedTextField(
+                        value = editItemCategory,
+                        onValueChange = { editItemCategory = it },
+                        label = { Text("Category (பிரிவு)", color = Color.Gray) },
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    if (editItemNeedsReview) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFEF4444).copy(alpha = 0.1f))
+                                .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable { editItemNeedsReview = !editItemNeedsReview }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.Warning, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                Column {
+                                    Text("Needs Review (சரிபார்க்க தேவை)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Unresolved price-range line", color = Color.Gray, fontSize = 9.sp)
+                                }
+                            }
+                            androidx.compose.material3.TextButton(
+                                onClick = { editItemNeedsReview = false },
+                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = Color(0xFF38BDF8))
+                            ) {
+                                Text("RESOLVE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x0Fffffff))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(16.dp))
+                                Column {
+                                    Text("Review Status: Resolved ✅", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Price has been successfully verified", color = Color.Gray, fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    Text("Meat Type:", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -8687,7 +10082,9 @@ fun InteractivePreviewSection(
                                 itemName = editItemNameEn,
                                 itemNameTa = editItemNameTa,
                                 price = parsedPrice,
-                                meatType = editItemMeatType
+                                meatType = editItemMeatType,
+                                category = editItemCategory,
+                                needsReview = editItemNeedsReview
                             )
                         )
                         showEditItemDialog = false
@@ -9617,7 +11014,9 @@ fun InteractivePreviewSection(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (item.needsReview) Color(0x26EF4444) else Color.Transparent)
+                                                .padding(horizontal = 4.dp, vertical = 6.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
@@ -9659,6 +11058,24 @@ fun InteractivePreviewSection(
                                                         fontWeight = FontWeight.Bold
                                                     )
                                                 }
+
+                                                if (item.needsReview) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(top = 2.dp)
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(Color(0xFFEF4444).copy(alpha = 0.2f))
+                                                            .border(0.5.dp, Color(0xFFEF4444), RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            "⚠️ Price Range - Needs Review",
+                                                            color = Color(0xFFFCA5A5),
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
                                             }
                                             
                                             Row(
@@ -9681,6 +11098,8 @@ fun InteractivePreviewSection(
                                                         editItemNameTa = item.itemNameTa
                                                         editItemPrice = item.price.toString()
                                                         editItemMeatType = item.meatType
+                                                        editItemCategory = item.category
+                                                        editItemNeedsReview = item.needsReview
                                                         showEditItemDialog = true
                                                     },
                                                     modifier = Modifier.size(24.dp)
@@ -9733,24 +11152,163 @@ fun InteractivePreviewSection(
                             }
                         }
 
-                        // Section: Final Publish Button
+                        // Section: Smart Menu Manager Compliance Checklist G
                         item {
                             Spacer(modifier = Modifier.height(16.dp))
-                            androidx.compose.material3.Button(
-                                onClick = {
-                                    viewModel.publishCurrentDraftDirectly()
-                                },
-                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),
-                                shape = RoundedCornerShape(12.dp),
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp)
-                                    .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-                                contentPadding = PaddingValues(horizontal = 16.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
+                                    .padding(16.dp)
                             ) {
-                                Icon(Icons.Filled.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("CONFIRM & PUBLISH MENU LIVE 🚀 (வெளியிடு)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.List,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        "MANUAL COMPLIANCE CHECKLIST (சரிபார்ப்பு பட்டியல்)",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    "Please complete all interface checks (A-F) to unlock the live publishing button.",
+                                    color = Color.LightGray,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                )
+                                
+                                val checks = listOf(
+                                    Triple("Check A: Edit Price", "Edit any item and change its price.", priceChangeChecked),
+                                    Triple("Check B: Move Category", "Edit any item and change its Category (e.g. Chicken Varieties) to move it.", moveCategoryChecked),
+                                    Triple("Check C: Add/Edit Tamil Name", "Edit any item and update its Tamil name.", addTamilNameChecked),
+                                    Triple("Check D: Resolve Needs Review", "Delete or resolve/fix at least one 'Needs Review' line.", removeNeedsReviewLineChecked),
+                                    Triple("Check E: Save Draft", "Save your current progress as a draft.", saveDraftChecked),
+                                    Triple("Check F: Close & Reopen Screen", "Close and reopen the review screen.", closeReopenChecked)
+                                )
+                                
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    checks.forEach { (title, desc, isChecked) ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isChecked) Color(0xFF16A34A).copy(alpha = 0.1f) else Color(0x0Fffffff))
+                                                .border(
+                                                    1.dp, 
+                                                    if (isChecked) Color(0xFF16A34A).copy(alpha = 0.4f) else Color.Transparent, 
+                                                    RoundedCornerShape(8.dp)
+                                                )
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                Text(desc, color = Color.Gray, fontSize = 9.sp)
+                                            }
+                                            if (isChecked) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.CheckCircle,
+                                                    contentDescription = "Passed",
+                                                    tint = Color(0xFF22C55E),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Warning,
+                                                    contentDescription = "Pending",
+                                                    tint = Color.Gray,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(12.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Save Draft button
+                                    androidx.compose.material3.Button(
+                                        onClick = {
+                                            viewModel.saveDraft()
+                                        },
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f).height(38.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("SAVE DRAFT 💾", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    
+                                    // Simulate Close/Reopen button
+                                    androidx.compose.material3.Button(
+                                        onClick = {
+                                            viewModel.markClosedAndReopened()
+                                        },
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B)),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f).height(38.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("CLOSE & REOPEN 🔄", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section: Final Publish Button (Unlocked only when all 6 checks are passed)
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            if (priceChangeChecked && moveCategoryChecked && addTamilNameChecked && removeNeedsReviewLineChecked && saveDraftChecked && closeReopenChecked) {
+                                androidx.compose.material3.Button(
+                                    onClick = {
+                                        viewModel.publishCurrentDraftDirectly()
+                                    },
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(52.dp)
+                                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    Icon(Icons.Filled.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("CONFIRM & PUBLISH MENU LIVE 🚀 (வெளியிடு)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(52.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "🔒 Publish Locked — Complete Checklist Above to Unlock",
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(24.dp))
                         }
@@ -9776,5 +11334,368 @@ fun MetadataRow(label: String, value: String) {
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold
         )
+    }
+}
+
+@Composable
+fun LiveTestMonitorTab(viewModel: AdminViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val orders by viewModel.allOrders.collectAsState()
+    val activeRides by viewModel.activeDeliveryRides.collectAsState()
+
+    val testPhones = listOf("9999900001", "9999900002", "9999900003", "9999900004", "9999900005")
+
+    var reportsState by remember { mutableStateOf<List<com.example.data.repository.TestOrderReport>>(emptyList()) }
+
+    LaunchedEffect(orders, activeRides) {
+        val list = mutableListOf<com.example.data.repository.TestOrderReport>()
+        for (phone in testPhones) {
+            val order = orders.firstOrNull { it.userId == phone }
+            if (order != null) {
+                val ride = activeRides.firstOrNull { it.orderId == order.id } ?: viewModel.repository.getRideForOrder(order.id)
+                val items = viewModel.getOrderItems(order.id)
+                val report = com.example.data.repository.LyoLiveTestTracker.getReportForOrder(order, ride, items)
+                list.add(report)
+            } else {
+                list.add(
+                    com.example.data.repository.TestOrderReport(
+                        orderId = 0L,
+                        customerPhone = phone,
+                        customerName = when (phone) {
+                            "9999900001" -> "Test Customer 1"
+                            "9999900002" -> "Test Customer 2"
+                            "9999900003" -> "Test Customer 3"
+                            "9999900004" -> "Test Customer 4"
+                            "9999900005" -> "Test Customer 5"
+                            else -> "Test Customer"
+                        },
+                        shopName = "None",
+                        itemsText = "None",
+                        price = 0.0,
+                        riderName = "Unassigned",
+                        riderPhone = "Unassigned",
+                        placementTimeStr = "Pending",
+                        adminAcceptanceTimeStr = "Pending",
+                        riderAssignmentTimeStr = "Pending",
+                        departureTimeStr = "Pending",
+                        completionTimeStr = "Pending",
+                        durationMinutes = 0,
+                        gpsCoordinatesLog = "None",
+                        notificationLogsStr = "None",
+                        checklist = mapOf(
+                            "A" to "NOT TESTED",
+                            "B" to "NOT TESTED",
+                            "C" to "NOT TESTED",
+                            "D" to "NOT TESTED",
+                            "E" to "NOT TESTED",
+                            "F" to "NOT TESTED"
+                        ),
+                        finalStatus = "NOT TESTED"
+                    )
+                )
+            }
+        }
+        reportsState = list
+    }
+
+    val totalOrdersCount = reportsState.count { it.orderId > 0L }
+    val completedCount = reportsState.count { it.finalStatus == "PASS" }
+    val overallStatus = when {
+        completedCount == 5 -> "PASS (COMPLETE) 🎉"
+        totalOrdersCount > 0 -> "RUNNING (IN PROGRESS) 🧪"
+        else -> "READY (NOT TESTED) ⚡"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Master Banner
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Live Test Monitor 🧪", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("5-Customer Concurrent Multi-Device Live Order Flow", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                when {
+                                    completedCount == 5 -> Color(0x3322C55E)
+                                    totalOrdersCount > 0 -> Color(0x33F97316)
+                                    else -> Color(0x3364748B)
+                                }
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = overallStatus,
+                            color = when {
+                                completedCount == 5 -> Color(0xFF22C55E)
+                                totalOrdersCount > 0 -> Color(0xFFF97316)
+                                else -> Color(0xFF94A3B8)
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Stats row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text("Active Test Devices", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                        Text("5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text("Orders Placed", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                        Text("$totalOrdersCount / 5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text("Full Flows Passed", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                        Text("$completedCount / 5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Export buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            val textBuilder = StringBuilder()
+                            textBuilder.append("=== Lyo AI Food Delivery System Test Report ===\n")
+                            textBuilder.append("Timestamp: ${java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())} IST\n")
+                            textBuilder.append("Overall Status: $overallStatus\n")
+                            textBuilder.append("Passed Flows: $completedCount / 5\n\n")
+                            for (rep in reportsState) {
+                                textBuilder.append("Slot ${rep.customerName} (${rep.customerPhone}):\n")
+                                textBuilder.append("  Order ID: ${if (rep.orderId > 0L) "#" + rep.orderId else "Pending"}\n")
+                                textBuilder.append("  Status: ${rep.finalStatus}\n")
+                                textBuilder.append("  Shop: ${rep.shopName} | Rider: ${rep.riderName}\n")
+                                textBuilder.append("  Timestamps: Placement: ${rep.placementTimeStr} | Acceptance: ${rep.adminAcceptanceTimeStr} | Rider assignment: ${rep.riderAssignmentTimeStr} | Dispatch: ${rep.departureTimeStr} | Delivery: ${rep.completionTimeStr}\n")
+                                textBuilder.append("  Checklist: A:${rep.checklist["A"]} B:${rep.checklist["B"]} C:${rep.checklist["C"]} D:${rep.checklist["D"]} E:${rep.checklist["E"]} F:${rep.checklist["F"]}\n")
+                                textBuilder.append("  GPS Log: ${rep.gpsCoordinatesLog}\n")
+                                textBuilder.append("  Device Push Notifications: ${rep.notificationLogsStr}\n")
+                                textBuilder.append("--------------------------------------------------\n")
+                            }
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Lyo Test Report", textBuilder.toString()))
+                            android.widget.Toast.makeText(context, "Plain Text report copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0x3338BDF8)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("📋 Copy Text Report", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            LyoNotificationHelper.generateTestReportPdfAndShare(context, reportsState)
+                        },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("📄 Export PDF Report", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Concurrent Test Channels (5 Devices)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+
+        for (i in reportsState.indices) {
+            val report = reportsState[i]
+            var isExpanded by remember { mutableStateOf(true) }
+
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                borderColor = when (report.finalStatus) {
+                    "PASS" -> Color(0xFF22C55E).copy(alpha = 0.3f)
+                    "IN PROGRESS" -> LyoColors.AccentOrange.copy(alpha = 0.3f)
+                    else -> Color(0xFF64748B).copy(alpha = 0.1f)
+                }
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { isExpanded = !isExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(LyoColors.AccentOrange)
+                                    .wrapContentSize(Alignment.Center)
+                            ) {
+                                Text((i + 1).toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(report.customerName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Device Contact: ${report.customerPhone}", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when (report.finalStatus) {
+                                        "PASS" -> Color(0x3322C55E)
+                                        "IN PROGRESS" -> Color(0x33F97316)
+                                        else -> Color(0x3364748B)
+                                    }
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = report.finalStatus,
+                                color = when (report.finalStatus) {
+                                    "PASS" -> Color(0xFF22C55E)
+                                    "IN PROGRESS" -> Color(0xFFF97316)
+                                    else -> Color(0xFF94A3B8)
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (isExpanded) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.material3.HorizontalDivider(color = Color(0x11FFFFFF), thickness = 1.dp)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Step statuses checklist row
+                        Text("Checklist Evaluation (A to F):", color = LyoColors.TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val steps = listOf("A", "B", "C", "D", "E", "F")
+                            val stepsTa = listOf("Placed", "Accepted", "Rider Assign", "Live GPS", "Notifications", "Delivered")
+                            for (j in steps.indices) {
+                                val stepKey = steps[j]
+                                val stepStatus = report.checklist[stepKey] ?: "NOT TESTED"
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when (stepStatus) {
+                                                    "PASS" -> Color(0x3322C55E)
+                                                    "IN PROGRESS" -> Color(0x33F97316)
+                                                    else -> Color(0x3364748B)
+                                                }
+                                            )
+                                            .wrapContentSize(Alignment.Center)
+                                    ) {
+                                        Text(
+                                            text = stepKey,
+                                            color = when (stepStatus) {
+                                                "PASS" -> Color(0xFF22C55E)
+                                                "IN PROGRESS" -> Color(0xFFF97316)
+                                                else -> Color(0xFF94A3B8)
+                                            },
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(stepsTa[j], color = LyoColors.TextSecondary, fontSize = 7.sp, maxLines = 1)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.material3.HorizontalDivider(color = Color(0x11FFFFFF), thickness = 1.dp)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Order info
+                        Text("Order details:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Linked Order:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(if (report.orderId > 0L) "#LYO-${report.orderId}" else "Not created yet", color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Selected Store:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.shopName, color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Order Items & Subtotal:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text("${report.itemsText} (₹${report.price.toInt()})", color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Selected Delivery Partner:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text("${report.riderName} (${report.riderPhone})", color = Color.White, fontSize = 10.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Flow Milestones Timestamps:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("A • Order Creation Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.placementTimeStr, color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("B • Admin Acceptance Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.adminAcceptanceTimeStr, color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("C • Partner Dispatch Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.riderAssignmentTimeStr, color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("D • Rider Out For Delivery Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.departureTimeStr, color = Color.White, fontSize = 10.sp)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("F • Successful Handover Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(report.completionTimeStr, color = Color.White, fontSize = 10.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Live GPS Logs (Salem Road, Idappadi):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(report.gpsCoordinatesLog, color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Device Notification Receipts Logs:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(report.notificationLogsStr, color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
     }
 }

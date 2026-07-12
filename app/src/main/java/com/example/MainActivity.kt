@@ -28,6 +28,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 
 class MainActivity : ComponentActivity() {
+  @android.annotation.SuppressLint("ContextCastToActivity")
   @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -82,43 +83,56 @@ class MainActivity : ComponentActivity() {
 
     setContent {
       MyApplicationTheme(darkTheme = true) { // Force-enable luxury premium dark theme
+        val remoteLogout by storefrontViewModel.repository.remoteLogoutTriggered.collectAsState()
         var currentRoute by remember { mutableStateOf("SPLASH") }
         var previousRoute by remember { mutableStateOf("CUSTOMER_DASHBOARD") }
         var selectedVendorId by remember { mutableLongStateOf(0L) }
         var activeOrderId by remember { mutableLongStateOf(0L) }
 
+        if (remoteLogout) {
+          androidx.compose.material3.AlertDialog(
+              onDismissRequest = { /* Prevent dismissing */ },
+              containerColor = Color(0xFF1E293B),
+              title = { Text("Session Terminated 🚨", color = Color.White, fontWeight = FontWeight.Bold) },
+              text = {
+                  Text(
+                      "உங்கள் கணக்கு மற்றொரு சாதனத்திலிருந்து வெளியேற்றப்பட்டுள்ளது!\n\nThis device has been logged out of this account remotely because the session was terminated or revoked on another device.",
+                      color = Color.LightGray,
+                      fontSize = 13.sp
+                  )
+              },
+              confirmButton = {
+                  androidx.compose.material3.Button(
+                      colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                      onClick = {
+                          storefrontViewModel.repository.remoteLogoutTriggered.value = false
+                          authViewModel.logout()
+                          currentRoute = "LOGIN"
+                      }
+                  ) {
+                      Text("சரி (OK)", color = Color.White)
+                  }
+              }
+          )
+        }
+
         val sharedPrefs = remember {
           applicationContext.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
         }
         val startPhone = remember { sharedPrefs.getString("logged_user_phone", null) }
+        val scope = rememberCoroutineScope()
+        var isRetryingOfflineAuth by remember { mutableStateOf(false) }
 
         val permissionsLauncher = rememberLauncherForActivityResult(
           contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
         ) { _ -> }
 
-        // Robust single-flow splash and session recovery
-        LaunchedEffect(Unit) {
-          val permissions = mutableListOf(
-            android.Manifest.permission.ACCESS_FINE_LOCATION,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
-          )
-          if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
-          }
-          try {
-            permissionsLauncher.launch(permissions.toTypedArray())
-          } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Failed to launch permissions: ${e.message}")
-          }
-
-          val startTime = System.currentTimeMillis()
+        suspend fun performVerification() {
           val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-          
-          // a. Wait for Firebase Auth state to finish resolving only if we have a saved user phone
           var firebaseUser = auth.currentUser
-          if (firebaseUser == null && startPhone != null) {
+          if (firebaseUser == null) {
               var elapsedWait = 0L
-              while (auth.currentUser == null && elapsedWait < 1500L) {
+              while (auth.currentUser == null && elapsedWait < 2000L) {
                   delay(100L)
                   elapsedWait += 100L
               }
@@ -129,68 +143,64 @@ class MainActivity : ComponentActivity() {
           var errorMessage: String? = null
 
           if (firebaseUser != null) {
-              // c. If an authenticated user exists, read exactly users/{auth.currentUser.uid}
               val uid = firebaseUser.uid
               try {
                   val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
                   val doc = dbInstance.collection("users").document(uid).get().await()
                   
-                  // d. Confirm that the document exists
                   if (doc.exists()) {
-                      // e. Confirm isActive === true
-                      val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
-                      if (isActive) {
-                          // f. Read and validate the role
-                          val rawRole = doc.getString("role") ?: "CUSTOMER"
-                          val role = if (rawRole == "RIDER") "DELIVERY" else rawRole
-                          val phone = doc.getString("phone") ?: ""
-                          
-                          val user = User(
-                              phone = phone,
-                              name = doc.getString("name") ?: "",
-                              email = doc.getString("email") ?: "",
-                              address = doc.getString("address") ?: "",
-                              lat = doc.getDouble("lat") ?: 11.5812,
-                              lng = doc.getDouble("lng") ?: 77.8465,
-                              isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
-                              role = role,
-                              vehicleNo = doc.getString("vehicleNo") ?: "",
-                              isActiveRider = doc.getBoolean("isActiveRider") ?: true,
-                              salaryType = doc.getString("salaryType") ?: "MONTHLY",
-                              salaryRate = doc.getDouble("salaryRate") ?: 0.0
-                          )
-                          
-                          // Save/update locally
-                          lyoRepository.userDao.insertUser(user)
-                          lyoRepository.currentUser.value = user
-                          recoverySuccessful = true
-                          
-                          // g. Route the user to the correct dashboard based on role
-                          currentRoute = when (role) {
-                              "ADMIN" -> "ADMIN_DASHBOARD"
-                              "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
-                              "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
-                              else -> "CUSTOMER_DASHBOARD"
-                          }
-                          android.util.Log.d("MainActivity", "Successfully recovered user session for UID: $uid, Role: $role")
-                          
-                          // Trigger background retry for any pending local synced orders
-                          CoroutineScope(Dispatchers.IO).launch {
-                              try {
-                                  lyoRepository.retryPendingSyncs()
-                              } catch (syncEx: Exception) {
-                                  android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
-                              }
-                          }
+                      val rawRole = doc.getString("role")
+                      if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                          errorMessage = "Account profile is incomplete. Please contact support."
                       } else {
-                          errorMessage = "Your account is inactive. Please contact the administrator. (உங்கள் கணக்கு முடக்கப்பட்டுள்ளது!)"
+                          val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
+                          if (isActive) {
+                              val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
+                              val phone = doc.getString("phone") ?: ""
+                              
+                              val user = User(
+                                  phone = phone,
+                                  name = doc.getString("name") ?: "",
+                                  email = doc.getString("email") ?: "",
+                                  address = doc.getString("address") ?: "",
+                                  lat = doc.getDouble("lat") ?: 11.5812,
+                                  lng = doc.getDouble("lng") ?: 77.8465,
+                                  isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                                  role = role,
+                                  vehicleNo = doc.getString("vehicleNo") ?: "",
+                                  isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                                  salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                                  salaryRate = doc.getDouble("salaryRate") ?: 0.0,
+                                  uid = doc.getString("uid") ?: uid
+                              )
+                              
+                              lyoRepository.userDao.insertUser(user)
+                              lyoRepository.currentUser.value = user
+                              recoverySuccessful = true
+                              
+                              currentRoute = when (role) {
+                                  "ADMIN" -> "ADMIN_DASHBOARD"
+                                  "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
+                                  "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                                  else -> "CUSTOMER_DASHBOARD"
+                              }
+                              android.util.Log.d("MainActivity", "Successfully recovered user session for UID: $uid, Role: $role")
+                              
+                              CoroutineScope(Dispatchers.IO).launch {
+                                  try {
+                                      lyoRepository.retryPendingSyncs()
+                                  } catch (syncEx: Exception) {
+                                      android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
+                                  }
+                              }
+                          } else {
+                              errorMessage = "Your account is inactive. Please contact the administrator. (உங்கள் கணக்கு முடக்கப்பட்டுள்ளது!)"
+                          }
                       }
                   } else {
-                      // i. Show specific error when the profile document is genuinely missing
-                      errorMessage = "Your user profile is missing in the system. (உங்கள் சுயவிவரம் காணப்படவில்லை!)"
+                      errorMessage = "Account profile is incomplete. Please contact support."
                   }
               } catch (e: Exception) {
-                  // h. Do not log out the user merely because Firestore temporarily fails due to network, cache, or timeout
                   android.util.Log.e("MainActivity", "Temporary Firestore error during session recovery: ${e.message}. Falling back to local cache.")
                   
                   val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
@@ -199,7 +209,6 @@ class MainActivity : ComponentActivity() {
                       recoverySuccessful = true
                       currentRoute = when (cachedUser.role) {
                           "ADMIN" -> "ADMIN_DASHBOARD"
-                          "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
                           "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
                           else -> "CUSTOMER_DASHBOARD"
                       }
@@ -221,33 +230,61 @@ class MainActivity : ComponentActivity() {
                   currentRoute = "CUSTOMER_DASHBOARD"
               }
           } else {
-              // b. If there is no authenticated user, show the customer dashboard by default
-              sharedPrefs.edit()
-                  .remove("logged_user_phone")
-                  .remove("logged_user_password_hash")
-                  .apply()
-              lyoRepository.currentUser.value = null
-              currentRoute = "CUSTOMER_DASHBOARD"
+              // FirebaseAuth.currentUser is genuinely null on startup!
+              val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
+              if (cachedUser != null) {
+                  lyoRepository.currentUser.value = cachedUser
+                  currentRoute = when (cachedUser.role) {
+                      "ADMIN" -> "ADMIN_DASHBOARD"
+                      "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                      else -> "CUSTOMER_DASHBOARD"
+                  }
+                  android.util.Log.d("MainActivity", "Firebase auth is null, restored cached user: ${cachedUser.phone}")
+              } else {
+                  lyoRepository.currentUser.value = null
+                  currentRoute = "CUSTOMER_DASHBOARD"
+                  android.util.Log.d("MainActivity", "Firebase auth is null on startup. Routing to CUSTOMER_DASHBOARD.")
+              }
           }
+        }
+
+        // Robust single-flow splash and session recovery
+        LaunchedEffect(Unit) {
+          val permissions = mutableListOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+          )
+          if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
+          }
+          try {
+            permissionsLauncher.launch(permissions.toTypedArray())
+          } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to launch permissions: ${e.message}")
+          }
+
+          val startTime = System.currentTimeMillis()
+          performVerification()
 
           // Ensure the splash screen stays visible for at least 450ms total for visual elegance and high speed
           val elapsed = System.currentTimeMillis() - startTime
           val remainingDelay = (450L - elapsed).coerceAtLeast(0L)
           delay(remainingDelay)
 
-          // Navigate directly if not already set by session recovery
-          if (currentRoute == "SPLASH") {
-              val currentUserVal = lyoRepository.currentUser.value
-              if (currentUserVal != null) {
-                  currentRoute = when (currentUserVal.role) {
-                      "ADMIN" -> "ADMIN_DASHBOARD"
-                      "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
-                      "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
-                      else -> "CUSTOMER_DASHBOARD"
-                  }
-              } else {
-                  currentRoute = "CUSTOMER_DASHBOARD"
+          lyoRepository.isAuthRestoring.value = false
+        }
+
+        val currentActivity = androidx.compose.ui.platform.LocalContext.current as? MainActivity
+        LaunchedEffect(currentActivity?.intent) {
+          currentActivity?.intent?.let { intentVal ->
+            val screen = intentVal.getStringExtra("screen")
+            if (screen != null) {
+              currentRoute = screen
+              if (screen == "CUSTOMER_DASHBOARD") {
+                storefrontViewModel.selectedTabState.value = "TRACKER"
               }
+              intentVal.removeExtra("screen")
+            }
           }
         }
 
@@ -307,7 +344,12 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = {
               androidx.compose.material3.Button(
-                onClick = { storefrontViewModel.showOrderSuccessDialog.value = false },
+                onClick = {
+                  storefrontViewModel.showOrderSuccessDialog.value = false
+                  if (successDialogText == "Please log in before placing an order." || successDialogTitle == "Login Required") {
+                    currentRoute = "LOGIN"
+                  }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen)
               ) {
                 Text("சரி (OK)", color = Color.White, fontWeight = FontWeight.Bold)
@@ -381,21 +423,113 @@ class MainActivity : ComponentActivity() {
                       }
                       editor.apply()
                     }
+                    if (com.example.BuildConfig.DEBUG) {
+                      val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                      val uid = fbUser?.uid ?: user?.uid
+                      android.util.Log.d("LyoAuthDebug", "--- LOGIN SUCCESSFUL ---")
+                      android.util.Log.d("LyoAuthDebug", "• Phone Number: ${user?.phone}")
+                      android.util.Log.d("LyoAuthDebug", "• FirebaseAuth Current User UID: ${fbUser?.uid ?: "NULL"}")
+                      android.util.Log.d("LyoAuthDebug", "• Local Repository User UID: ${user?.uid}")
+                      android.util.Log.d("LyoAuthDebug", "• Final Resolved Login UID: $uid")
+                    }
                     val welcomeMsg = when (role) {
                       "ADMIN" -> "Welcome, Administrator"
-                      "DELIVERY" -> "Welcome, Rider"
+                      "DELIVERY", "RIDER" -> "Welcome, Rider"
                       else -> "Welcome back, ${user?.name ?: "Customer"}"
                     }
                     android.widget.Toast.makeText(applicationContext, welcomeMsg, android.widget.Toast.LENGTH_SHORT).show()
-                    currentRoute = when (role) {
-                      "ADMIN" -> "ADMIN_DASHBOARD"
-                      "DELIVERY" -> "DELIVERY_DASHBOARD"
-                      else -> previousRoute
+                    val pendingAction = storefrontViewModel.pendingLoginAction.value
+                    val dest = if (previousRoute == "SPLASH" || previousRoute == "LOGIN" || previousRoute == "REGISTER") "CUSTOMER_DASHBOARD" else previousRoute
+                    if (pendingAction != null && (role == "CUSTOMER" || role == "USER" || role == "none")) {
+                      storefrontViewModel.executePendingLoginAction(pendingAction)
+                      storefrontViewModel.pendingLoginAction.value = null
+                      currentRoute = when (pendingAction) {
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.Checkout -> "CHECKOUT"
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCart,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCartByItemId,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCartWithQuantity,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ChangeCartQuantity -> dest
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewOrders,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewProfile -> "CUSTOMER_DASHBOARD"
+                        else -> dest
+                      }
+                    } else {
+                      currentRoute = when (role) {
+                        "ADMIN" -> "ADMIN_DASHBOARD"
+                        "DELIVERY", "RIDER" -> "DELIVERY_DASHBOARD"
+                        else -> dest
+                      }
                     }
                   },
+                  onNavigateToAdminLogin = {
+                    currentRoute = "ADMIN_LOGIN"
+                  },
+                  onNavigateToDeliveryLogin = {
+                    currentRoute = "DELIVERY_LOGIN"
+                  },
                   onBackToStore = {
-                    currentRoute = previousRoute
+                    val destBack = if (previousRoute == "SPLASH" || previousRoute == "LOGIN" || previousRoute == "REGISTER") "CUSTOMER_DASHBOARD" else previousRoute
+                    currentRoute = destBack
                   }
+                )
+              }
+
+              "ADMIN_LOGIN" -> {
+                LoginScreen(
+                  viewModel = authViewModel,
+                  onNavigateToRegister = {
+                    authViewModel.clearRegistrationFields()
+                    currentRoute = "REGISTER"
+                  },
+                  onLoginSuccess = { role, plainPass ->
+                    val user = lyoRepository.currentUser.value
+                    if (user != null) {
+                      val editor = sharedPrefs.edit().putString("logged_user_phone", user.phone)
+                      if (plainPass != null) {
+                        editor.putString("logged_user_password_hash", com.example.data.repository.LyoFirebaseHelper.hashPassword(plainPass))
+                      }
+                      editor.apply()
+                    }
+                    val welcomeMsg = "Welcome, Administrator"
+                    android.widget.Toast.makeText(applicationContext, welcomeMsg, android.widget.Toast.LENGTH_SHORT).show()
+                    currentRoute = "ADMIN_DASHBOARD"
+                  },
+                  onNavigateToAdminLogin = {},
+                  onNavigateToDeliveryLogin = {},
+                  onBackToStore = {
+                    currentRoute = "LOGIN"
+                  },
+                  initialMode = "ADMIN"
+                )
+              }
+
+              "DELIVERY_LOGIN" -> {
+                LoginScreen(
+                  viewModel = authViewModel,
+                  onNavigateToRegister = {
+                    authViewModel.clearRegistrationFields()
+                    authViewModel.regRole.value = "DELIVERY"
+                    currentRoute = "REGISTER"
+                  },
+                  onLoginSuccess = { role, plainPass ->
+                    val user = lyoRepository.currentUser.value
+                    if (user != null) {
+                      val editor = sharedPrefs.edit().putString("logged_user_phone", user.phone)
+                      if (plainPass != null) {
+                        editor.putString("logged_user_password_hash", com.example.data.repository.LyoFirebaseHelper.hashPassword(plainPass))
+                      }
+                      editor.apply()
+                    }
+                    val welcomeMsg = "Welcome, Rider"
+                    android.widget.Toast.makeText(applicationContext, welcomeMsg, android.widget.Toast.LENGTH_SHORT).show()
+                    currentRoute = "DELIVERY_DASHBOARD"
+                  },
+                  onNavigateToAdminLogin = {},
+                  onNavigateToDeliveryLogin = {},
+                  onBackToStore = {
+                    currentRoute = "LOGIN"
+                  },
+                  initialMode = "DELIVERY"
                 )
               }
 
@@ -420,8 +554,42 @@ class MainActivity : ComponentActivity() {
                       editor.apply()
                     }
                     authViewModel.clearRegistrationFields()
-                    currentRoute = if (user?.role == "DELIVERY") "DELIVERY_DASHBOARD" else "CUSTOMER_DASHBOARD"
+                    val pendingAction = storefrontViewModel.pendingLoginAction.value
+                    val dest = if (previousRoute == "SPLASH" || previousRoute == "LOGIN" || previousRoute == "REGISTER") "CUSTOMER_DASHBOARD" else previousRoute
+                    if (pendingAction != null && (user?.role == "CUSTOMER" || user?.role == "USER" || user?.role == null)) {
+                      storefrontViewModel.executePendingLoginAction(pendingAction)
+                      storefrontViewModel.pendingLoginAction.value = null
+                      currentRoute = when (pendingAction) {
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.Checkout -> "CHECKOUT"
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCart,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCartByItemId,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.AddToCartWithQuantity,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ChangeCartQuantity -> dest
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewOrders,
+                        is com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewProfile -> "CUSTOMER_DASHBOARD"
+                        else -> dest
+                      }
+                    } else {
+                      currentRoute = if (user?.role == "DELIVERY" || user?.role == "RIDER") "DELIVERY_DASHBOARD" else "CUSTOMER_DASHBOARD"
+                    }
                   }
+                )
+              }
+
+              "OFFLINE_AUTHORIZATION_PENDING" -> {
+                OfflineAuthorizationPendingScreen(
+                  onRetry = {
+                    scope.launch {
+                      isRetryingOfflineAuth = true
+                      performVerification()
+                      isRetryingOfflineAuth = false
+                    }
+                  },
+                  onLogout = {
+                    authViewModel.logout()
+                    currentRoute = "LOGIN"
+                  },
+                  isRetrying = isRetryingOfflineAuth
                 )
               }
 
@@ -475,6 +643,7 @@ class MainActivity : ComponentActivity() {
                   onNavigateToCartCheckout = {
                     if (lyoRepository.currentUser.value == null) {
                       android.widget.Toast.makeText(applicationContext, "Please login first to place an order! 🔐", android.widget.Toast.LENGTH_LONG).show()
+                      storefrontViewModel.pendingLoginAction.value = com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.Checkout
                       currentRoute = "LOGIN"
                     } else {
                       currentRoute = "CHECKOUT"
@@ -484,30 +653,34 @@ class MainActivity : ComponentActivity() {
               }
 
               "CHECKOUT" -> {
-                BackHandler {
-                  val activeVendor = storefrontViewModel.activeVendor.value
-                  if (activeVendor == null) {
-                    currentRoute = "CUSTOMER_DASHBOARD"
-                  } else {
-                    currentRoute = "VENDOR_PROFILE"
-                  }
-                }
-                CheckoutCartScreen(
-                  viewModel = storefrontViewModel,
-                  onNavigateBack = {
+                if (lyoRepository.currentUser.value == null) {
+                  currentRoute = "LOGIN"
+                } else {
+                  BackHandler {
                     val activeVendor = storefrontViewModel.activeVendor.value
                     if (activeVendor == null) {
                       currentRoute = "CUSTOMER_DASHBOARD"
                     } else {
                       currentRoute = "VENDOR_PROFILE"
                     }
-                  },
-                  onCheckoutSuccessful = { generatedId ->
-                    activeOrderId = generatedId
-                    storefrontViewModel.selectedTabState.value = "TRACKER"
-                    currentRoute = "CUSTOMER_DASHBOARD"
                   }
-                )
+                  CheckoutCartScreen(
+                    viewModel = storefrontViewModel,
+                    onNavigateBack = {
+                      val activeVendor = storefrontViewModel.activeVendor.value
+                      if (activeVendor == null) {
+                        currentRoute = "CUSTOMER_DASHBOARD"
+                      } else {
+                        currentRoute = "VENDOR_PROFILE"
+                      }
+                    },
+                    onCheckoutSuccessful = { generatedId ->
+                      activeOrderId = generatedId
+                      storefrontViewModel.selectedTabState.value = "TRACKER"
+                      currentRoute = "CUSTOMER_DASHBOARD"
+                    }
+                  )
+                }
               }
 
               "ACTIVE_ORDER_TRACKING" -> {
@@ -521,59 +694,75 @@ class MainActivity : ComponentActivity() {
               }
 
               "ADMIN_DASHBOARD" -> {
-                val selectedAdminVendor by adminViewModel.selectedAdminVendor.collectAsState()
-                var lastBackPressTime by remember { mutableStateOf(0L) }
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val activity = context as? android.app.Activity
+                val currentUserVal = lyoRepository.currentUser.value
+                if (currentUserVal == null || currentUserVal.role != "ADMIN") {
+                  currentRoute = "LOGIN"
+                  android.widget.Toast.makeText(applicationContext, "🛡️ Admin authorization required.", android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                  val selectedAdminVendor by adminViewModel.selectedAdminVendor.collectAsState()
+                  var lastBackPressTime by remember { mutableStateOf(0L) }
+                  val context = androidx.compose.ui.platform.LocalContext.current
+                  val activity = context as? android.app.Activity
 
-                BackHandler(enabled = true) {
-                  if (selectedAdminVendor != null) {
-                    adminViewModel.selectedAdminVendor.value = null
-                  } else {
+                  BackHandler(enabled = true) {
+                    if (selectedAdminVendor != null) {
+                      adminViewModel.selectedAdminVendor.value = null
+                    } else {
+                      val currentTime = System.currentTimeMillis()
+                      if (currentTime - lastBackPressTime < 2000) {
+                        activity?.finish()
+                      } else {
+                        lastBackPressTime = currentTime
+                        android.widget.Toast.makeText(context, "Press BACK again to exit Admin Portal", android.widget.Toast.LENGTH_SHORT).show()
+                      }
+                    }
+                  }
+                  CompositionLocalProvider(LocalIsLightTheme provides false) {
+                    AdminDashboardScreen(
+                      viewModel = adminViewModel,
+                      onLogoutClick = {
+                        sharedPrefs.edit().remove("logged_user_phone").apply()
+                        authViewModel.logout()
+                        currentRoute = "LOGIN"
+                      },
+                      onSwitchToCustomer = {
+                        currentRoute = "CUSTOMER_DASHBOARD"
+                      }
+                    )
+                  }
+                }
+              }
+
+              "DELIVERY_DASHBOARD" -> {
+                val currentUserVal = lyoRepository.currentUser.value
+                if (currentUserVal == null || (currentUserVal.role != "RIDER" && currentUserVal.role != "DELIVERY")) {
+                  currentRoute = "LOGIN"
+                  android.widget.Toast.makeText(applicationContext, "🏍️ Rider authorization required.", android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                  var lastBackPressTime by remember { mutableStateOf(0L) }
+                  val context = androidx.compose.ui.platform.LocalContext.current
+                  val activity = context as? android.app.Activity
+
+                  BackHandler(enabled = true) {
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastBackPressTime < 2000) {
                       activity?.finish()
                     } else {
                       lastBackPressTime = currentTime
-                      android.widget.Toast.makeText(context, "Press BACK again to exit Admin Portal", android.widget.Toast.LENGTH_SHORT).show()
+                      android.widget.Toast.makeText(context, "Press BACK again to exit Rider Portal", android.widget.Toast.LENGTH_SHORT).show()
                     }
                   }
-                }
-                AdminDashboardScreen(
-                  viewModel = adminViewModel,
-                  onLogoutClick = {
-                    sharedPrefs.edit().remove("logged_user_phone").apply()
-                    authViewModel.logout()
-                    currentRoute = "LOGIN"
-                  },
-                  onSwitchToCustomer = {
-                    currentRoute = "CUSTOMER_DASHBOARD"
-                  }
-                )
-              }
-
-              "DELIVERY_DASHBOARD" -> {
-                var lastBackPressTime by remember { mutableStateOf(0L) }
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val activity = context as? android.app.Activity
-
-                BackHandler(enabled = true) {
-                  val currentTime = System.currentTimeMillis()
-                  if (currentTime - lastBackPressTime < 2000) {
-                    activity?.finish()
-                  } else {
-                    lastBackPressTime = currentTime
-                    android.widget.Toast.makeText(context, "Press BACK again to exit Rider Portal", android.widget.Toast.LENGTH_SHORT).show()
+                  CompositionLocalProvider(LocalIsLightTheme provides false) {
+                    DeliveryPartnerDashboardScreen(
+                      viewModel = deliveryViewModel,
+                      onLogoutClick = {
+                        sharedPrefs.edit().remove("logged_user_phone").apply()
+                        authViewModel.logout()
+                        currentRoute = "LOGIN"
+                      }
+                    )
                   }
                 }
-                DeliveryPartnerDashboardScreen(
-                  viewModel = deliveryViewModel,
-                  onLogoutClick = {
-                    sharedPrefs.edit().remove("logged_user_phone").apply()
-                    authViewModel.logout()
-                    currentRoute = "LOGIN"
-                  }
-                )
               }
             }
           }
@@ -598,5 +787,10 @@ class MainActivity : ComponentActivity() {
     } catch (e: Exception) {
       android.util.Log.e("MainActivity", "Error resuming sync: ${e.message}")
     }
+  }
+
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
   }
 }

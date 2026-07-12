@@ -40,6 +40,9 @@ fun ActiveOrderTrackingScreen(
     val otp = activeOrderVal?.otpCode ?: "1234"
 
     var isMapExpanded by remember { mutableStateOf(false) }
+    var showBlockedDialog by remember { mutableStateOf(false) }
+    var showConfirmCancelDialog by remember { mutableStateOf(false) }
+    var isCancelling by remember { mutableStateOf(false) }
 
     var activeRideState by remember(activeOrderVal?.id) { mutableStateOf<com.example.data.database.DeliveryRide?>(null) }
     var assignedRiderState by remember(activeRideState?.riderPhone) { mutableStateOf<com.example.data.database.User?>(null) }
@@ -100,6 +103,16 @@ fun ActiveOrderTrackingScreen(
             }
         }
     }
+    var isLocationFresh by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeRideState) {
+        while (true) {
+            val ts = activeRideState?.locationTimestamp ?: 0L
+            isLocationFresh = ts > 0L && (System.currentTimeMillis() - ts) <= 120_000L
+            kotlinx.coroutines.delay(5000L)
+        }
+    }
+
     val riderName = if (activeRideState != null) activeRideState!!.riderName else "Assigning Rider..."
     val riderPhone = if (activeRideState != null) activeRideState!!.riderPhone else ""
     val vehicleNo = if (activeRideState != null && assignedRiderState != null && assignedRiderState!!.vehicleNo.isNotEmpty()) assignedRiderState!!.vehicleNo else "Auto-Allocation Active"
@@ -567,8 +580,8 @@ fun ActiveOrderTrackingScreen(
                 LeafletMapView(
                     centerLat = currentUserState?.lat ?: 11.5812,
                     centerLng = currentUserState?.lng ?: 77.8465,
-                    riderLat = activeRideState?.currentLat,
-                    riderLng = activeRideState?.currentLng,
+                    riderLat = if (isLocationFresh) activeRideState?.currentLat else null,
+                    riderLng = if (isLocationFresh) activeRideState?.currentLng else null,
                     storeLat = orderVendorState?.lat ?: partner?.lat,
                     storeLng = orderVendorState?.lng ?: partner?.lng,
                     customerLat = currentUserState?.lat ?: activeOrderVal?.customerLat ?: 11.5812,
@@ -913,9 +926,9 @@ fun ActiveOrderTrackingScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "மின்னல் வேக விநியோகஸ்தர் • LIVE GPS",
+                                    text = if (isLocationFresh) "மின்னல் வேக விநியோகஸ்தர் • LIVE GPS" else "Rider location unavailable/offline (விநியோகஸ்தர் தற்காலிகமாக ஆஃப்லைனில் உள்ளார்)",
                                     fontSize = 10.sp,
-                                    color = LyoColors.AmberYellow,
+                                    color = if (isLocationFresh) LyoColors.AmberYellow else Color.Red,
                                     fontWeight = FontWeight.Black,
                                     modifier = Modifier.padding(top = 2.dp),
                                     maxLines = 1,
@@ -1127,6 +1140,74 @@ fun ActiveOrderTrackingScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
+                // ✨ HELP TOPICS & FAQ LIST
+                Text(
+                    text = "SUPPORT DESK & FAQ (உதவி மற்றும் கேள்விகள்)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = LyoColors.TextSecondary,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                )
+
+                var expandedFaqIndex by remember { mutableStateOf<Int?>(null) }
+                val faqs = listOf(
+                    "Missing item from order? (பொருட்கள் விடுபட்டுள்ளதா?)" to "Please check your package seals. If an item is missing, our support team will refund or re-deliver instantly. Contact customer care at 1800-419-1580.",
+                    "Delay in delivery? (டெலிவரி தாமதமாகிறதா?)" to "Our riders navigate carefully to ensure food safety. Heavy traffic or rain can cause minor delays. Call your assigned rider directly to get instant updates.",
+                    "How to cancel my order? (ஆர்டரை ரத்து செய்வது எப்படி?)" to "Orders can only be cancelled before merchant accepts (within 2-3 mins). If already preparing, cancellation is locked to prevent food waste.",
+                    "Payment debited but failed? (பணம் கழிந்தது ஆனால் தோல்வி?)" to "Don't worry! Failed transactions are automatically reversed by your bank within 3-5 working days. Contact us with the transaction ID for instant validation."
+                )
+
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        faqs.forEachIndexed { idx, (question, answer) ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        expandedFaqIndex = if (expandedFaqIndex == idx) null else idx
+                                    }
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "❓ $question",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = if (expandedFaqIndex == idx) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                        contentDescription = "Toggle",
+                                        tint = LyoColors.AccentOrange,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                if (expandedFaqIndex == idx) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = answer,
+                                        color = LyoColors.TextSecondary,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        modifier = Modifier.padding(start = 14.dp)
+                                    )
+                                }
+                            }
+                            if (idx < faqs.size - 1) {
+                                HorizontalDivider(color = Color(0x11FFFFFF), thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
                 // Primary Go to Home Button
                 Button(
                     onClick = onNavigateBack,
@@ -1148,17 +1229,28 @@ fun ActiveOrderTrackingScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                val cancellableStatuses = listOf("PENDING", "PLACED", "NEW", "READY_FOR_ACCEPTANCE")
+                val isCancellable = status.uppercase() in cancellableStatuses
 
-                // Cancel Order CTA
-                TextButton(
-                    onClick = {
-                        viewModel.activeLiveOrder.value = null
-                        onNavigateBack()
-                    },
-                    modifier = Modifier.padding(bottom = 20.dp)
-                ) {
-                    Text("De-escalate & Terminate Tracking (ஆர்டரை ரத்து செய்)", color = LyoColors.NonVegRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                if (isCancellable) {
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (isCancelling) {
+                        CircularProgressIndicator(
+                            color = LyoColors.NonVegRed,
+                            modifier = Modifier.size(24.dp).padding(bottom = 20.dp)
+                        )
+                    } else {
+                        // Cancel Order CTA
+                        TextButton(
+                            onClick = {
+                                showConfirmCancelDialog = true
+                            },
+                            modifier = Modifier.padding(bottom = 20.dp)
+                        ) {
+                            Text("Cancel Order (ஆர்டரை ரத்து செய்)", color = LyoColors.NonVegRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }
@@ -1260,8 +1352,8 @@ fun ActiveOrderTrackingScreen(
                             LeafletMapView(
                                 centerLat = mapCenterLat,
                                 centerLng = mapCenterLng,
-                                riderLat = if (status == "OUT_FOR_DELIVERY") rLat else null,
-                                riderLng = if (status == "OUT_FOR_DELIVERY") rLng else null,
+                                riderLat = if (status == "OUT_FOR_DELIVERY" && isLocationFresh) rLat else null,
+                                riderLng = if (status == "OUT_FOR_DELIVERY" && isLocationFresh) rLng else null,
                                 storeLat = vLat,
                                 storeLng = vLng,
                                 customerLat = cLat,
@@ -1306,8 +1398,8 @@ fun ActiveOrderTrackingScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "ஆர்டர் வழியில் உள்ளது • Live Rider visible on screen",
-                                    color = LyoColors.AmberYellow,
+                                    text = if (isLocationFresh) "ஆர்டர் வழியில் உள்ளது • Live Rider visible on screen" else "Rider location unavailable/offline (விநியோகஸ்தர் ஆஃப்லைனில் உள்ளார்)",
+                                    color = if (isLocationFresh) LyoColors.AmberYellow else Color.Red,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -1327,6 +1419,91 @@ fun ActiveOrderTrackingScreen(
                 }
             }
         }
+    }
+
+    if (showConfirmCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmCancelDialog = false },
+            title = {
+                Text(
+                    text = "ஆர்டரை ரத்து செய்யவா? / Cancel Order?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "நிச்சயமாக இந்த ஆர்டரை ரத்து செய்ய விரும்புகிறீர்களா?\n\nAre you sure you want to cancel this order?",
+                    color = Color.LightGray,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmCancelDialog = false
+                        isCancelling = true
+                        scope.launch {
+                            val orderId = activeOrderVal?.id
+                            if (orderId != null) {
+                                val result = viewModel.cancelOrderCustomer(orderId)
+                                isCancelling = false
+                                if (result.isSuccess) {
+                                    onNavigateBack()
+                                } else {
+                                    val exception = result.exceptionOrNull()
+                                    if (exception?.message?.contains("ACCEPTED_BLOCKED") == true) {
+                                        showBlockedDialog = true
+                                    } else {
+                                        LyoFirebaseHelper.appContext?.let { ctx ->
+                                            android.widget.Toast.makeText(ctx, exception?.message ?: "Cancellation failed", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                isCancelling = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("YES, CANCEL / ஆம், ரத்து செய்", color = LyoColors.NonVegRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmCancelDialog = false }) {
+                    Text("NO, KEEP / இல்லை, இருக்கட்டும்", color = LyoColors.TextSecondary)
+                }
+            },
+            containerColor = Color(0xFF1E293B)
+        )
+    }
+
+    if (showBlockedDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockedDialog = false },
+            title = {
+                Text(
+                    text = "Order already accepted",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "This order has already been accepted by the restaurant. Please contact the restaurant directly for cancellation.",
+                    color = Color.LightGray,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showBlockedDialog = false }) {
+                    Text("OK / சரி", color = LyoColors.AccentOrange, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1E293B)
+        )
     }
 }
 }

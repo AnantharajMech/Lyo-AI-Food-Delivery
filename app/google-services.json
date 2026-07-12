@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "604469873807",
+    "project_id": "lyo-ai-food-delivery",
+    "storage_bucket": "lyo-ai-food-delivery.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:604469873807:android:ae70018a97af4cfab2b4fa",
+        "android_client_info": {
+          "package_name": "com.lyo.fooddelivery"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCj35HL7MOIQMc1sXV1AGcRGt7DSkRabXk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

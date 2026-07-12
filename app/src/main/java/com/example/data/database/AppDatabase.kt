@@ -17,9 +17,11 @@ import androidx.room.RoomDatabase
         PromoBanner::class,
         SavedAddress::class,
         SavedPaymentMethod::class,
-        Review::class
+        Review::class,
+        MissingDictionaryWord::class,
+        LyoNotification::class
     ],
-    version = 21,
+    version = 26,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract val savedAddressDao: SavedAddressDao
     abstract val savedPaymentMethodDao: SavedPaymentMethodDao
     abstract val reviewDao: ReviewDao
+    abstract val missingDictionaryWordDao: MissingDictionaryWordDao
 
     companion object {
         @Volatile

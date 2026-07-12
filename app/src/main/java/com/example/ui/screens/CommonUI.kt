@@ -6,8 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,21 +44,23 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
 
+val LocalIsLightTheme = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 // Central Premium Theme Colors (Section 1)
 object LyoColors {
-    val DarkCyanBg = Color(0xFF0B1120) // Deep Navy Background (#0B1120)
-    val CardSlate = Color(0xFF131B2E) // Deep Premium Slate Card Surface
-    val AccentOrange = Color(0xFFFF7622) // Vibrant high-contrast Premium Coral/Orange Accent (#FFFF7622)
-    val AmberYellow = Color(0xFF00D9FF) // Electric Cyan Accent (#00D9FF)
-    val GlassBorder = Color(0x3300D9FF) // Translucent Electric Cyan border stroke
-    val TranslucentSlate = Color(0x1F131B2E) // Light glass translucent overlay
+    val DarkCyanBg = Color(0xFF071426) // Deep Navy Background (--bg)
+    val CardSlate = Color(0xFF0E1D34) // Deep Premium Slate Card Surface (--surface)
+    val AccentOrange = Color(0xFFFF7A1A) // Vibrant orange (--orange)
+    val AmberYellow = Color(0xFF14C7E8) // Premium Cyan (--cyan)
+    val GlassBorder = Color(0x4714C7E8) // Translucent border (--border)
+    val TranslucentSlate = Color(0xCC0E1D34) // Glass overlay
     val TranslucentBlack = Color(0x99000000)
-    val TextPrimary = Color(0xFFFFFFFF) // Crisp White for maximum dark contrast
-    val TextSecondary = Color(0xFFCBD5E1) // Brilliant Platinum/Slate muted text for perfect dark contrast
-    val VegGreen = Color(0xFF10B981) // Modern Emerald Veg Green
+    val TextPrimary = Color(0xFFF8FAFC) // Primary text (--text)
+    val TextSecondary = Color(0xFFA9B7CC) // Muted text (--muted)
+    val VegGreen = Color(0xFF22C55E) // Veg green (--green)
     val NonVegRed = Color(0xFFEF4444) // Premium Coral Red
-    val WarningYellow = Color(0xFFF59E0B) // Warning Amber Gold
-    val LiveCyan = Color(0xFF00D9FF) // Electric Cyan Accent
+    val WarningYellow = Color(0xFFFF7A1A) // Warning Amber Gold
+    val LiveCyan = Color(0xFF14C7E8) // Electric Cyan Accent
 }
 
 // ============================================
@@ -135,6 +136,18 @@ object LyoGlassDesignTokens {
 fun LyoBackground(
     content: @Composable BoxScope.() -> Unit
 ) {
+    val isLightTheme = LocalIsLightTheme.current
+    if (isLightTheme) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF8FAFC))
+        ) {
+            content()
+        }
+        return
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "lyo_bg_anim")
     
     // Pulsating factors
@@ -205,9 +218,9 @@ fun LyoBackground(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF0B1120), // Ultimate Deep Navy background
-                        Color(0xFF0B1120),
-                        Color(0xFF1E3A8A)  // Futuristic Deep Indigo base glow
+                        LyoColors.DarkCyanBg, // Ultimate Deep Navy background (--bg)
+                        LyoColors.DarkCyanBg,
+                        Color(0xFF0E1D34)  // Deep Indigo surface (--surface)
                     )
                 )
             )
@@ -300,15 +313,32 @@ fun LyoBackground(
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 20.dp,
-    borderWidth: Dp = 1.2.dp,
+    cornerRadius: Dp = 14.dp,
+    borderWidth: Dp = 1.0.dp,
     borderColor: Color = LyoColors.GlassBorder,
     backgroundColor: Color = LyoGlassDesignTokens.GlassCardBg,
     glowColor: Color? = null,
     onClick: (() -> Unit)? = null,
-    innerPadding: Dp = 16.dp,
+    innerPadding: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isLightTheme = LocalIsLightTheme.current
+    if (isLightTheme) {
+        Box(
+            modifier = modifier
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(Color.White)
+                .border(borderWidth, Color(0xFFE2E8F0), RoundedCornerShape(cornerRadius))
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(innerPadding)
+        ) {
+            Column {
+                content()
+            }
+        }
+        return
+    }
+
     val finalBorderColor = glowColor ?: borderColor
     val finalBorderWidth = if (glowColor != null) 1.5.dp else borderWidth
     val finalElevation = if (glowColor != null) LyoGlassDesignTokens.Active3DElevation else LyoGlassDesignTokens.Standard3DElevation
@@ -2366,6 +2396,21 @@ function setupOfflineMap() {
         },
         modifier = modifier
     )
+}
+
+fun getIconForCategoryKey(key: String): androidx.compose.ui.graphics.vector.ImageVector {
+    return when (key.lowercase()) {
+        "restaurant", "dining" -> Icons.Filled.Restaurant
+        "coffee", "cafe" -> Icons.Filled.Coffee
+        "localdining", "hotel" -> Icons.Filled.LocalDining
+        "cake", "bakery" -> Icons.Filled.Cake
+        "localpizza", "pizza", "snack" -> Icons.Filled.LocalPizza
+        "store", "dhaba" -> Icons.Filled.Storefront
+        "icecream", "dessert" -> Icons.Filled.Icecream
+        "fastfood" -> Icons.Filled.Fastfood
+        "localbar", "bar", "drinks" -> Icons.Filled.LocalBar
+        else -> Icons.Filled.Category
+    }
 }
 
 

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.viewmodels.AuthViewModel
+import com.example.data.database.User
 import androidx.compose.ui.res.painterResource
 import com.example.R
 import kotlinx.coroutines.delay
@@ -226,15 +227,24 @@ fun SplashScreen(
 
 // ==========================================
 // 2. UNIFIED LOGIN SCREEN
-// ==========================================
 @Composable
 fun LoginScreen(
     viewModel: AuthViewModel,
     onNavigateToRegister: () -> Unit,
     onLoginSuccess: (String, String?) -> Unit, // returns role: CUSTOMER, ADMIN, DELIVERY and passwordOrHash
-    onBackToStore: (() -> Unit)? = null
+    onNavigateToAdminLogin: () -> Unit,
+    onNavigateToDeliveryLogin: () -> Unit,
+    onBackToStore: (() -> Unit)? = null,
+    initialMode: String = "CUSTOMER"
 ) {
-    if (onBackToStore != null) {
+    var loginMode by remember { mutableStateOf(initialMode) }
+
+    if (loginMode != "CUSTOMER") {
+        androidx.activity.compose.BackHandler {
+            loginMode = "CUSTOMER"
+            viewModel.clearError()
+        }
+    } else if (onBackToStore != null) {
         androidx.activity.compose.BackHandler {
             onBackToStore()
         }
@@ -267,12 +277,27 @@ fun LoginScreen(
     var showSandboxGoogleDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var forgotPhone by remember { mutableStateOf("") }
-    var forgotStep by remember { mutableStateOf(1) } // 1: Enter phone, 2: Simulated OTP, 3: Set password, 4: Success
+    var forgotStep by remember { mutableStateOf(1) }
     var generatedOtp by remember { mutableStateOf("") }
     var enteredOtp by remember { mutableStateOf("") }
     var forgotError by remember { mutableStateOf("") }
     var newResetPassword by remember { mutableStateOf("") }
-    var resetOtpMethod by remember { mutableStateOf("SMS") } // SMS or Gmail
+    var resetOtpMethod by remember { mutableStateOf("SMS") }
+
+    val mappedError = remember(errorMsg) {
+        if (errorMsg != null) {
+            val err = errorMsg!!.lowercase()
+            if (err.contains("incorrect") || err.contains("wrong") || err.contains("invalid") || err.contains("failed") || err.contains("no user") || err.contains("not found") || err.contains("password")) {
+                "Incorrect password. Please try again."
+            } else if (err.contains("deactivated")) {
+                "Sorry, your delivery partner account has been deactivated by the administrator."
+            } else {
+                errorMsg
+            }
+        } else {
+            null
+        }
+    }
 
     LyoBackground {
         Column(
@@ -286,41 +311,6 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            if (onBackToStore != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = onBackToStore,
-                        modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.08f), CircleShape)
-                            .size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowBack,
-                            contentDescription = "Back to Store",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    TextButton(
-                        onClick = onBackToStore,
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = "👈 View Catalog / Guest Mode",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(15.dp))
-            }
-
             // Compact Brand Logo & Heading Row
             Row(
                 modifier = Modifier
@@ -331,8 +321,7 @@ fun LoginScreen(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .scale(logoPulseScale)
+                        .size(56.dp)
                         .background(Color(0x13FFFFFF), CircleShape)
                         .border(1.dp, Color(0x33FFB347), CircleShape)
                         .padding(6.dp)
@@ -379,254 +368,730 @@ fun LoginScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Input Form Card
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 20.dp
             ) {
-                Text(
-                    text = "Lyo Account Login",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+                if (loginMode == "CUSTOMER") {
+                    Text(
+                        text = "Lyo Account Login",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
 
-                Text(
-                    text = "Enter your registered credentials. The portal will automatically detect if you are a Customer, Rider, or Administrator.",
-                    fontSize = 12.sp,
-                    color = LyoColors.TextSecondary,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
+                    Text(
+                        text = "Enter your registered credentials to access your account.",
+                        fontSize = 12.sp,
+                        color = LyoColors.TextSecondary,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
 
-                // Error Banner
-                if (errorMsg != null) {
+                    // Error Banner
+                    if (mappedError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
+                                .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = mappedError ?: "",
+                                fontSize = 13.sp,
+                                color = Color(0xFFFCA5A5),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Phone/Username/Email ID
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = it },
+                        label = { Text("Username / Email / Mobile") },
+                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = "username", tint = LyoColors.TextSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33F8FAFC)
+                        ),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("username_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Masked Password
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
+                        trailingIcon = {
+                            val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33F8FAFC)
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("password_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Forgot Password Button / கடவுச்சொல்லை மறந்துவிட்டீர்களா?
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
-                            .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
-                            .padding(12.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterEnd
                     ) {
                         Text(
-                            text = errorMsg ?: "",
+                            text = "Forgot Password?",
+                            color = LyoColors.AccentOrange,
                             fontSize = 13.sp,
-                            color = Color(0xFFFCA5A5),
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .testTag("forgot_password_button")
+                                .clickable {
+                                    forgotPhone = phone
+                                    forgotStep = 1
+                                    forgotError = ""
+                                    generatedOtp = ""
+                                    enteredOtp = ""
+                                    showForgotDialog = true
+                                }
+                                .padding(vertical = 4.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
-                }
 
-                // Phone/Username/Email ID
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
-                    label = { Text("Username / Email / Mobile") },
-                    leadingIcon = { Icon(Icons.Filled.Person, contentDescription = "username", tint = LyoColors.TextSecondary) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = LyoColors.AccentOrange,
-                        unfocusedBorderColor = Color(0x33F8FAFC)
-                    ),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    modifier = Modifier.fillMaxWidth().testTag("username_input")
-                )
+                    if (loginMode != "CUSTOMER") {
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Masked Password
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
-                    trailingIcon = {
-                        val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                        // Remember Me
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = rememberMe,
+                                onCheckedChange = { viewModel.setRememberMe(it) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = LyoColors.AccentOrange,
+                                    uncheckedColor = LyoColors.TextSecondary
+                                )
+                            )
+                            Text(
+                                text = "Keep me authorized on this terminal",
+                                color = LyoColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
                         }
-                    },
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = LyoColors.AccentOrange,
-                        unfocusedBorderColor = Color(0x33F8FAFC)
-                    ),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth().testTag("password_input")
-                )
+                    }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                // Forgot Password Button / கடவுச்சொல்லை மறந்துவிட்டீர்களா?
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text(
-                        text = "Forgot Password?",
-                        color = LyoColors.AccentOrange,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .testTag("forgot_password_button")
-                            .clickable {
-                                forgotPhone = phone
-                                forgotStep = 1
-                                forgotError = ""
-                                generatedOtp = ""
-                                enteredOtp = ""
-                                showForgotDialog = true
-                            }
-                            .padding(vertical = 4.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Remember Me
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = rememberMe,
-                        onCheckedChange = { viewModel.setRememberMe(it) },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = LyoColors.AccentOrange,
-                            uncheckedColor = LyoColors.TextSecondary
-                        )
-                    )
-                    Text(
-                        text = "Keep me authorized on this terminal",
-                        color = LyoColors.TextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Primary Login Button
-                LyoButton(
-                    text = "Authorize Session",
-                    onClick = {
-                        viewModel.loginWithPhoneAndPassword(phone, password) { detectedRole ->
-                            onLoginSuccess(detectedRole, password)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().testTag("submit_button")
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Real Authenticating Google Provider Button
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val googleSignInLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult()
-                ) { result: ActivityResult ->
-                    val intent = result.data
-                    if (result.resultCode == android.app.Activity.RESULT_OK && intent != null) {
-                        try {
-                            val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(intent)
-                            val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
-                            account?.idToken?.let { token ->
-                                viewModel.loginWithGoogle(token) { detectedRole ->
-                                    onLoginSuccess(detectedRole, null)
+                    // Primary Login Button
+                    LyoButton(
+                        text = "Authorize Session",
+                        onClick = {
+                            viewModel.loginWithPhoneAndPassword(phone, password) { detectedRole ->
+                                if (detectedRole == "ADMIN") {
+                                    viewModel.setLoginError("Access Denied: Admin accounts cannot log in through this portal. Please use the Admin Console login.")
+                                } else if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                    viewModel.setLoginError("Access Denied: Delivery Partner accounts cannot log in through this portal. Please use the Delivery Partner Login.")
+                                } else {
+                                    onLoginSuccess(detectedRole, password)
                                 }
                             }
-                        } catch (e: Exception) {
-                            android.util.Log.e("GoogleSignIn", "Google authorization failed, opening sandbox fallback: ${e.message}")
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("submit_button")
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Real Authenticating Google Provider Button
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val googleSignInLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.StartActivityForResult()
+                    ) { result: ActivityResult ->
+                        val intent = result.data
+                        if (result.resultCode == android.app.Activity.RESULT_OK && intent != null) {
+                            try {
+                                val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(intent)
+                                val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
+                                account?.idToken?.let { token ->
+                                    viewModel.loginWithGoogle(token) { detectedRole ->
+                                        if (detectedRole == "ADMIN") {
+                                            viewModel.setLoginError("Access Denied: Admin accounts cannot log in through this portal.")
+                                        } else if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                            viewModel.setLoginError("Access Denied: Delivery Partner accounts cannot log in through this portal.")
+                                        } else {
+                                            onLoginSuccess(detectedRole, null)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                showSandboxGoogleDialog = true
+                            }
+                        } else {
                             showSandboxGoogleDialog = true
                         }
-                    } else {
-                        // User cancelled or Play Services failed - open sandbox dialog helper for easy local testing
-                        showSandboxGoogleDialog = true
                     }
-                }
 
-                Button(
-                    onClick = {
-                        val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
-                            .requestIdToken("368208047268-example.apps.googleusercontent.com")
-                            .requestEmail()
-                            .build()
-                        val mGoogleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
-                        googleSignInLauncher.launch(mGoogleSignInClient.signInIntent)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color(0xFFDADCE0)),
-                    modifier = Modifier.fillMaxWidth().height(44.dp).testTag("google_login_button")
-                ) {
+                    Button(
+                        onClick = {
+                            val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                                .requestIdToken("604469873807-example.apps.googleusercontent.com")
+                                .requestEmail()
+                                .build()
+                            val mGoogleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
+                            googleSignInLauncher.launch(mGoogleSignInClient.signInIntent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFDADCE0)),
+                        modifier = Modifier.fillMaxWidth().height(44.dp).testTag("google_login_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AccountCircle,
+                                contentDescription = "google icon",
+                                tint = Color(0xFFF97316),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Sign in with Google",
+                                color = Color(0xFF1F1F1F),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else if (loginMode == "ADMIN") {
+                    val admins by viewModel.allAdmins.collectAsState(initial = emptyList())
+                    val activeAdmins = remember(admins) {
+                        admins.filter { it.role == "ADMIN" }.distinctBy { it.phone }
+                    }
+                    val finalAdmins = remember(activeAdmins) {
+                        if (activeAdmins.isEmpty()) {
+                            listOf(User("Anantharajmech", "Anantharaj Super Admin", "superadmin@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+                        } else {
+                            activeAdmins
+                        }
+                    }
+                    var selectedAdmin by remember { mutableStateOf<User?>(null) }
+                    var isAdminExpanded by remember { mutableStateOf(false) }
+
+                    Text(
+                        text = "🛡️ Lyo Admin Console Login",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LyoColors.AccentOrange,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Text(
+                        text = "Please select your Administrator profile below to authenticate into the Control Tower.",
+                        fontSize = 12.sp,
+                        color = LyoColors.TextSecondary,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    // Error Banner
+                    if (mappedError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
+                                .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Incorrect password. Please try again.",
+                                fontSize = 13.sp,
+                                color = Color(0xFFFCA5A5),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Dropdown for Admin selection
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isAdminExpanded = !isAdminExpanded }
+                        ) {
+                            OutlinedTextField(
+                                value = if (selectedAdmin != null) selectedAdmin!!.name else "",
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = false,
+                                label = { Text("Select Admin") },
+                                placeholder = { Text("Click to select Admin") },
+                                leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, tint = LyoColors.TextSecondary) },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = if (isAdminExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "Toggle Dropdown",
+                                        tint = LyoColors.TextSecondary
+                                    )
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = Color.White,
+                                    disabledLabelColor = LyoColors.TextSecondary,
+                                    disabledBorderColor = Color(0x33F8FAFC),
+                                    disabledLeadingIconColor = LyoColors.TextSecondary,
+                                    disabledTrailingIconColor = LyoColors.TextSecondary
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("admin_select_dropdown")
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { isAdminExpanded = !isAdminExpanded }
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = isAdminExpanded,
+                            onDismissRequest = { isAdminExpanded = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .background(Color(0xFF0F172A))
+                                .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                        ) {
+                            finalAdmins.forEach { admin ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(admin.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text("Authorized Admin", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedAdmin = admin
+                                        isAdminExpanded = false
+                                        viewModel.clearError()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (selectedAdmin != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Admin Password Field
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Password") },
+                            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
+                            trailingIcon = {
+                                val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                                }
+                            },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color(0x33F8FAFC)
+                            ),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth().testTag("admin_password_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Remember Me
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = rememberMe,
+                                onCheckedChange = { viewModel.setRememberMe(it) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = LyoColors.AccentOrange,
+                                    uncheckedColor = LyoColors.TextSecondary
+                                )
+                            )
+                            Text(
+                                text = "Keep me authorized on this terminal",
+                                color = LyoColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Primary Admin Login Button
+                        LyoButton(
+                            text = "Authenticate Admin Console",
+                            onClick = {
+                                viewModel.loginWithPhoneAndPassword(selectedAdmin!!.phone, password) { detectedRole ->
+                                    if (detectedRole == "ADMIN") {
+                                        onLoginSuccess("ADMIN", password)
+                                    } else {
+                                        viewModel.logout()
+                                        viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("admin_submit_button")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Small Back Link
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.AccountCircle,
-                            contentDescription = "google icon",
-                            tint = Color(0xFFF97316),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Sign in with Google",
-                            color = Color(0xFF1F1F1F),
+                            text = "← Customer Login",
+                            color = LyoColors.AccentOrange,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .testTag("back_to_customer_login")
+                                .clickable {
+                                    loginMode = "CUSTOMER"
+                                    viewModel.clearError()
+                                    phone = ""
+                                    password = ""
+                                    selectedAdmin = null
+                                }
+                                .padding(8.dp)
+                        )
+                    }
+                } else if (loginMode == "DELIVERY") {
+                    val riders by viewModel.allRiders.collectAsState(initial = emptyList())
+                    val activeRiders = remember(riders) {
+                        riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && it.isActiveRider && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
+                    }
+                    var selectedRider by remember { mutableStateOf<User?>(null) }
+                    var searchText by remember { mutableStateOf("") }
+                    var isExpanded by remember { mutableStateOf(false) }
+
+                    val searchFiltered = remember(activeRiders, searchText) {
+                        activeRiders.filter {
+                            it.name.contains(searchText, ignoreCase = true) || it.phone.contains(searchText)
+                        }
+                    }
+
+                    Text(
+                        text = "🏍️ Lyo Delivery Partner Login",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LyoColors.AccentOrange,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Text(
+                        text = "Please select your name from the active delivery partners list below, enter your password, and log in.",
+                        fontSize = 12.sp,
+                        color = LyoColors.TextSecondary,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    // Error Banner
+                    if (mappedError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
+                                .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Incorrect password. Please try again.",
+                                fontSize = 13.sp,
+                                color = Color(0xFFFCA5A5),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Dropdown/Search selection field
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = if (selectedRider != null) selectedRider!!.name else searchText,
+                            onValueChange = {
+                                searchText = it
+                                selectedRider = null
+                                isExpanded = true
+                            },
+                            label = { Text("Select Delivery Partner") },
+                            placeholder = { Text("Type name to search") },
+                            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, tint = LyoColors.TextSecondary) },
+                            trailingIcon = {
+                                IconButton(onClick = { isExpanded = !isExpanded }) {
+                                    Icon(
+                                        imageVector = if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "Toggle Dropdown",
+                                        tint = LyoColors.TextSecondary
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color(0x33F8FAFC)
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("rider_select_dropdown")
+                        )
+
+                        DropdownMenu(
+                            expanded = isExpanded,
+                            onDismissRequest = { isExpanded = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .background(Color(0xFF0F172A))
+                                .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                        ) {
+                            if (searchFiltered.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No active delivery partners found", color = Color.Gray, fontSize = 13.sp) },
+                                    onClick = {},
+                                    enabled = false
+                                )
+                            } else {
+                                searchFiltered.forEach { rider ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(rider.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedRider = rider
+                                            searchText = rider.name
+                                            isExpanded = false
+                                            viewModel.clearError()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (selectedRider != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Masked Password
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Password") },
+                            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
+                            trailingIcon = {
+                                val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                                }
+                            },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color(0x33F8FAFC)
+                            ),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth().testTag("rider_password_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Remember Me
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = rememberMe,
+                                onCheckedChange = { viewModel.setRememberMe(it) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = LyoColors.AccentOrange,
+                                    uncheckedColor = LyoColors.TextSecondary
+                                )
+                            )
+                            Text(
+                                text = "Keep me authorized on this terminal",
+                                color = LyoColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Primary Rider Login Button
+                        LyoButton(
+                            text = "Authenticate Rider Session",
+                            onClick = {
+                                viewModel.loginWithPhoneAndPassword(selectedRider!!.phone, password) { detectedRole ->
+                                    if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                        onLoginSuccess(detectedRole, password)
+                                    } else {
+                                        viewModel.logout()
+                                        viewModel.setLoginError("Access Denied: You do not have Rider privileges.")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("rider_submit_button")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Small Back Link
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "← Customer Login",
+                            color = LyoColors.AccentOrange,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .testTag("back_to_customer_login")
+                                .clickable {
+                                    loginMode = "CUSTOMER"
+                                    viewModel.clearError()
+                                    phone = ""
+                                    password = ""
+                                    selectedRider = null
+                                    searchText = ""
+                                }
+                                .padding(8.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            if (loginMode == "CUSTOMER") {
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "புதிய வாடிக்கையாளரா? • New Customer?",
-                color = LyoColors.TextSecondary,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "பதிவு செய்ய இங்கே கிளிக் செய்யவும் • Click to Create Account",
-                color = LyoColors.AccentOrange,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .clickable { onNavigateToRegister() }
-            )
+                // Premium CTA box
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF0F172A) // subtle dark-blue surface
+                    ),
+                    border = BorderStroke(1.dp, LyoColors.AccentOrange), // thin orange border
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "New to Lyo AI Food Delivery?",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { onNavigateToRegister() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = LyoColors.AccentOrange,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("register_link")
+                        ) {
+                            Text(
+                                text = "Register Now",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            Row(
-                modifier = Modifier
-                    .clickable { showAboutDialog = true }
-                    .padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Info,
-                    contentDescription = "About icon",
-                    tint = LyoColors.AccentOrange.copy(alpha = 0.8f),
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Lyo Settings & Privacy Policy",
-                    color = LyoColors.TextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                    textAlign = TextAlign.Center
-                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clickable {
+                                onNavigateToAdminLogin()
+                            }
+                            .padding(8.dp)
+                            .testTag("admin_portal_link"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "👑 Admin Login",
+                            color = LyoColors.AccentOrange,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clickable {
+                                onNavigateToDeliveryLogin()
+                            }
+                            .padding(8.dp)
+                            .testTag("delivery_portal_link"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🏍️ Delivery Partner Login",
+                            color = LyoColors.AccentOrange,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }
@@ -634,6 +1099,10 @@ fun LoginScreen(
     // Elegant Interactive Sizable Forgot Password Dialog (Firebase-Auth based)
     if (showForgotDialog) {
         val dialogContext = androidx.compose.ui.platform.LocalContext.current
+        var forgotEmail by remember { mutableStateOf("") }
+        var forgotStatusMessage by remember { mutableStateOf("") }
+        var isResetSending by remember { mutableStateOf(false) }
+        
         AlertDialog(
             onDismissRequest = { showForgotDialog = false },
             title = {
@@ -647,7 +1116,7 @@ fun LoginScreen(
                         tint = LyoColors.NonVegRed
                     )
                     Text(
-                        text = "பாதுகாப்பான கடவுச்சொல் மீட்பு (Secure Password Reset)",
+                        text = if (loginMode == "CUSTOMER") "கடவுச்சொல் மீட்பு (Password Reset)" else "பாதுகாப்பான கடவுச்சொல் மீட்பு (Secure Password Reset)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = Color.White
@@ -659,52 +1128,205 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Tamil Message
-                    Text(
-                        text = "பாதுகாப்பு காரணங்களுக்காக, இந்த செயலியில் தானியங்கி முறையில் (OTP) கடவுச்சொல்லை மாற்றும் வசதி தற்காலிகமாக முடக்கப்பட்டுள்ளது. " +
-                                "உங்கள் கணக்கின் கடவுச்சொல்லை மீட்டமைக்க, தயவுசெய்து எங்களது வாட்ஸ்அப் நிர்வாகியைத் தொடர்பு கொள்ளவும். உங்கள் அடையாளம் சரிபார்க்கப்பட்ட பின் உடனடியாக புதிய கடவுச்சொல் வழங்கப்படும்.",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    // English Message
-                    Text(
-                        text = "For enhanced cryptographic security, automated self-service password reset has been disabled. " +
-                                "To reset your confidential account passcode, please contact our administrator directly on WhatsApp. Our support team will verify your identity and restore access securely.",
-                        color = LyoColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Contact CTA Button inside text area
-                    Button(
-                        onClick = {
-                            val msg = "வணக்கம் Lyo, எனது கணக்கின் கடவுச்சொல்லை மாற்ற உதவி தேவை. (Hello Lyo, I need help resetting my password.)"
-                            com.example.WhatsAppHelper.sendMessage(dialogContext, "8778148899", msg)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)), // Whatsapp green
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("forgot_whatsapp_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Send,
-                            contentDescription = "WhatsApp",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    if (loginMode == "CUSTOMER") {
+                        // Tamil instruction for Customer
                         Text(
-                            text = "வாட்ஸ்அப்பில் தொடர்பு கொள்ள (WhatsApp Admin)",
+                            text = "உங்கள் கணக்கில் பதிவு செய்யப்பட்ட மின்னஞ்சல் முகவரியை (Email Address) கீழே உள்ளிடவும். உங்கள் ஜிமெயில் முகவரிக்கு கடவுச்சொல்லை மீட்டமைப்பதற்கான இணைப்பு உடனடியாக அனுப்பப்படும்.",
                             color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            fontWeight = FontWeight.Medium
                         )
+
+                        // English instruction
+                        Text(
+                            text = "Please enter your registered email address below. A password reset link will be sent to your Gmail inbox instantly.",
+                            color = LyoColors.TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Email Text Field
+                        OutlinedTextField(
+                            value = forgotEmail,
+                            onValueChange = { 
+                                forgotEmail = it
+                                forgotError = ""
+                                forgotStatusMessage = ""
+                            },
+                            label = { Text("மின்னஞ்சல் முகவரி (Email Address)", color = Color.Gray) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedContainerColor = Color(0xFF1E293B),
+                                unfocusedContainerColor = Color(0xFF1E293B),
+                                focusedLabelColor = LyoColors.AccentOrange,
+                                unfocusedLabelColor = Color.Gray,
+                                focusedIndicatorColor = LyoColors.AccentOrange,
+                                unfocusedIndicatorColor = Color.DarkGray
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("forgot_email_input"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        if (isResetSending) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                androidx.compose.material3.CircularProgressIndicator(color = LyoColors.AccentOrange)
+                            }
+                        }
+
+                        if (forgotStatusMessage.isNotEmpty()) {
+                            Text(
+                                text = forgotStatusMessage,
+                                color = LyoColors.VegGreen,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        if (forgotError.isNotEmpty()) {
+                            Text(
+                                text = forgotError,
+                                color = LyoColors.NonVegRed,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val emailVal = forgotEmail.trim()
+                                if (emailVal.isEmpty()) {
+                                    forgotError = "தயவுசெய்து மின்னஞ்சல் முகவரியை உள்ளிடவும். (Please enter your email.)"
+                                    return@Button
+                                }
+                                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(emailVal).matches()) {
+                                    forgotError = "தவறான மின்னஞ்சல் வடிவம். (Invalid email format.)"
+                                    return@Button
+                                }
+
+                                isResetSending = true
+                                forgotError = ""
+                                forgotStatusMessage = ""
+                                viewModel.sendFirebasePasswordReset(emailVal) { success, errMsg ->
+                                    isResetSending = false
+                                    if (success) {
+                                        forgotStatusMessage = "வெற்றி! கடவுச்சொல் மீட்பு இணைப்பு உங்கள் மின்னஞ்சலுக்கு அனுப்பப்பட்டுள்ளது. (Success! Reset link has been sent to your email.)"
+                                    } else {
+                                        forgotError = errMsg ?: "மின்னஞ்சல் அனுப்புவதில் தோல்வி. (Failed to send reset email.)"
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("forgot_send_email_button"),
+                            enabled = !isResetSending
+                        ) {
+                            Text(
+                                text = "மின்னஞ்சல் அனுப்பவும் (Send Reset Link)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        // Divider or WhatsApp option for Customer as fallback
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color.DarkGray)
+                            Text(
+                                text = " அல்லது (OR) ",
+                                color = Color.Gray,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            HorizontalDivider(modifier = Modifier.weight(1f), color = Color.DarkGray)
+                        }
+
+                        // Fallback Contact CTA Button
+                        Button(
+                            onClick = {
+                                val msg = "வணக்கம் Lyo, எனது கஸ்டமர் கணக்கின் கடவுச்சொல்லை மாற்ற உதவி தேவை. (Hello Lyo, I need help resetting my customer password.)"
+                                com.example.WhatsAppHelper.sendMessage(dialogContext, "8778148899", msg)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)), // Whatsapp green
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("forgot_whatsapp_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Send,
+                                contentDescription = "WhatsApp",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "வாட்ஸ்அப்பில் தொடர்பு கொள்ள (WhatsApp Support)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        // Admin / Rider mode: Automated reset is disabled, contact WhatsApp
+                        Text(
+                            text = "பாதுகாப்பு காரணங்களுக்காக, இந்த செயலியில் அட்மின் / விநியோகஸ்தர் கணக்குகளுக்கான தானியங்கி கடவுச்சொல் மீட்டமைப்பு மின்னஞ்சல் வசதி முடக்கப்பட்டுள்ளது. " +
+                                    "உங்கள் கடவுச்சொல்லை மீட்டமைக்க, தயவுசெய்து எங்களது வாட்ஸ்அப் நிர்வாகியை நேரடியாகத் தொடர்பு கொள்ளவும். உங்கள் அடையாளம் சரிபார்க்கப்பட்ட பின் உடனடியாக புதிய கடவுச்சொல் வழங்கப்படும்.",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Text(
+                            text = "For security reasons, automated password reset email is disabled for Admin / Delivery roles. " +
+                                    "To reset your account password, please contact our administrator directly on WhatsApp. Our support team will verify your identity and restore access.",
+                            color = LyoColors.TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Button(
+                            onClick = {
+                                val msg = "வணக்கம் Lyo, எனது அட்மின்/விநியோகஸ்தர் கணக்கின் கடவுச்சொல்லை மாற்ற உதவி தேவை. (Hello Lyo, I need help resetting my admin/rider password.)"
+                                com.example.WhatsAppHelper.sendMessage(dialogContext, "8778148899", msg)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)), // Whatsapp green
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("forgot_whatsapp_admin_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Send,
+                                contentDescription = "WhatsApp",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "வாட்ஸ்அப்பில் தொடர்பு கொள்ள (WhatsApp Admin)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
             },
@@ -863,7 +1485,7 @@ fun LoginScreen(
                                     com.example.WhatsAppHelper.sendMessage(
                                         aboutContext,
                                         "8778148899",
-                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
+                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
                                     )
                                 } catch (e: Exception) {
                                     e.printStackTrace()
@@ -980,6 +1602,294 @@ fun LoginScreen(
             containerColor = Color(0xFF0F172A),
             shape = RoundedCornerShape(20.dp)
         )
+    }
+}
+
+@Composable
+fun AdminLoginScreen(
+    viewModel: AuthViewModel,
+    onLoginSuccess: (String, String?) -> Unit, // returns role "ADMIN" and password
+    onBackToCustomerLogin: () -> Unit
+) {
+    androidx.activity.compose.BackHandler {
+        onBackToCustomerLogin()
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.clearError()
+    }
+
+    val admins by viewModel.allAdmins.collectAsState(initial = emptyList())
+    val activeAdmins = remember(admins) {
+        admins.filter { it.role == "ADMIN" }.distinctBy { it.phone }
+    }
+    val finalAdmins = remember(activeAdmins) {
+        if (activeAdmins.isEmpty()) {
+            listOf(User("Anantharajmech", "Anantharaj Super Admin", "superadmin@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+        } else {
+            activeAdmins
+        }
+    }
+    var selectedAdmin by remember { mutableStateOf<User?>(null) }
+    var isAdminExpanded by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val errorMsg by viewModel.loginError.collectAsState()
+    val rememberMe by viewModel.rememberMe.collectAsState()
+
+    val mappedError = remember(errorMsg) {
+        if (errorMsg != null) {
+            "Incorrect password. Please try again."
+        } else {
+            null
+        }
+    }
+
+    LyoBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .navigationBarsPadding()
+                .imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBackToCustomerLogin,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Admin Icon
+            Icon(
+                imageVector = Icons.Filled.Security,
+                contentDescription = "Admin Console",
+                tint = LyoColors.AccentOrange,
+                modifier = Modifier.size(64.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Input Form Card
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp
+            ) {
+                Text(
+                    text = "🛡️ Lyo Admin Console Login",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LyoColors.AccentOrange,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "Please select your Administrator profile below to authenticate into the Control Tower. Standard customer and rider accounts cannot log in here.",
+                    fontSize = 12.sp,
+                    color = LyoColors.TextSecondary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Error Banner
+                if (mappedError != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
+                            .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = mappedError,
+                            fontSize = 13.sp,
+                            color = Color(0xFFFCA5A5),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Dropdown for Admin selection
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isAdminExpanded = !isAdminExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = if (selectedAdmin != null) selectedAdmin!!.name else "",
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = false,
+                            label = { Text("Select Admin") },
+                            placeholder = { Text("Click to select Admin") },
+                            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, tint = LyoColors.TextSecondary) },
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = if (isAdminExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "Toggle Dropdown",
+                                    tint = LyoColors.TextSecondary
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = Color.White,
+                                disabledLabelColor = LyoColors.TextSecondary,
+                                disabledBorderColor = Color(0x33F8FAFC),
+                                disabledLeadingIconColor = LyoColors.TextSecondary,
+                                disabledTrailingIconColor = LyoColors.TextSecondary
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("admin_select_dropdown")
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { isAdminExpanded = !isAdminExpanded }
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = isAdminExpanded,
+                        onDismissRequest = { isAdminExpanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .background(Color(0xFF0F172A))
+                            .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                    ) {
+                        finalAdmins.forEach { admin ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(admin.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text("Authorized Admin", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                    }
+                                },
+                                onClick = {
+                                    selectedAdmin = admin
+                                    isAdminExpanded = false
+                                    viewModel.clearError()
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (selectedAdmin != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Admin Password Field
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
+                        trailingIcon = {
+                            val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33F8FAFC)
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_password_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Remember Me
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = rememberMe,
+                            onCheckedChange = { viewModel.setRememberMe(it) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = LyoColors.AccentOrange,
+                                uncheckedColor = LyoColors.TextSecondary
+                            )
+                        )
+                        Text(
+                            text = "Keep me authorized on this terminal",
+                            color = LyoColors.TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Primary Login Button
+                    LyoButton(
+                        text = "Authenticate Admin Console",
+                        onClick = {
+                            viewModel.loginWithPhoneAndPassword(selectedAdmin!!.phone, password) { detectedRole ->
+                                if (detectedRole == "ADMIN") {
+                                    onLoginSuccess("ADMIN", password)
+                                } else {
+                                    viewModel.logout()
+                                    viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("admin_submit_button")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            onBackToCustomerLogin()
+                        }
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Person,
+                        contentDescription = "Customer Login",
+                        tint = LyoColors.AccentOrange,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Switch to Customer / Rider Login",
+                        color = LyoColors.AccentOrange,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1123,6 +2033,7 @@ fun RegisterScreen(
                         unfocusedBorderColor = Color(0x33F8FAFC)
                     ),
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("reg_name_input")
                 )
 
@@ -1142,6 +2053,7 @@ fun RegisterScreen(
                     ),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("reg_phone_input")
                 )
 
@@ -1160,6 +2072,7 @@ fun RegisterScreen(
                         unfocusedBorderColor = Color(0x33F8FAFC)
                     ),
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1178,6 +2091,7 @@ fun RegisterScreen(
                             unfocusedBorderColor = Color(0x33F8FAFC)
                         ),
                         singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().testTag("reg_vehicle_input")
                     )
                 }
@@ -1209,6 +2123,7 @@ fun RegisterScreen(
                     ),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("reg_password_input")
                 )
 
@@ -1234,6 +2149,7 @@ fun RegisterScreen(
                     ),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("reg_confirm_password_input")
                 )
 
@@ -1378,6 +2294,7 @@ fun RegisterScreen(
                         unfocusedBorderColor = LyoColors.AccentOrange,
                         focusedBorderColor = LyoColors.AccentOrange
                     ),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1401,6 +2318,7 @@ fun RegisterScreen(
                             focusedBorderColor = LyoColors.AccentOrange,
                             unfocusedBorderColor = Color(0x33F8FAFC)
                         ),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.weight(1f)
                     )
 
@@ -1417,6 +2335,7 @@ fun RegisterScreen(
                             focusedBorderColor = LyoColors.AccentOrange,
                             unfocusedBorderColor = Color(0x33F8FAFC)
                         ),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1537,7 +2456,7 @@ fun RegisterScreen(
                             ).show()
                         } else {
                             val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
-                                .requestIdToken("368208047268-example.apps.googleusercontent.com")
+                                .requestIdToken("604469873807-example.apps.googleusercontent.com")
                                 .requestEmail()
                                 .build()
                             val mGoogleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
@@ -1692,3 +2611,379 @@ fun OrbitalGlowLogo() {
         }
     }
 }
+
+@Composable
+fun DeliveryPartnerLoginScreen(
+    viewModel: AuthViewModel,
+    onLoginSuccess: (String, String?) -> Unit,
+    onBackToPortal: () -> Unit
+) {
+    androidx.activity.compose.BackHandler {
+        onBackToPortal()
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.clearError()
+    }
+
+    val riders by viewModel.allRiders.collectAsState(initial = emptyList())
+    val activeRiders = remember(riders) {
+        riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && it.isActiveRider && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
+    }
+
+    var selectedRider by remember { mutableStateOf<User?>(null) }
+    var searchText by remember { mutableStateOf("") }
+    var isExpanded by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val errorMsg by viewModel.loginError.collectAsState()
+    val rememberMe by viewModel.rememberMe.collectAsState()
+
+    val searchFiltered = remember(activeRiders, searchText) {
+        activeRiders.filter {
+            it.name.contains(searchText, ignoreCase = true) || it.phone.contains(searchText)
+        }
+    }
+
+    val mappedError = remember(errorMsg) {
+        if (errorMsg != null) {
+            if (errorMsg!!.contains("deactivated", ignoreCase = true)) {
+                "Sorry, your delivery partner account has been deactivated by the administrator."
+            } else {
+                "Incorrect password. Please try again."
+            }
+        } else {
+            null
+        }
+    }
+
+    LyoBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .navigationBarsPadding()
+                .imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBackToPortal,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Rider Icon
+            Icon(
+                imageVector = Icons.Filled.TwoWheeler,
+                contentDescription = "Delivery Partner",
+                tint = LyoColors.AccentOrange,
+                modifier = Modifier.size(64.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp
+            ) {
+                Text(
+                    text = "🏍️ Lyo Delivery Partner Login",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LyoColors.AccentOrange,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "Please select your name from the active delivery partners list below, enter your password, and log in to access your Delivery Dashboard.",
+                    fontSize = 12.sp,
+                    color = LyoColors.TextSecondary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Error Banner
+                if (mappedError != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x33EF4444), RoundedCornerShape(8.dp))
+                            .border(1.dp, LyoColors.NonVegRed, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = mappedError,
+                            fontSize = 13.sp,
+                            color = Color(0xFFFCA5A5),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Dropdown/Search selection field
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (selectedRider != null) selectedRider!!.name else searchText,
+                        onValueChange = {
+                            searchText = it
+                            selectedRider = null
+                            isExpanded = true
+                        },
+                        label = { Text("Select Delivery Partner") },
+                        placeholder = { Text("Type name to search") },
+                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, tint = LyoColors.TextSecondary) },
+                        trailingIcon = {
+                            IconButton(onClick = { isExpanded = !isExpanded }) {
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "Toggle Dropdown",
+                                    tint = LyoColors.TextSecondary
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33F8FAFC)
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("rider_select_dropdown")
+                    )
+
+                    DropdownMenu(
+                        expanded = isExpanded,
+                        onDismissRequest = { isExpanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .background(Color(0xFF0F172A))
+                            .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                    ) {
+                        if (searchFiltered.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No active delivery partners found", color = Color.Gray, fontSize = 13.sp) },
+                                onClick = {},
+                                enabled = false
+                            )
+                        } else {
+                            searchFiltered.forEach { rider ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(rider.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedRider = rider
+                                        searchText = rider.name
+                                        isExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedRider != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Masked Password
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = "pass", tint = LyoColors.TextSecondary) },
+                        trailingIcon = {
+                            val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(image, contentDescription = "Toggle password", tint = LyoColors.TextSecondary)
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33F8FAFC)
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().testTag("rider_password_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Remember Me
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = rememberMe,
+                            onCheckedChange = { viewModel.setRememberMe(it) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = LyoColors.AccentOrange,
+                                uncheckedColor = LyoColors.TextSecondary
+                            )
+                        )
+                        Text(
+                            text = "Keep me authorized on this terminal",
+                            color = LyoColors.TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Primary Login Button
+                    LyoButton(
+                        text = "Authenticate Rider Session",
+                        onClick = {
+                            viewModel.loginWithPhoneAndPassword(selectedRider!!.phone, password) { detectedRole ->
+                                if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                    onLoginSuccess(detectedRole, password)
+                                } else {
+                                    viewModel.logout()
+                                    viewModel.setLoginError("Access Denied: You do not have Rider privileges.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("rider_submit_button")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        onBackToPortal()
+                    }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Person,
+                    contentDescription = "Switch Portal",
+                    tint = LyoColors.AccentOrange,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Switch Login Portal",
+                    color = LyoColors.AccentOrange,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun OfflineAuthorizationPendingScreen(
+    onRetry: () -> Unit,
+    onLogout: () -> Unit,
+    isRetrying: Boolean = false
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LyoColors.DarkCyanBg)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OrbitalGlowLogo()
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Text(
+                text = "இணைப்பு துண்டிக்கப்பட்டது • Verification Pending",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = "We could not verify your session with our servers. Your authorization is pending a valid network connection. Please check your internet connection and retry.\n\n(உங்கள் கணக்கு விவரங்களை சர்வரில் இருந்து சரிபார்க்க முடியவில்லை. இணைய இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்.)",
+                color = LyoColors.TextSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            if (isRetrying) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = LyoColors.AccentOrange,
+                    modifier = Modifier.size(36.dp)
+                )
+            } else {
+                androidx.compose.material3.Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(48.dp)
+                        .testTag("retry_offline_auth_button")
+                ) {
+                    Text(
+                        text = "மீண்டும் முயல்க (Retry Verification)",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                androidx.compose.material3.TextButton(
+                    onClick = onLogout,
+                    modifier = Modifier.testTag("logout_offline_auth_button")
+                ) {
+                    Text(
+                        text = "வெளியேறவும் (Logout)",
+                        color = Color.Red.copy(alpha = 0.8f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+

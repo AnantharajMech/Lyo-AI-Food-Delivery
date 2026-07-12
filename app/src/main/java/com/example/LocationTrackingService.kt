@@ -127,7 +127,8 @@ class LocationTrackingService : Service() {
         val firestore = LyoFirebaseHelper.firestore ?: return
         val updateMap = mapOf(
             "currentLat" to lat,
-            "currentLng" to lng
+            "currentLng" to lng,
+            "locationTimestamp" to System.currentTimeMillis()
         )
 
         firestore.collection("delivery_rides")

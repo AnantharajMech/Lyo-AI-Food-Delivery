@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -27,6 +28,298 @@ import androidx.compose.ui.unit.sp
 import com.example.data.database.DeliveryRide
 import com.example.ui.viewmodels.DeliveryViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.material3.TextFieldColors
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonElevation
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+
+// Overrides for Light Operational Theme (DeliveryScreens)
+private val LocalTextColor = staticCompositionLocalOf<Color?> { null }
+
+private object RiderThemeColors {
+    val DarkCyanBg = LyoColors.DarkCyanBg
+    val CardSlate = LyoColors.CardSlate
+    val AccentOrange = LyoColors.AccentOrange
+    val AmberYellow = LyoColors.AmberYellow
+    val GlassBorder = LyoColors.GlassBorder
+    val TranslucentSlate = LyoColors.TranslucentSlate
+    val TranslucentBlack = LyoColors.TranslucentBlack
+    val TextPrimary = LyoColors.TextPrimary
+    val TextSecondary = LyoColors.TextSecondary
+    val VegGreen = LyoColors.VegGreen
+    val NonVegRed = LyoColors.NonVegRed
+    val WarningYellow = LyoColors.WarningYellow
+    val LiveCyan = LyoColors.LiveCyan
+}
+
+@Composable
+private fun Color(color: Long): Color {
+    return androidx.compose.ui.graphics.Color(color)
+}
+
+@Composable
+private fun Color(color: Int): Color {
+    return androidx.compose.ui.graphics.Color(color)
+}
+
+@Composable
+private fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+    style: TextStyle = LocalTextStyle.current
+) {
+    val overrideColor = LocalTextColor.current
+    val finalColor = when {
+        overrideColor != null -> overrideColor
+        else -> color
+    }
+    androidx.compose.material3.Text(
+        text = text,
+        modifier = modifier,
+        color = finalColor,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
+
+@Composable
+private fun Text(
+    text: androidx.compose.ui.text.AnnotatedString,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+    style: TextStyle = LocalTextStyle.current
+) {
+    val overrideColor = LocalTextColor.current
+    val finalColor = when {
+        overrideColor != null -> overrideColor
+        else -> color
+    }
+    androidx.compose.material3.Text(
+        text = text,
+        modifier = modifier,
+        color = finalColor,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
+
+@Composable
+private fun Icon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current
+) {
+    val finalTint = tint
+    androidx.compose.material3.Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        tint = finalTint
+    )
+}
+
+@Composable
+private fun Icon(
+    painter: Painter,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current
+) {
+    val finalTint = tint
+    androidx.compose.material3.Icon(
+        painter = painter,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        tint = finalTint
+    )
+}
+
+@Composable
+private fun OutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    prefix: @Composable (() -> Unit)? = null,
+    suffix: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+    singleLine: Boolean = false,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    minLines: Int = 1,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
+) {
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = enabled,
+        readOnly = readOnly,
+        textStyle = textStyle.copy(color = LyoColors.TextPrimary),
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        prefix = prefix,
+        suffix = suffix,
+        supportingText = supportingText,
+        isError = isError,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        singleLine = singleLine,
+        maxLines = maxLines,
+        minLines = minLines,
+        interactionSource = interactionSource,
+        shape = shape,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = LyoColors.TextPrimary,
+            unfocusedTextColor = LyoColors.TextPrimary,
+            focusedBorderColor = LyoColors.AmberYellow,
+            unfocusedBorderColor = LyoColors.GlassBorder,
+            focusedLabelColor = LyoColors.AmberYellow,
+            unfocusedLabelColor = LyoColors.TextSecondary
+        )
+    )
+}
+
+@Composable
+private fun Button(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = ButtonDefaults.shape,
+    colors: ButtonColors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+    elevation: ButtonElevation? = ButtonDefaults.buttonElevation(),
+    border: BorderStroke? = null,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    content: @Composable RowScope.() -> Unit
+) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = shape,
+        colors = colors,
+        elevation = elevation,
+        border = border,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource
+    ) {
+        CompositionLocalProvider(LocalTextColor provides Color.White) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun TextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = ButtonDefaults.textShape,
+    colors: ButtonColors = ButtonDefaults.textButtonColors(contentColor = LyoColors.AccentOrange),
+    elevation: ButtonElevation? = null,
+    border: BorderStroke? = null,
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    content: @Composable RowScope.() -> Unit
+) {
+    androidx.compose.material3.TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = shape,
+        colors = colors,
+        elevation = elevation,
+        border = border,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource
+    ) {
+        CompositionLocalProvider(LocalTextColor provides LyoColors.AccentOrange) {
+            content()
+        }
+    }
+}
 
 // ==========================================
 // 1. DELIVERY MOBILE VIEWPORT & DIRECTIONS
@@ -231,24 +524,71 @@ fun DeliveryPartnerDashboardScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp, 12.dp),
+                        .padding(20.dp, 12.dp)
+                        .background(LyoColors.CardSlate, RoundedCornerShape(12.dp))
+                        .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(12.dp))
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "FLEET HUD",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            color = hudColor,
-                            letterSpacing = 1.5.sp
-                        )
-                        Text(
-                            text = "Delivery Logistics Panel",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Lyo AI Food Delivery Custom Logo Icon / Avatar
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(LyoColors.VegGreen),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.material3.Text(
+                                text = "Lyo",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            androidx.compose.material3.Text(
+                                text = "Lyo AI Food Delivery",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = LyoColors.TextPrimary
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.Text(
+                                    text = "Rider Panel",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = LyoColors.TextSecondary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                // Active ride status indicator: Available / Busy / Offline
+                                val statusText = if (currentUserState?.isActiveRider == true) {
+                                    if (activeDeliveringRide != null) "BUSY" else "AVAILABLE"
+                                } else {
+                                    "OFFLINE"
+                                }
+                                val statusColor = when (statusText) {
+                                    "AVAILABLE" -> LyoColors.VegGreen
+                                    "BUSY" -> LyoColors.WarningYellow
+                                    else -> LyoColors.TextSecondary
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(statusColor)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                androidx.compose.material3.Text(
+                                    text = statusText,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = statusColor
+                                )
+                            }
+                        }
                     }
 
                     Row(
@@ -260,21 +600,21 @@ fun DeliveryPartnerDashboardScreen(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(20.dp))
-                                    .background(if (isOnline) Color(0x2200E676) else hudColor.copy(alpha = 0.15f))
+                                    .background(if (isOnline) LyoColors.CardSlate else Color(0x11FFFFFF))
                                     .clickable { viewModel.toggleRiderStatus() }
-                                    .border(1.dp, if (isOnline) LyoColors.VegGreen else hudColor, RoundedCornerShape(20.dp))
+                                    .border(1.dp, if (isOnline) LyoColors.AmberYellow else LyoColors.GlassBorder, RoundedCornerShape(20.dp))
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(8.dp)
-                                        .background(if (isOnline) LyoColors.VegGreen else hudColor, CircleShape)
+                                        .background(if (isOnline) LyoColors.AmberYellow else LyoColors.TextSecondary, CircleShape)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (isOnline) "ஆன்லைன்" else "ஆஃப்லைன்",
-                                    color = if (isOnline) LyoColors.VegGreen else hudColor,
+                                    text = if (isOnline) "ஆன்லைன் (Online)" else "ஆஃப்லைன் (Offline)",
+                                    color = if (isOnline) LyoColors.AmberYellow else LyoColors.TextSecondary,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -286,9 +626,9 @@ fun DeliveryPartnerDashboardScreen(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color(0x1AFFFFFF))
+                                .background(LyoColors.CardSlate)
                         ) {
-                            Icon(Icons.Filled.Logout, contentDescription = "logout", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Logout, contentDescription = "logout", tint = LyoColors.NonVegRed, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -299,10 +639,11 @@ fun DeliveryPartnerDashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 10.dp)
-                        .background(Color(0xFF0F172A), RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(LyoColors.CardSlate)
+                        .padding(4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val myJobCount = activeRides.count { ride -> 
@@ -327,17 +668,18 @@ fun DeliveryPartnerDashboardScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) hudColor else Color.Transparent)
+                                .background(if (isSelected) LyoColors.VegGreen else Color.Transparent)
                                 .clickable { selectedTab = tabId }
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "$label ($count)",
-                                color = if (isSelected) Color.White else Color(0xFF94A3B8),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
-                            )
+                            CompositionLocalProvider(LocalTextColor provides (if (isSelected) Color.White else LyoColors.TextSecondary)) {
+                                Text(
+                                    text = "$label ($count)",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -964,15 +1306,15 @@ fun RiderPerformanceDashboardCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("அடிப்படை கட்டணம்:", fontSize = 8.sp, color = LyoColors.TextSecondary)
-                        Text("₹${String.format(java.util.Locale.US, "%.1f", base)}", fontSize = 8.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("அடிப்படை கட்டணம்:", fontSize = 10.5.sp, color = LyoColors.TextSecondary)
+                        Text("₹${String.format(java.util.Locale.US, "%.1f", base)}", fontSize = 10.5.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("ஊக்கத்தொகை/டிப்ஸ்:", fontSize = 8.sp, color = LyoColors.TextSecondary)
-                        Text("₹${String.format(java.util.Locale.US, "%.1f", bonus)}", fontSize = 8.sp, color = Color(0xFFFF6B00), fontWeight = FontWeight.Bold)
+                        Text("ஊக்கத்தொகை/டிப்ஸ்:", fontSize = 10.5.sp, color = LyoColors.TextSecondary)
+                        Text("₹${String.format(java.util.Locale.US, "%.1f", bonus)}", fontSize = 10.5.sp, color = Color(0xFFFF6B00), fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -984,7 +1326,7 @@ fun RiderPerformanceDashboardCard(
                 ) {
                     Text(
                         text = "வழங்கப்பட்டவை",
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         color = LyoColors.TextSecondary,
                         fontWeight = FontWeight.Bold
                     )
@@ -996,7 +1338,7 @@ fun RiderPerformanceDashboardCard(
                     )
                     Text(
                         text = "Deliveries Closed",
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         color = LyoColors.TextSecondary
                     )
 
@@ -1007,7 +1349,7 @@ fun RiderPerformanceDashboardCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(Icons.Filled.Star, contentDescription = "rating", tint = Color(0xFFFDE047), modifier = Modifier.size(12.dp))
-                        Text("⭐ 4.90 Rating", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("⭐ 4.90 Rating", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1319,12 +1661,25 @@ fun DeliveryJobCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text(
-                        text = "டெலிவரி ஆர்டர் #${ride.id}",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(
+                            text = "டெலிவரி ஆர்டர் #${ride.id}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                        if (order != null && com.example.data.repository.LyoLiveTestTracker.isTestOrder(order)) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF8B5CF6))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("🧪 TEST ORDER", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                     Text(
                         text = "Linked Order ID: #LYO-${ride.orderId}",
                         color = LyoColors.TextSecondary,
@@ -1425,9 +1780,10 @@ fun DeliveryJobCard(
                             Text(
                                 text = "ஆர்டரைத் துரிதமாகத் தயார் செய்யச் சொல்லுங்கள் 🛵",
                                 color = LyoColors.AmberYellow,
-                                fontSize = 8.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 1.dp)
+                                lineHeight = 14.sp,
+                                modifier = Modifier.padding(top = 2.dp)
                             )
                         }
 
@@ -1528,9 +1884,10 @@ fun DeliveryJobCard(
                             Text(
                                 text = "உங்கள் இல்லம் தேடி! / Delivered safely to home 🏡",
                                 color = Color(0xFFA5F3FC),
-                                fontSize = 8.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 1.dp)
+                                lineHeight = 14.sp,
+                                modifier = Modifier.padding(top = 2.dp)
                             )
                         }
 
@@ -1608,12 +1965,8 @@ fun DeliveryJobCard(
                 val scope = rememberCoroutineScope()
                 var customMessage by remember { mutableStateOf("") }
 
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
-                    borderColor = Color(0x3338BDF8),
-                    backgroundColor = Color(0xFF0F172A)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                if (false) {
+                    Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Chat, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
@@ -2053,7 +2406,7 @@ fun DeliveryJobCard(
 
                             Text("RESTAURANT PICKUP GEOFENCE", color = LyoColors.TextSecondary, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             Text(vendor?.name ?: "Kitchen Outlets", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(vendor?.address ?: "Lyo Partner Merchant", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(vendor?.address ?: "Lyo AI Food Delivery Partner Merchant", color = LyoColors.TextSecondary, fontSize = 10.sp)
 
                             Spacer(modifier = Modifier.height(14.dp))
 

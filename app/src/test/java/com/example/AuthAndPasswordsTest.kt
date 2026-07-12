@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.example.data.database.AppDatabase
 import com.example.data.repository.LyoRepository
 import com.example.ui.screens.LoginScreen
@@ -38,6 +40,16 @@ class AuthAndPasswordsTest {
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        
+        if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
+            val options = com.google.firebase.FirebaseOptions.Builder()
+                .setApplicationId("com.example.lyofood")
+                .setApiKey("mock-api-key")
+                .setProjectId("mock-project")
+                .build()
+            com.google.firebase.FirebaseApp.initializeApp(context, options)
+        }
+
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
@@ -58,7 +70,9 @@ class AuthAndPasswordsTest {
                 LoginScreen(
                     viewModel = viewModel,
                     onNavigateToRegister = {},
-                    onLoginSuccess = {}
+                    onLoginSuccess = { _, _ -> },
+                    onNavigateToAdminLogin = {},
+                    onNavigateToDeliveryLogin = {}
                 )
             }
         }
@@ -69,5 +83,45 @@ class AuthAndPasswordsTest {
         composeTestRule.onNodeWithTag("username_input").assertExists()
         composeTestRule.onNodeWithTag("password_input").assertExists()
         composeTestRule.onNodeWithTag("submit_button").assertExists()
+    }
+
+    @Test
+    fun loginScreen_togglesToAdminMode() {
+        composeTestRule.setContent {
+            MyApplicationTheme(darkTheme = true) {
+                var currentScreen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("LOGIN") }
+                if (currentScreen == "LOGIN") {
+                    LoginScreen(
+                        viewModel = viewModel,
+                        onNavigateToRegister = {},
+                        onLoginSuccess = { _, _ -> },
+                        onNavigateToAdminLogin = { currentScreen = "ADMIN_LOGIN" },
+                        onNavigateToDeliveryLogin = {}
+                    )
+                } else {
+                    com.example.ui.screens.AdminLoginScreen(
+                        viewModel = viewModel,
+                        onLoginSuccess = { _, _ -> },
+                        onBackToCustomerLogin = { currentScreen = "LOGIN" }
+                    )
+                }
+            }
+        }
+        
+        composeTestRule.waitForIdle()
+        
+        // Assert Admin access button/link exists
+        composeTestRule.onNodeWithText("👑 Admin Login", useUnmergedTree = true).assertExists()
+        
+        // Click the admin toggle link
+        composeTestRule.onNodeWithText("👑 Admin Login", useUnmergedTree = true).performClick()
+        
+        composeTestRule.waitForIdle()
+        
+        // Verify header text changes to reflect Admin Console Login
+        composeTestRule.onNodeWithText("🛡️ Lyo Admin Console Login", useUnmergedTree = true).assertExists()
+        
+        // Assert the Switch mode button text changes
+        composeTestRule.onNodeWithText("Switch to Customer / Rider Login", useUnmergedTree = true).assertExists()
     }
 }

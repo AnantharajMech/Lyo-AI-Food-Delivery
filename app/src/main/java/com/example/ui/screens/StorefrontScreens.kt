@@ -79,6 +79,7 @@ fun StorefrontDashboardScreen(
     val promoBanners by viewModel.allPromoBanners.collectAsState(initial = emptyList())
     val searchQuery by viewModel.searchQueries.collectAsState(initial = "")
     val activeFilter by viewModel.selectedCategoryFilter.collectAsState(initial = "All")
+    val globalCategories by viewModel.globalCategories.collectAsState(initial = emptyList())
     val cartItems by viewModel.activeCart.collectAsState(initial = emptyMap())
     val activeOrderVal by viewModel.activeLiveOrder.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
@@ -92,6 +93,7 @@ fun StorefrontDashboardScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showCorrectionMapDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showNotificationCenterDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
     var correctionLat by remember { androidx.compose.runtime.mutableStateOf(11.5812) }
     var correctionLng by remember { androidx.compose.runtime.mutableStateOf(77.8465) }
     var correctionAddress by remember { androidx.compose.runtime.mutableStateOf("") }
@@ -127,7 +129,7 @@ fun StorefrontDashboardScreen(
                     vendor.type.contains("Non-Veg", ignoreCase = true) ||
                     (!vendor.type.contains("Pure Veg", ignoreCase = true) && listOf("Restaurant", "Cafe", "Hotel", "Bakery", "Snack Shop").any { vendor.type.contains(it, ignoreCase = true) })
                 } else {
-                    vendor.type.equals(activeFilter, ignoreCase = true)
+                    vendor.type.contains(activeFilter, ignoreCase = true)
                 }
             }
             matchesSearch && matchesCategory
@@ -140,97 +142,299 @@ fun StorefrontDashboardScreen(
     )
 
     LyoBackground {
-        if (isPaused && currentUser?.role != "ADMIN") {
+        // Auto refresh checking state every 30 seconds
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(30000)
+                try {
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("app_settings")
+                        .document("global")
+                        .get()
+                        .addOnSuccessListener { snapshot ->
+                            if (snapshot != null && snapshot.exists()) {
+                                val isPausedRemote = snapshot.getBoolean("isAppPaused") ?: false
+                                val msgEn = snapshot.getString("appPauseMessageEn") ?: ""
+                                val msgTa = snapshot.getString("appPauseMessageTa") ?: ""
+                                
+                                val repo = com.example.data.repository.LyoFirebaseHelper.repositoryRef
+                                if (repo != null) {
+                                    repo.isAppPaused.value = isPausedRemote
+                                    if (msgEn.isNotBlank()) repo.appPauseMessageEn.value = msgEn
+                                    if (msgTa.isNotBlank()) repo.appPauseMessageTa.value = msgTa
+                                }
+                            }
+                        }
+                } catch (e: Exception) {
+                    android.util.Log.e("StorefrontScreens", "Auto refresh app pause status error: ${e.message}")
+                }
+            }
+        }
+
+        val showClosedOverlay = isPaused && currentUser?.role != "ADMIN"
+        
+        AnimatedVisibility(
+            visible = showClosedOverlay,
+            enter = fadeIn(animationSpec = tween(600)) + expandIn(expandFrom = Alignment.Center),
+            exit = fadeOut(animationSpec = tween(600)) + shrinkOut(shrinkTowards = Alignment.Center)
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF0F172A))
+                    .background(Color(0xFF07090E)) // Ultra premium dark cosmos background
                     .padding(24.dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Background cosmic glow spots
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFFF43F5E).copy(alpha = 0.08f), Color.Transparent),
+                            center = Offset(size.width * 0.2f, size.height * 0.3f),
+                            radius = size.width * 0.8f
+                        )
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFFFF8A65).copy(alpha = 0.05f), Color.Transparent),
+                            center = Offset(size.width * 0.8f, size.height * 0.7f),
+                            radius = size.width * 0.8f
+                        )
+                    )
+                }
+
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.NotificationsOff,
-                        contentDescription = "Shop Closed",
-                        tint = Color(0xFFF43F5E),
-                        modifier = Modifier
-                            .size(80.dp)
-                            .background(Color(0xFFF43F5E).copy(alpha = 0.1f), CircleShape)
-                            .padding(16.dp)
-                    )
+                    // Custom Glowing Neon Storefront Rest Sign
+                    Box(
+                        modifier = Modifier.size(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "NeonGlow")
+                        val pulseAlpha by infiniteTransition.animateFloat(
+                            initialValue = 0.4f,
+                            targetValue = 1.0f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1800, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "PulseAlpha"
+                        )
+                        val rotateAngle by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(24000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "Rotation"
+                        )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val w = size.width
+                            val h = size.height
+                            val center = Offset(w / 2, h / 2)
+
+                            // Outer dotted neon halo
+                            drawCircle(
+                                color = Color(0xFFF43F5E),
+                                radius = w / 2.3f,
+                                center = center,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = 2.dp.toPx(),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 24f))
+                                ),
+                                alpha = pulseAlpha * 0.25f
+                            )
+
+                            // Inner elegant neon ring
+                            drawCircle(
+                                color = Color(0xFFF43F5E),
+                                radius = w / 2.7f,
+                                center = center,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.5.dp.toPx()),
+                                alpha = pulseAlpha * 0.85f
+                            )
+
+                            // Warm soft background ambient radial shadow
+                            drawCircle(
+                                color = Color(0xFFF43F5E),
+                                radius = w / 3.2f,
+                                center = center,
+                                alpha = pulseAlpha * 0.12f
+                            )
+                        }
+
+                        // Rotating orbital elements
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer(rotationZ = rotateAngle)
+                        ) {
+                            val w = size.width
+                            val h = size.height
+                            val center = Offset(w / 2, h / 2)
+                            val r = w / 2.3f
+                            
+                            val dotsCount = 6
+                            for (i in 0 until dotsCount) {
+                                val angleRad = (2.0 * Math.PI * i / dotsCount)
+                                val dotX = (center.x + Math.cos(angleRad) * r).toFloat()
+                                val dotY = (center.y + Math.sin(angleRad) * r).toFloat()
+                                drawCircle(
+                                    color = if (i % 2 == 0) Color(0xFFF43F5E) else Color(0xFFFF9E80),
+                                    radius = 5.dp.toPx(),
+                                    center = Offset(dotX, dotY),
+                                    alpha = pulseAlpha * 0.9f
+                                )
+                            }
+                        }
+
+                        // Glowing store icon inside
+                        Icon(
+                            imageVector = Icons.Filled.Storefront,
+                            contentDescription = "Lyo AI Store Rest",
+                            tint = Color(0xFFFFE0B2),
+                            modifier = Modifier
+                                .size(64.dp)
+                                .graphicsLayer(
+                                    scaleX = 1f + (pulseAlpha * 0.05f),
+                                    scaleY = 1f + (pulseAlpha * 0.05f)
+                                )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
 
                     Text(
-                        text = "TEMPORARILY CLOSED",
+                        text = "Lyo AI Food Delivery",
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.2.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "TEMPORARILY RESTING",
+                        color = Color(0xFFF43F5E),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp
                     )
                     Text(
                         text = "கடை தற்காலிகமாக மூடப்பட்டுள்ளது",
-                        color = Color(0xFFF43F5E),
-                        fontSize = 15.sp,
+                        color = Color(0xFFFFB300),
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                    Column(
+                    // Glassmorphism Informational Container with Linear Gradient Border
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                            .padding(18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .background(
+                                color = Color(0xFF1E293B).copy(alpha = 0.45f),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.18f),
+                                        Color.White.copy(alpha = 0.02f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .padding(20.dp)
                     ) {
-                        Text(
-                            text = if (pauseMsgEn.isBlank()) "We are currently closed for a short break. Please check back soon!" else pauseMsgEn,
-                            color = Color.LightGray,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            lineHeight = 18.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(14.dp))
-                        
-                        Text(
-                            text = if (pauseMsgTa.isBlank()) "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!" else pauseMsgTa,
-                            color = Color(0xFFFFCCAA),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            lineHeight = 18.sp
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (pauseMsgEn.isBlank()) "We are currently preparing our kitchens to bring you the finest culinary experiences. Please check back shortly!" else pauseMsgEn,
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 20.sp
+                            )
+                            
+                            Spacer(modifier = Modifier.height(14.dp))
+                            
+                            Text(
+                                text = if (pauseMsgTa.isBlank()) "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் புதிய சுவையான உணவுகளுடன் மீண்டும் வருகிறோம்!" else pauseMsgTa,
+                                color = Color(0xFFFFE0B2),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 19.sp
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
 
-                    Text(
-                        text = "Thank you for your patience and support! 🙏",
-                        color = Color.Gray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        val infiniteTransitionRef = rememberInfiniteTransition(label = "RefreshDot")
+                        val dotAlpha by infiniteTransitionRef.animateFloat(
+                            initialValue = 0.3f,
+                            targetValue = 1.0f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "DotAlpha"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFF10B981).copy(alpha = dotAlpha), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Auto-syncing real-time channel...",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
                     Button(
                         onClick = onLogoutClick,
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(44.dp)
                     ) {
-                        Text("Logout / Account Switch (வெளியேறு)", fontSize = 11.sp, color = Color.White)
+                        Icon(
+                            imageVector = Icons.Filled.Logout,
+                            contentDescription = "Logout",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Logout / Switch Account (வெளியேறு)", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
-        } else {
+        }
+
+        if (!showClosedOverlay) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -240,7 +444,13 @@ fun StorefrontDashboardScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clickable {
+                            correctionLat = currentUser?.lat ?: 11.5812
+                            correctionLng = currentUser?.lng ?: 77.8465
+                            correctionAddress = currentUser?.address ?: ""
+                            showCorrectionMapDialog = true
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -258,17 +468,62 @@ fun StorefrontDashboardScreen(
                             color = LyoColors.AccentOrange,
                             letterSpacing = 1.2.sp
                         )
-                        // UI-GUARD: fixed above: allow address to wrap up to 2 lines to prevent truncation / clipping
-                        Text(
-                            text = currentUser?.address ?: "No. 12, East Car Street, Idappadi, Salem, Tamil Nadu", // Realistic high-fidelity fallback address
-                            fontSize = 11.sp, // Slightly more compact for 2 lines
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = currentUser?.address ?: "No. 12, East Car Street, Idappadi, Salem, Tamil Nadu", // Realistic high-fidelity fallback address
+                                fontSize = 11.sp, // Slightly more compact for 2 lines
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Filled.EditLocationAlt,
+                                contentDescription = "Edit Location",
+                                tint = LyoColors.AmberYellow,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(10.dp))
+                    
+                    // Premium Notification Bell Icon with dynamic Badge
+                    val notificationHistory by viewModel.notificationHistory.collectAsState()
+                    val unreadCount = notificationHistory.count { !it.isRead }
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .shadow(elevation = 6.dp, shape = CircleShape)
+                            .border(width = 1.dp, color = if (unreadCount > 0) LyoColors.AmberYellow else Color(0x33FFFFFF), shape = CircleShape)
+                            .background(Color(0xFF0D0F14), shape = CircleShape)
+                            .clickable {
+                                showNotificationCenterDialog = true
+                            }
+                            .testTag("notification_bell_btn"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = "Notifications",
+                            tint = if (unreadCount > 0) LyoColors.AmberYellow else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        if (unreadCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Red)
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (2).dp, y = (-2).dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.width(10.dp))
+                    
                     // Premium World-Class Gold Circular Lyo Icon
                     Box(
                         modifier = Modifier
@@ -283,6 +538,46 @@ fun StorefrontDashboardScreen(
                             contentDescription = "Lyo Premium Logo",
                             modifier = Modifier.fillMaxSize()
                         )
+                    }
+                }
+
+                // MULTI-LOGIN WARNING BANNER
+                val activeSessions by viewModel.repository.activeSessions.collectAsState()
+                val myDeviceId = remember { com.example.data.repository.LyoFirebaseHelper.getDeviceId(context) }
+                val otherSessionsCount = activeSessions.count { it.deviceId != myDeviceId }
+                if (otherSessionsCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFFEF3C7))
+                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.Warning,
+                                contentDescription = "warning",
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Multiple devices are logged in with this account!",
+                                    color = Color(0xFF92400E),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "உங்கள் கணக்கு வேறு சாதனங்களிலும் லாகின் செய்யப்பட்டுள்ளது.",
+                                    color = Color(0xFF92400E).copy(alpha = 0.8f),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                 }
             } else {
@@ -406,6 +701,177 @@ fun StorefrontDashboardScreen(
                 }
             }
 
+            if (showNotificationCenterDialog) {
+                Lyo3DDialog(onDismissRequest = { showNotificationCenterDialog = false }) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(480.dp)
+                            .padding(8.dp)
+                    ) {
+                        // Title Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = LyoColors.AmberYellow,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "NOTIFICATION CENTER 📢",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 14.sp,
+                                    color = Color.White,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                            IconButton(onClick = { showNotificationCenterDialog = false }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.LightGray)
+                            }
+                        }
+                        
+                        Text(
+                            text = "அறிவிப்புகள் மற்றும் சிறப்புச் சலுகைகள்",
+                            fontSize = 10.sp,
+                            color = LyoColors.TextSecondary,
+                            modifier = Modifier.padding(start = 30.dp, bottom = 12.dp)
+                        )
+                        
+                        // Action Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.markAllNotificationsAsRead() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text("MARK ALL READ ✅", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Button(
+                                onClick = { viewModel.clearAllNotifications() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7F1D1D).copy(alpha = 0.5f)),
+                                border = BorderStroke(1.dp, Color(0x33FF0000)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Text("CLEAR ALL 🧹", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                        
+                        // History List
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            if (notificationHistory.isEmpty()) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Inbox,
+                                        contentDescription = null,
+                                        tint = LyoColors.TextSecondary.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "No notifications yet! 📭",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = Color.LightGray
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "உங்களுக்கு வரும் சலுகைகள் மற்றும் ஆர்டர் அறிவிப்புகள் இங்கே காண்பிக்கப்படும்.",
+                                        fontSize = 11.sp,
+                                        color = LyoColors.TextSecondary,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 24.dp)
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(notificationHistory) { item ->
+                                        val isUnread = !item.isRead
+                                        val borderCol = if (isUnread) LyoColors.AmberYellow.copy(alpha = 0.4f) else Color(0x1AFFFFFF)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(if (isUnread) Color(0xFF1E293B).copy(alpha = 0.8f) else Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+                                                .border(1.dp, borderCol, RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    viewModel.markNotificationAsRead(item.id)
+                                                }
+                                                .padding(12.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.Top) {
+                                                // Unread Indicator
+                                                if (isUnread) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(top = 4.dp, end = 8.dp)
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(LyoColors.AmberYellow)
+                                                    )
+                                                } else {
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                }
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = item.title,
+                                                        color = if (isUnread) Color.White else Color.LightGray,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isUnread) FontWeight.ExtraBold else FontWeight.Bold
+                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = item.message,
+                                                        color = if (isUnread) Color.White.copy(alpha = 0.9f) else LyoColors.TextSecondary,
+                                                        fontSize = 11.sp,
+                                                        lineHeight = 15.sp
+                                                    )
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    // Time text
+                                                    val formattedTime = remember(item.timestamp) {
+                                                        try {
+                                                            val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                                                            sdf.format(Date(item.timestamp))
+                                                        } catch (e: Exception) {
+                                                            ""
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = formattedTime,
+                                                        fontSize = 9.sp,
+                                                        color = LyoColors.TextSecondary,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -420,12 +886,7 @@ fun StorefrontDashboardScreen(
                                 .weight(1f),
                             contentPadding = PaddingValues(bottom = 80.dp)
                         ) {
-                            // 1. HIGH-FIDELITY HERO BANNERS (Supports 10-15+ images with 3D liquid frosted glass effects)
-                            item {
-                                LiquidHeroBanners(promoBanners = promoBanners)
-                            }
-
-                            // 2. SEARCH BOX SECTION (Moved BELOW Hero Banners with advanced liquid frosted glass visual styling)
+                            // 1. SEARCH BOX SECTION (Placed directly below Address header)
                             item {
                                 Box(
                                     modifier = Modifier
@@ -462,12 +923,7 @@ fun StorefrontDashboardScreen(
                                 }
                             }
 
-                            // Spacer replacing LYO EXECUTIVE SELECTIONS to provide more clean space
-                            item {
-                                Spacer(modifier = Modifier.height(2.dp))
-                            }
-
-                            // Categorized Horizontal Scrolling Grid (Sticky Header)
+                            // 2. CATEGORIES CHIPS SECTION (Placed directly below Search Bar)
                             stickyHeader {
                                 Column(
                                     modifier = Modifier
@@ -484,81 +940,120 @@ fun StorefrontDashboardScreen(
                                         modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)
                                     )
 
-                                    val context = androidx.compose.ui.platform.LocalContext.current
-                                    val foodCategories = remember(vendors) {
-                                        val dbTypes = vendors.map { it.type.trim() }.filter { it.isNotEmpty() }.distinct()
-                                        val defaultList = listOf("Restaurant", "Cafe", "Hotel", "Bakery", "Snack Shop", "Dhaba")
-                                        val sharedPrefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
-                                        val savedCategories = sharedPrefs.getString("category_custom_order", null)
-                                        val prefsList = if (savedCategories != null) {
-                                            savedCategories.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                                        } else {
-                                            emptyList()
-                                        }
-                                        val customGeneratedList = (listOf("All") + dbTypes + prefsList + defaultList).distinct()
-                                        customGeneratedList
+                                    val activeCategories = remember(globalCategories) {
+                                        globalCategories.filter { it.isActive }.sortedBy { it.sortOrder }
                                     }
                                     LazyRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 2.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                                     ) {
-                                        items(foodCategories, key = { it }) { catCode ->
-                                            val isSelected = activeFilter == catCode
-                                            Box(
+                                        // "All" item first
+                                        item {
+                                            val isSelected = activeFilter == "All"
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(
-                                                        if (isSelected) {
-                                                            Brush.verticalGradient(
-                                                                colors = listOf(
-                                                                    LyoColors.AmberYellow,
-                                                                    LyoColors.AmberYellow.copy(alpha = 0.8f)
-                                                                )
-                                                            )
-                                                        } else {
-                                                            Brush.verticalGradient(
-                                                                colors = listOf(
-                                                                    LyoColors.CardSlate,
-                                                                    LyoColors.CardSlate
-                                                                )
-                                                            )
-                                                        }
-                                                    )
-                                                    .clickable { viewModel.selectedCategoryFilter.value = catCode }
-                                                    .border(
-                                                        width = 1.dp,
-                                                        brush = if (isSelected) {
-                                                            Brush.verticalGradient(
-                                                                colors = listOf(
-                                                                    Color(0xFFFFFFFF),
-                                                                    LyoColors.AmberYellow
-                                                                )
-                                                            )
-                                                        } else {
-                                                            Brush.verticalGradient(
-                                                                colors = listOf(
-                                                                    LyoColors.GlassBorder,
-                                                                    LyoColors.GlassBorder.copy(alpha = 0.5f)
-                                                                )
-                                                            )
-                                                        },
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    )
-                                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                                contentAlignment = Alignment.Center
+                                                    .clickable { viewModel.selectedCategoryFilter.value = "All" }
+                                                    .padding(horizontal = 4.dp, vertical = 4.dp)
                                             ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(56.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) LyoColors.AccentOrange else LyoColors.CardSlate)
+                                                        .border(
+                                                            width = 1.5.dp,
+                                                            color = if (isSelected) Color.White else LyoColors.GlassBorder,
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Storefront,
+                                                        contentDescription = "All",
+                                                        tint = if (isSelected) Color.White else LyoColors.AmberYellow,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
                                                 Text(
-                                                    text = catCode.uppercase(),
-                                                    color = if (isSelected) Color(0xFF0B1120) else LyoColors.TextSecondary,
-                                                    fontWeight = FontWeight.Black,
+                                                    text = "All",
+                                                    color = if (isSelected) LyoColors.AccentOrange else LyoColors.TextPrimary,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                     fontSize = 11.sp,
-                                                    letterSpacing = 0.5.sp
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "அனைத்தும்",
+                                                    color = if (isSelected) LyoColors.AccentOrange.copy(alpha = 0.8f) else Color.Gray,
+                                                    fontSize = 9.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        // Dynamic items
+                                        items(activeCategories, key = { it.id }) { cat ->
+                                            val isSelected = activeFilter == cat.nameEn
+                                            val catColor = try { Color(android.graphics.Color.parseColor(cat.accentColor)) } catch(e: Exception) { LyoColors.AccentOrange }
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier
+                                                    .clickable { viewModel.selectedCategoryFilter.value = cat.nameEn }
+                                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(56.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) catColor else LyoColors.CardSlate)
+                                                        .border(
+                                                            width = 1.5.dp,
+                                                            color = if (isSelected) Color.White else catColor.copy(alpha = 0.3f),
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = getIconForCategoryKey(cat.iconKey),
+                                                        contentDescription = cat.nameEn,
+                                                        tint = if (isSelected) Color.White else catColor,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    text = cat.nameEn,
+                                                    color = if (isSelected) catColor else LyoColors.TextPrimary,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = cat.nameTa,
+                                                    color = if (isSelected) catColor.copy(alpha = 0.8f) else Color.Gray,
+                                                    fontSize = 9.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
                                     }
                                 }
+                            }
+
+                            // 3. HIGH-FIDELITY HERO BANNERS (Compact offer carousel placed directly below Category chips)
+                            item {
+                                LiquidHeroBanners(promoBanners = promoBanners)
+                            }
+
+                            // Spacer to provide clean layout
+                            item {
+                                Spacer(modifier = Modifier.height(2.dp))
                             }
 
                             // Vendor listings header
@@ -599,64 +1094,194 @@ fun StorefrontDashboardScreen(
                                 }
                             }
 
-                            // Vendor Grid
+                            // Vendor listings styled as compact horizontal cards
                             items(filteredVendors, key = { it.id }) { partner ->
                                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                                     GlassCard(
                                         modifier = Modifier.fillMaxWidth(),
-                                        cornerRadius = 18.dp,
-                                        innerPadding = 10.dp,
-                                        backgroundColor = Color(0xFF1E293B),
-                                        glowColor = if (partner.rating >= 4.5) Color(0xFFFC9F38).copy(alpha = 0.5f) else null,
+                                        cornerRadius = 16.dp,
+                                        innerPadding = 8.dp,
+                                        backgroundColor = LyoColors.CardSlate,
+                                        borderColor = LyoColors.GlassBorder,
+                                        glowColor = if (partner.rating >= 4.5) LyoColors.AccentOrange.copy(alpha = 0.12f) else null,
                                         onClick = { onNavigateToVendor(partner.id) }
                                     ) {
-                                        Column {
-                                            // Premium Curated Shop Photographic Backdrop
-                                            VendorBanner(
-                                                name = partner.name,
-                                                nameTa = partner.nameTa,
-                                                type = partner.type,
-                                                bannerUrl = partner.bannerUrl,
-                                                address = partner.address,
-                                                isOnHoliday = !partner.isCurrentlyOpen,
-                                                showOverlayText = true,
-                                                height = 165.dp,
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Left: small square thumbnail (rounded corners, clip)
+                                            Box(
                                                 modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(14.dp))
-                                            )
-                                            
-                                            Spacer(modifier = Modifier.height(6.dp))
-
-                                            // Operational Stats
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().padding(top = 1.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
+                                                    .size(76.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF1E293B))
                                             ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                val hasCustomImage = partner.bannerUrl.isNotBlank() && (
+                                                    partner.bannerUrl.startsWith("http") ||
+                                                    partner.bannerUrl.startsWith("content://") ||
+                                                    partner.bannerUrl.startsWith("file://") ||
+                                                    partner.bannerUrl.contains("/")
+                                                )
+                                                if (hasCustomImage) {
+                                                    val painterModel = remember(partner.bannerUrl) {
+                                                        if (partner.bannerUrl.startsWith("/")) java.io.File(partner.bannerUrl) else partner.bannerUrl
+                                                    }
+                                                    androidx.compose.foundation.Image(
+                                                        painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                                        contentDescription = null,
+                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                } else {
+                                                    // Fallback icon based on type
+                                                    val normType = partner.type.lowercase()
+                                                    val fallbackIcon = when {
+                                                        normType.contains("hotel") -> Icons.Filled.LocalDining
+                                                        normType.contains("restaurant") -> Icons.Filled.Restaurant
+                                                        normType.contains("cafe") -> Icons.Filled.Coffee
+                                                        normType.contains("bakery") -> Icons.Filled.Cake
+                                                        else -> Icons.Filled.Storefront
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = fallbackIcon,
+                                                            contentDescription = null,
+                                                            tint = LyoColors.AmberYellow,
+                                                            modifier = Modifier.size(28.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                if (!partner.isCurrentlyOpen) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .background(Color(0x99000000)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = "CLOSED",
+                                                            color = Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Black
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.width(12.dp))
+
+                                            // Center: name, cuisine, and metadata
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = partner.name,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = LyoColors.TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (partner.nameTa.isNotBlank()) {
                                                     Text(
-                                                        text = "⭐ ${partner.rating} • ${String.format(java.util.Locale.US, "%.1f", partner.distance)} km • ${partner.deliveryTime} mins",
-                                                        fontSize = 10.sp,
+                                                        text = partner.nameTa,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium,
                                                         color = LyoColors.TextSecondary,
                                                         maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(top = 1.dp)
+                                                    )
+                                                }
+                                                Text(
+                                                    text = getVendorSubtitle(partner.type),
+                                                    fontSize = 11.sp,
+                                                    color = LyoColors.TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(top = 1.dp)
+                                                )
+
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Bottom Metadata: rating, distance, time
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    // Rating
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(Color(0x1FFF7A1A))
+                                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Star,
+                                                            contentDescription = "Rating",
+                                                            tint = Color(0xFFFF7A1A),
+                                                            modifier = Modifier.size(10.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(2.dp))
+                                                        Text(
+                                                            text = String.format(java.util.Locale.US, "%.1f", partner.rating),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFFFF7A1A)
+                                                        )
+                                                    }
+
+                                                    // Distance
+                                                    Text(
+                                                        text = "•  ${String.format(java.util.Locale.US, "%.1f", partner.distance)} km",
+                                                        fontSize = 10.sp,
+                                                        color = LyoColors.TextSecondary
+                                                    )
+
+                                                    // Time
+                                                    Text(
+                                                        text = "•  ${partner.deliveryTime} mins",
+                                                        fontSize = 10.sp,
+                                                        color = LyoColors.TextSecondary
+                                                    )
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.width(8.dp))
+
+                                            // Right: small offer badge and delivery fee info
+                                            Column(
+                                                horizontalAlignment = Alignment.End,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                // Offer badge (e.g. "30% OFF")
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(LyoColors.AccentOrange)
+                                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "30% OFF",
+                                                        color = Color.White,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Black
                                                     )
                                                 }
 
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .background(Color(0x1AFC9F38))
-                                                        .padding(horizontal = 4.dp, vertical = 1.6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "₹${partner.deliveryFee.toInt()} DEL",
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = LyoColors.AccentOrange
-                                                    )
-                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+
+                                                // Delivery fee info
+                                                Text(
+                                                    text = "₹${partner.deliveryFee.toInt()} DEL",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = LyoColors.AmberYellow
+                                                )
                                             }
                                         }
                                     }
@@ -730,6 +1355,16 @@ fun StorefrontDashboardScreen(
                         }
                     }
                 } else if (selectedTab == "LYO_AI") {
+                    LaunchedEffect(Unit) {
+                        if (com.example.BuildConfig.DEBUG) {
+                            val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                            val user = viewModel.currentUser.value
+                            android.util.Log.d("LyoAuthDebug", "--- ENTERED LYO AI CHATBOT ---")
+                            android.util.Log.d("LyoAuthDebug", "• FirebaseAuth Current User UID: ${fbUser?.uid ?: "NULL"}")
+                            android.util.Log.d("LyoAuthDebug", "• Local Repository User UID: ${user?.uid ?: "NULL"}")
+                            android.util.Log.d("LyoAuthDebug", "• Is Logged In: ${fbUser != null && user != null}")
+                        }
+                    }
                     LyoAiChatbotSection(
                         viewModel = viewModel,
                         onNavigateToVendor = onNavigateToVendor,
@@ -808,6 +1443,7 @@ fun StorefrontDashboardScreen(
                             .clickable {
                                 if (currentUser == null) {
                                     android.widget.Toast.makeText(context, "Please login first to view your past orders! 🔐", android.widget.Toast.LENGTH_LONG).show()
+                                    viewModel.pendingLoginAction.value = com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewOrders
                                     viewModel.navigationTrigger.value = "LOGIN"
                                 } else {
                                     viewModel.selectedTabState.value = "ORDERS"
@@ -889,6 +1525,7 @@ fun StorefrontDashboardScreen(
                             .clickable {
                                 if (currentUser == null) {
                                     android.widget.Toast.makeText(context, "Please login first to track your order live! 🔐", android.widget.Toast.LENGTH_LONG).show()
+                                    viewModel.pendingLoginAction.value = com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewOrders
                                     viewModel.navigationTrigger.value = "LOGIN"
                                 } else {
                                     viewModel.selectedTabState.value = "TRACKER"
@@ -934,6 +1571,7 @@ fun StorefrontDashboardScreen(
                             .clickable {
                                 if (currentUser == null) {
                                     android.widget.Toast.makeText(context, "Please login first to view your profile! 🔐", android.widget.Toast.LENGTH_LONG).show()
+                                    viewModel.pendingLoginAction.value = com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewProfile
                                     viewModel.navigationTrigger.value = "LOGIN"
                                 } else {
                                     viewModel.selectedTabState.value = "PROFILE"
@@ -1176,7 +1814,7 @@ fun CustomerProfileSection(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 1.5. HIGH-DENSITY 3D LIQUID GLASS LOYALTY CARD
-        val totalLoyaltyPoints = pastOrders.sumOf { ((it.totalAmount / 10).toInt().coerceAtLeast(1) - it.redeemedPoints) }.coerceAtLeast(0)
+        val totalLoyaltyPoints = pastOrders.sumOf { ((it.totalAmount / 10).toInt() - it.redeemedPoints) }.coerceAtLeast(0)
         val pointsForDiscount = 100
         val pointsEarnedInCurrentCycle = totalLoyaltyPoints % pointsForDiscount
         val pointsNeededForNextDiscount = pointsForDiscount - pointsEarnedInCurrentCycle
@@ -1204,7 +1842,7 @@ fun CustomerProfileSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(18.dp)
+                    .padding(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1224,12 +1862,12 @@ fun CustomerProfileSection(
                                 imageVector = Icons.Filled.Star,
                                 contentDescription = "loyalty",
                                 tint = LyoColors.AmberYellow,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "$totalLoyaltyPoints PTS",
-                                fontSize = 24.sp,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color.White
                             )
@@ -1243,9 +1881,9 @@ fun CustomerProfileSection(
                                 Brush.horizontalGradient(
                                     colors = listOf(LyoColors.AccentOrange, LyoColors.AmberYellow)
                                 ),
-                                RoundedCornerShape(12.dp)
+                                RoundedCornerShape(8.dp)
                             )
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = if (earnedDiscounts > 0) "🎁 $earnedDiscounts REWARDS READY" else "🔒 NEXT REWARD AT 100 PTS",
@@ -1265,7 +1903,7 @@ fun CustomerProfileSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Next ₹100 Discount Coupon Progress",
+                        text = "Next ₹10 Reward Coupon Progress",
                         fontSize = 11.sp,
                         color = Color.White,
                         fontWeight = FontWeight.Bold
@@ -1284,7 +1922,7 @@ fun CustomerProfileSection(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
+                        .height(8.dp)
                         .clip(CircleShape)
                         .background(Color(0x33000000))
                         .border(1.dp, Color(0x33FFFFFF), CircleShape)
@@ -1320,7 +1958,7 @@ fun CustomerProfileSection(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "அடுத்த தள்ளுபடி பெற இன்னும் $pointsNeededForNextDiscount புள்ளிகள் தேவை! (1 Point per ₹10 spent)",
+                        text = "அடுத்த தள்ளுபடி பெற இன்னும் $pointsNeededForNextDiscount புள்ளிகள் தேவை! (1 Point per ₹100 spent)",
                         fontSize = 10.sp,
                         color = LyoColors.TextSecondary,
                         fontWeight = FontWeight.Medium
@@ -2289,7 +2927,7 @@ fun CustomerProfileSection(
 
         // Metadata build label
         Text(
-            text = "Lyo Premium App v1.0.0\nSecurely customized for Edappadi food delivery services",
+            text = "Lyo Premium App v1.0.0\nSecurely customized for Lyo AI Food Delivery services",
             fontSize = 9.sp,
             color = Color(0xFF475569),
             textAlign = TextAlign.Center,
@@ -2773,6 +3411,144 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // SECTION: ACTIVE DEVICES
+        val activeSessions by viewModel.repository.activeSessions.collectAsState()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val myDeviceId = remember { com.example.data.repository.LyoFirebaseHelper.getDeviceId(context) }
+
+        Text(
+            text = "📱 ACTIVE DEVICES & SECURITY (சாதனங்கள்)",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFF94A3B8),
+            letterSpacing = 1.2.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF0F172A))
+                .border(1.dp, Color(0x334F46E5), RoundedCornerShape(16.dp))
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = "Manage active logins and remote device authorizations. Other authorized devices will be automatically and securely synchronized in real-time.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B),
+                    lineHeight = 15.sp
+                )
+
+                if (activeSessions.isEmpty()) {
+                    Text("Loading authorized sessions...", color = Color.White, fontSize = 12.sp)
+                } else {
+                    activeSessions.forEachIndexed { index, session ->
+                        val isMyDevice = session.deviceId == myDeviceId
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isMyDevice) Color(0x1610B981) else Color(0x1638BDF8)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Smartphone,
+                                        contentDescription = null,
+                                        tint = if (isMyDevice) Color(0xFF10B981) else Color(0xFF38BDF8),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = session.deviceName,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (isMyDevice) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(Color(0x3310B981))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("THIS DEVICE", color = Color(0xFF34D399), fontSize = 8.sp, fontWeight = FontWeight.ExtraBold)
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "${session.osVersion} • ID: ${session.deviceId.take(8).uppercase()}",
+                                        color = Color(0xFF64748B),
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+
+                            if (!isMyDevice) {
+                                IconButton(
+                                    onClick = {
+                                        currentUser?.phone?.let { phone ->
+                                            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                                .collection("users")
+                                                .document(phone)
+                                                .collection("sessions")
+                                                .document(session.deviceId)
+                                                .delete()
+                                        }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Cancel,
+                                        contentDescription = "Terminate",
+                                        tint = Color(0xFFEF4444),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                        if (index < activeSessions.size - 1) {
+                            Divider(color = Color(0x11FFFFFF))
+                        }
+                    }
+
+                    val otherSessionsCount = activeSessions.count { it.deviceId != myDeviceId }
+                    if (otherSessionsCount > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                currentUser?.uid?.let { uid ->
+                                    if (uid.isNotBlank()) {
+                                        com.example.data.repository.LyoFirebaseHelper.removeAllOtherDeviceSessions(uid)
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x22EF4444)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Filled.ExitToApp, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("LOGOUT ALL OTHER DEVICES (மற்றவை வெளியேற்று)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFCA5A5))
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // SECTION 2: APP PREFERENCES
         Text(
             text = "⚙️ APP PREFERENCES",
@@ -2948,7 +3724,50 @@ fun PastOrdersHistoryList(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        if (pastOrders.isEmpty()) {
+        // FILTER CHIPS FOR 2 DAYS / 3 DAYS
+        var historyFilter by remember { mutableStateOf("ALL") }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val filterOptions = listOf(
+                Triple("ALL", "All", "அனைத்தும்"),
+                Triple("2_DAYS", "Within 2 Days", "2 நாட்கள்"),
+                Triple("3_DAYS", "Within 3 Days", "3 நாட்கள்")
+            )
+            filterOptions.forEach { opt ->
+                val isSelected = historyFilter == opt.first
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isSelected) LyoColors.AccentOrange else Color(0x1AFFFFFF))
+                        .border(1.dp, if (isSelected) LyoColors.AccentOrange else Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                        .clickable { historyFilter = opt.first }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(opt.second, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(opt.third, color = Color.White.copy(alpha = 0.7f), fontSize = 8.sp, fontWeight = FontWeight.Normal)
+                    }
+                }
+            }
+        }
+
+        val filteredOrders = remember(pastOrders, historyFilter) {
+            val now = System.currentTimeMillis()
+            pastOrders.reversed().filter { order ->
+                when (historyFilter) {
+                    "2_DAYS" -> (now - order.timestamp) <= 2 * 24 * 60 * 60 * 1000L
+                    "3_DAYS" -> (now - order.timestamp) <= 3 * 24 * 60 * 60 * 1000L
+                    else -> true
+                }
+            }
+        }
+
+        if (filteredOrders.isEmpty()) {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2969,13 +3788,13 @@ fun PastOrdersHistoryList(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "No cuisine orders placed yet!",
+                        text = "No cuisine orders found!",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Head to the Home section to place your first delicious order!",
+                        text = "Try changing the filter or place a new delicious order!",
                         color = LyoColors.TextSecondary,
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center,
@@ -2984,14 +3803,18 @@ fun PastOrdersHistoryList(
                 }
             }
         } else {
-            pastOrders.reversed().forEach { order ->
+            filteredOrders.forEach { order ->
                 val isExpanded = expandedOrderId == order.id
                 var orderItems by remember(order.id) { mutableStateOf<List<com.example.data.database.OrderItem>>(emptyList()) }
+                var riderRideState by remember(order.id) { mutableStateOf<com.example.data.database.DeliveryRide?>(null) }
 
-                // Fetch items when expanding
+                // Fetch items & rider details when expanding
                 LaunchedEffect(isExpanded) {
-                    if (isExpanded && orderItems.isEmpty()) {
-                        orderItems = viewModel.getOrderItems(order.id)
+                    if (isExpanded) {
+                        if (orderItems.isEmpty()) {
+                            orderItems = viewModel.getOrderItems(order.id)
+                        }
+                        riderRideState = viewModel.getDeliveryRide(order.id)
                     }
                 }
 
@@ -3005,19 +3828,32 @@ fun PastOrdersHistoryList(
                         }
                     ) {
                         Column {
-                            // Header: Order ID & Date
+                            // Header: Order ID & Date & Badge
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
-                                    Text(
-                                        text = "ORDER LYO-${order.id}",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White
-                                    )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text(
+                                            text = "ORDER LYO-${order.id}",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White
+                                        )
+                                        if (com.example.data.repository.LyoLiveTestTracker.isTestOrder(order)) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(Color(0xFF8B5CF6))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("🧪 TEST ORDER", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
                                     val formattedDate = remember(order.timestamp) {
                                         val sdf = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault())
                                         sdf.format(java.util.Date(order.timestamp))
@@ -3027,28 +3863,67 @@ fun PastOrdersHistoryList(
                                         fontSize = 11.sp,
                                         color = LyoColors.TextSecondary
                                     )
+
+                                    // AGE BADGE (இரண்டு நாட்களுக்குள் / மூன்று நாட்களுக்குள்)
+                                    val now = System.currentTimeMillis()
+                                    val orderAgeMs = now - order.timestamp
+                                    val orderAgeDays = orderAgeMs / (1000 * 60 * 60 * 24)
+                                    val withinDaysText = when {
+                                        orderAgeDays < 1 -> "⚡ Placed Today (இன்று)"
+                                        orderAgeDays == 1L -> "⏱️ Placed Yesterday (நேற்று)"
+                                        orderAgeDays <= 2 -> "⏱️ Within 2 Days (2 நாட்கள்)"
+                                        orderAgeDays <= 3 -> "⏱️ Within 3 Days (3 நாட்கள்)"
+                                        else -> "⏱️ $orderAgeDays Days Ago ($orderAgeDays நாட்களுக்கு முன்)"
+                                    }
+                                    Text(
+                                        text = withinDaysText,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (orderAgeDays <= 2) Color(0xFF34D399) else Color(0xFF60A5FA),
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
                                 }
 
-                                // Status Sticker
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (order.status == "DELIVERED") Color(0x2222C55E) else Color(0x22FBBF24)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Status Sticker
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (order.status == "DELIVERED") Color(0x2222C55E) else if (order.status == "CANCELLED") Color(0x22EF4444) else Color(0x22FBBF24)
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (order.status == "DELIVERED") Color(0xFF22C55E) else if (order.status == "CANCELLED") Color(0xFFEF4444) else Color(0xFFFBBF24),
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = order.status,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (order.status == "DELIVERED") LyoColors.VegGreen else if (order.status == "CANCELLED") Color(0xFFEF4444) else LyoColors.AmberYellow
                                         )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (order.status == "DELIVERED") Color(0xFF22C55E) else Color(0xFFFBBF24),
-                                            shape = RoundedCornerShape(8.dp)
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Delete Order History Button (Trash Icon)
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.deleteOrder(order.id)
+                                            android.widget.Toast.makeText(context, "ஆர்டர் ஹிஸ்டரி நீக்கப்பட்டது / Order history deleted! 🗑️", android.widget.Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Delete,
+                                            contentDescription = "Delete",
+                                            tint = Color(0xFFEF4444).copy(alpha = 0.8f),
+                                            modifier = Modifier.size(16.dp)
                                         )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = order.status,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (order.status == "DELIVERED") LyoColors.VegGreen else LyoColors.AmberYellow
-                                    )
+                                    }
                                 }
                             }
 
@@ -3239,7 +4114,7 @@ fun PastOrdersHistoryList(
                                                             paint.color = android.graphics.Color.BLACK
                                                             paint.textSize = 12f
                                                             paint.isFakeBoldText = true
-                                                            canvas.drawText("LYO FOOD DELIVERY - INVOICE", 10f, 25f, paint)
+                                                            canvas.drawText("Lyo AI Food Delivery", 10f, 25f, paint)
                                                             
                                                             paint.isFakeBoldText = false
                                                             paint.textSize = 8f
@@ -3472,6 +4347,129 @@ fun PastOrdersHistoryList(
                                                 modifier = Modifier.padding(vertical = 4.dp).align(Alignment.CenterHorizontally)
                                             )
                                         }
+
+                                        // --- AWARD BONUS POINTS AND RATE THE DELIVERY BOY ---
+                                        if (riderRideState != null) {
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            var riderRating by remember { mutableStateOf(5) }
+                                            var selectedPointsReward by remember { mutableStateOf(10) }
+                                            var riderRatedForOrder by remember { mutableStateOf(false) }
+
+                                            if (!riderRatedForOrder) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(Color(0x0AFFFFFF))
+                                                        .border(1.dp, Color(0x19FFFFFF), RoundedCornerShape(12.dp))
+                                                        .padding(10.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "🏅 டெலிவரி பாய்க்கு புள்ளிகள் / Rate Rider",
+                                                                color = Color.White.copy(alpha = 0.9f),
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                            Text(
+                                                                text = "Rider: ${riderRideState?.riderName ?: "Lyo Express Rider"}",
+                                                                color = LyoColors.TextSecondary,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            (1..5).forEach { star ->
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clickable { riderRating = star }
+                                                                        .padding(horizontal = 2.dp)
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Filled.Star,
+                                                                        contentDescription = "$star Stars",
+                                                                        tint = if (star <= riderRating) LyoColors.AmberYellow else Color.White.copy(alpha = 0.15f),
+                                                                        modifier = Modifier.size(14.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                                    Text(
+                                                        text = "Award Bonus Points (பாயிண்ட்ஸ் வழங்குங்கள்):",
+                                                        color = Color.White.copy(alpha = 0.7f),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(bottom = 6.dp)
+                                                    )
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        listOf(10, 20, 50).forEach { pt ->
+                                                            val isPtSelected = selectedPointsReward == pt
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .weight(1f)
+                                                                    .clip(RoundedCornerShape(8.dp))
+                                                                    .background(if (isPtSelected) Color(0x33F59E0B) else Color(0x0DFFFFFF))
+                                                                    .border(
+                                                                        1.dp,
+                                                                        if (isPtSelected) LyoColors.AmberYellow else Color.White.copy(alpha = 0.1f),
+                                                                        RoundedCornerShape(8.dp)
+                                                                    )
+                                                                    .clickable { selectedPointsReward = pt }
+                                                                    .padding(vertical = 8.dp),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Text(
+                                                                    text = "+$pt Pts",
+                                                                    color = if (isPtSelected) LyoColors.AmberYellow else Color.White,
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                            }
+                                                        }
+
+                                                        Button(
+                                                            onClick = {
+                                                                val rPhone = riderRideState?.riderPhone
+                                                                if (!rPhone.isNullOrBlank()) {
+                                                                    viewModel.submitRiderPointsAndRating(rPhone, riderRating, selectedPointsReward)
+                                                                    riderRatedForOrder = true
+                                                                    android.widget.Toast.makeText(context, "நன்றி! டெலிவரி பாய்க்கு புள்ளிகள் வழங்கப்பட்டது / Points awarded! 🎖️", android.widget.Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.height(36.dp),
+                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                                        ) {
+                                                            Text("AWARD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = "டெலிவரி பாய்க்கு புள்ளிகள் வழங்கப்பட்டது / Rider points awarded successfully! 🎖️",
+                                                    color = Color(0xFF34D399),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(vertical = 4.dp).align(Alignment.CenterHorizontally)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3646,6 +4644,10 @@ fun VendorProfileScreen(
 ) {
     val vendors by viewModel.allVendors.collectAsState(initial = emptyList())
     val partner = vendors.find { it.id == vendorId } ?: return
+
+    LaunchedEffect(partner) {
+        viewModel.repository.currentVendor.value = partner
+    }
 
     val categoriesFlow = remember(vendorId) { viewModel.getCategoriesForVendor(vendorId) }
     val categories by categoriesFlow.collectAsState(initial = emptyList())
@@ -3868,7 +4870,7 @@ fun VendorProfileScreen(
                                 .fillMaxWidth()
                                 .background(
                                     brush = Brush.verticalGradient(
-                                        colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
+                                        colors = listOf(LyoColors.CardSlate, Color(0xFF071426))
                                     ),
                                     shape = RoundedCornerShape(18.dp)
                                 )
@@ -4120,51 +5122,46 @@ fun VendorProfileScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // All Button
+                        val isAllSelected = selectedVegFilter == "ALL"
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp) // Fixed height to guarantee absolute alignment
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (selectedVegFilter == "ALL") {
-                                        Brush.verticalGradient(colors = listOf(Color(0xFF38BDF8), Color(0xFF0284C7)))
-                                    } else {
-                                        Brush.verticalGradient(colors = listOf(Color(0x1AFFFFFF), Color(0x0DFFFFFF)))
-                                    }
-                                )
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isAllSelected) Color(0xFF16C7E8) else Color(0xFF14233D))
                                 .border(
                                     width = 1.dp,
-                                    color = if (selectedVegFilter == "ALL") Color(0xFF38BDF8) else Color.White.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(12.dp)
+                                    color = if (isAllSelected) Color(0xFF16C7E8) else Color(0x1AD9E2EC),
+                                    shape = RoundedCornerShape(8.dp)
                                 )
                                 .clickable { 
                                     selectedVegFilter = "ALL"
                                     selectedCategoryIndex = 0
-                                },
+                                }
+                                .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(horizontal = 4.dp)
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.RestaurantMenu,
                                     contentDescription = "All",
-                                    tint = if (selectedVegFilter == "ALL") Color.White else LyoColors.TextSecondary,
+                                    tint = if (isAllSelected) Color(0xFF071225) else Color(0xFFB9C6D8),
                                     modifier = Modifier.size(13.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "அனைத்தும் / ALL",
-                                    color = if (selectedVegFilter == "ALL") Color.White else LyoColors.TextPrimary,
+                                    color = if (isAllSelected) Color(0xFF071225) else Color(0xFFB9C6D8),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -4172,54 +5169,48 @@ fun VendorProfileScreen(
                         }
 
                         // Veg Button
+                        val isVegSelected = selectedVegFilter == "VEG"
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp) // Fixed height to guarantee absolute alignment
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (selectedVegFilter == "VEG") {
-                                        Brush.verticalGradient(colors = listOf(Color(0xFF10B981), Color(0xFF047857)))
-                                    } else {
-                                        Brush.verticalGradient(colors = listOf(Color(0x1AFFFFFF), Color(0x0DFFFFFF)))
-                                    }
-                                )
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isVegSelected) Color(0xFF16A56B) else Color(0xFF14233D))
                                 .border(
                                     width = 1.dp,
-                                    color = if (selectedVegFilter == "VEG") Color(0xFF10B981) else Color.White.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(12.dp)
+                                    color = if (isVegSelected) Color(0xFF16A56B) else Color(0x1AD9E2EC),
+                                    shape = RoundedCornerShape(8.dp)
                                 )
                                 .clickable { 
                                     selectedVegFilter = "VEG"
                                     selectedCategoryIndex = 0
-                                },
+                                }
+                                .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(horizontal = 4.dp)
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(10.dp)
-                                        .border(1.2.dp, if (selectedVegFilter == "VEG") Color.White else LyoColors.VegGreen, RoundedCornerShape(2.dp))
-                                        .padding(1.5.dp),
+                                        .border(1.dp, if (isVegSelected) Color.White else Color(0xFF16A56B), RoundedCornerShape(2.dp))
+                                        .padding(1.2.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(1.dp))
-                                            .background(if (selectedVegFilter == "VEG") Color.White else LyoColors.VegGreen)
+                                            .background(if (isVegSelected) Color.White else Color(0xFF16A56B))
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "சைவம் / VEG 🌱",
-                                    color = if (selectedVegFilter == "VEG") Color.White else LyoColors.TextPrimary,
+                                    color = if (isVegSelected) Color.White else Color(0xFFB9C6D8),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -4227,54 +5218,48 @@ fun VendorProfileScreen(
                         }
 
                         // Non-Veg Button
+                        val isNonVegSelected = selectedVegFilter == "NON_VEG"
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp) // Fixed height to guarantee absolute alignment
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (selectedVegFilter == "NON_VEG") {
-                                        Brush.verticalGradient(colors = listOf(Color(0xFFEF4444), Color(0xFFB91C1C)))
-                                    } else {
-                                        Brush.verticalGradient(colors = listOf(Color(0x1AFFFFFF), Color(0x0DFFFFFF)))
-                                    }
-                                )
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isNonVegSelected) Color(0xFFD94A52) else Color(0xFF14233D))
                                 .border(
                                     width = 1.dp,
-                                    color = if (selectedVegFilter == "NON_VEG") Color(0xFFEF4444) else Color.White.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(12.dp)
+                                    color = if (isNonVegSelected) Color(0xFFD94A52) else Color(0x1AD9E2EC),
+                                    shape = RoundedCornerShape(8.dp)
                                 )
                                 .clickable { 
                                     selectedVegFilter = "NON_VEG"
                                     selectedCategoryIndex = 0
-                                },
+                                }
+                                .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(horizontal = 4.dp)
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(10.dp)
-                                        .border(1.2.dp, if (selectedVegFilter == "NON_VEG") Color.White else LyoColors.NonVegRed, RoundedCornerShape(2.dp))
-                                        .padding(1.5.dp),
+                                        .border(1.dp, if (isNonVegSelected) Color.White else Color(0xFFD94A52), RoundedCornerShape(2.dp))
+                                        .padding(1.2.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(1.dp))
-                                            .background(if (selectedVegFilter == "NON_VEG") Color.White else LyoColors.NonVegRed)
+                                            .background(if (isNonVegSelected) Color.White else Color(0xFFD94A52))
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "அசைவம் / N-VEG 🍗",
-                                    color = if (selectedVegFilter == "NON_VEG") Color.White else LyoColors.TextPrimary,
+                                    text = "அசைவம் / NON-VEG 🍗",
+                                    color = if (isNonVegSelected) Color.White else Color(0xFFB9C6D8),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -4329,40 +5314,17 @@ fun VendorProfileScreen(
                                     // 3D Glass / Liquid tab effect
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(
-                                                if (isSelected) {
-                                                    Brush.verticalGradient(
-                                                        colors = listOf(
-                                                            Color(0xFFEA580C),
-                                                            Color(0xFFF97316),
-                                                            Color(0xFFFF7E1A)
-                                                        )
-                                                    )
-                                                } else {
-                                                    Brush.verticalGradient(
-                                                        colors = listOf(
-                                                            LyoGlassDesignTokens.GlassCardBgGlow,
-                                                            LyoGlassDesignTokens.GlassCardBg
-                                                        )
-                                                    )
-                                                }
-                                            )
+                                            .height(36.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isSelected) Color(0xFFFF7A1A) else Color(0xFF14233D))
                                             .border(
-                                                1.dp,
-                                                if (isSelected) {
-                                                    Brush.verticalGradient(
-                                                        colors = listOf(Color.White.copy(alpha = 0.6f), Color.Transparent)
-                                                    )
-                                                } else {
-                                                    Brush.verticalGradient(
-                                                        colors = listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                                                    )
-                                                },
-                                                RoundedCornerShape(14.dp)
+                                                width = 1.dp,
+                                                color = if (isSelected) Color(0xFFFF7A1A) else Color(0x22B9C6D8),
+                                                shape = RoundedCornerShape(10.dp)
                                             )
                                             .clickable { selectedCategoryIndex = idx }
-                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            .padding(horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -4370,16 +5332,20 @@ fun VendorProfileScreen(
                                         ) {
                                             Text(
                                                 text = cat.nameEn,
-                                                color = if (isSelected) Color.White else LyoColors.TextPrimary,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
+                                                color = if (isSelected) Color.White else Color(0xFFB9C6D8),
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             if (cat.nameTa.isNotBlank() && cat.nameTa != cat.nameEn) {
                                                 Text(
                                                     text = cat.nameTa,
-                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else LyoColors.TextSecondary,
-                                                    fontSize = 8.sp,
-                                                    lineHeight = 10.sp
+                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else Color(0xFF8E9BAE),
+                                                    fontSize = 9.sp,
+                                                    lineHeight = 10.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
@@ -4405,11 +5371,11 @@ fun VendorProfileScreen(
                 } else {
                     items(activeItems, key = { it.id }) { dish ->
                         val qtyInCart = cart[dish] ?: 0
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 3.dp)) {
+                        Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
                             GlassCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                glowColor = if (qtyInCart > 0) Color(0xFF38BDF8).copy(alpha = 0.6f) else null,
-                                innerPadding = 8.dp
+                                glowColor = if (qtyInCart > 0) Color(0xFF38BDF8).copy(alpha = 0.5f) else null,
+                                innerPadding = 6.dp
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -4419,9 +5385,9 @@ fun VendorProfileScreen(
                                     if (false && dish.imageUrl.isNotBlank()) {
                                         Box(
                                             modifier = Modifier
-                                                .size(64.dp)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+                                                .size(54.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
                                                 .background(Brush.verticalGradient(colors = listOf(Color(0x33FFFFFF), Color(0x11000000))))
                                         ) {
                                             androidx.compose.foundation.Image(
@@ -4443,7 +5409,7 @@ fun VendorProfileScreen(
                                                                 Color.Black.copy(alpha = 0.35f)
                                                             ),
                                                             startY = 0f,
-                                                            endY = 150f
+                                                            endY = 120f
                                                         )
                                                     )
                                             )
@@ -4456,11 +5422,11 @@ fun VendorProfileScreen(
                                                         Brush.linearGradient(
                                                             colors = listOf(Color.White.copy(alpha = 0.4f), Color.Transparent, Color.White.copy(alpha = 0.2f))
                                                         ),
-                                                        RoundedCornerShape(12.dp)
+                                                        RoundedCornerShape(8.dp)
                                                     )
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
@@ -4468,22 +5434,23 @@ fun VendorProfileScreen(
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier
-                                                    .padding(bottom = 4.dp)
-                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .padding(bottom = 2.dp)
+                                                    .clip(RoundedCornerShape(3.dp))
                                                     .background(Color(0xFF3B2E1E))
-                                                    .border(0.5.dp, Color(0xFFFBBF24).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                                                    .padding(horizontal = 4.dp, vertical = 1.5.dp)
+                                                    .border(0.5.dp, Color(0xFFFBBF24).copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+                                                    .padding(horizontal = 3.dp, vertical = 1.0.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.AccessTime,
                                                     contentDescription = null,
                                                     tint = Color(0xFFFBBF24),
-                                                    modifier = Modifier.size(9.dp)
+                                                    modifier = Modifier.size(8.dp)
                                                 )
-                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Spacer(modifier = Modifier.width(2.dp))
                                                 Text(
                                                     text = "கிடைக்கும் நேரம்: ${dish.autoOpenTime} - ${dish.autoCloseTime}",
-                                                    fontSize = 8.sp,
+                                                    fontSize = 8.5.sp,
+                                                    lineHeight = 11.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFFFBBF24)
                                                 )
@@ -4491,18 +5458,18 @@ fun VendorProfileScreen(
                                         }
                                         Text(
                                             text = dish.nameEn,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.White
-                                            )
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
                                         
                                         if (dish.nameTa.isNotBlank() && dish.nameTa != dish.nameEn) {
                                             Text(
                                                 text = dish.nameTa,
-                                                fontSize = 10.5.sp,
-                                                color = LyoColors.AccentOrange,
+                                                fontSize = 11.5.sp,
+                                                color = Color(0xFF20D7F2),
                                                 fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.padding(top = 0.5.dp)
+                                                modifier = Modifier.padding(top = 1.dp)
                                             )
                                         }
 
@@ -4510,10 +5477,11 @@ fun VendorProfileScreen(
                                             Text(
                                                 text = dish.descEn,
                                                 fontSize = 9.5.sp,
-                                                color = LyoColors.TextSecondary,
+                                                lineHeight = 12.sp,
+                                                color = Color(0xFFB9C6D8),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(vertical = 1.dp)
+                                                modifier = Modifier.padding(vertical = 2.dp)
                                             )
                                         }
 
@@ -4523,28 +5491,28 @@ fun VendorProfileScreen(
                                         ) {
                                             Text(
                                                 text = "₹${dish.price.toInt()}",
-                                                fontSize = 13.sp,
+                                                fontSize = 14.5.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(5.dp))
                                             VegIndicator(isVeg = dish.isVeg)
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
 
                                     if (!dish.isCurrentlyAvailable || !partner.isCurrentlyOpen) {
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
+                                                .clip(RoundedCornerShape(4.dp))
                                                 .background(Color(0x22EF4444))
-                                                .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(6.dp))
-                                                .padding(horizontal = 4.dp, vertical = 2.5.dp)
+                                                .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
                                         ) {
                                             Text(
                                                 text = if (!partner.isCurrentlyOpen) "CLOSED TODAY" else "OUT OF STOCK",
-                                                fontSize = 8.sp,
+                                                fontSize = 8.5.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFFEF4444)
                                             )
@@ -4554,43 +5522,43 @@ fun VendorProfileScreen(
                                             onClick = {
                                                 viewModel.addToCart(dish, partner)
                                             },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x1F38BDF8)),
-                                            border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                            border = BorderStroke(1.dp, Color(0xFF16C7E8)),
                                             shape = RoundedCornerShape(6.dp),
-                                            modifier = Modifier.height(24.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                            modifier = Modifier.height(26.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                                         ) {
-                                            Text("ADD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                                            Text("ADD", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16C7E8))
                                         }
                                     } else {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
-                                                .background(LyoColors.AccentOrange, RoundedCornerShape(6.dp))
+                                                .background(LyoColors.AccentOrange, RoundedCornerShape(5.dp))
                                                 .padding(horizontal = 1.dp, vertical = 0.5.dp)
                                         ) {
                                             IconButton(
                                                 onClick = { viewModel.removeFromCart(dish) },
-                                                modifier = Modifier.size(24.dp)
+                                                modifier = Modifier.size(20.dp)
                                             ) {
-                                                Icon(Icons.Filled.Remove, contentDescription = "remove", tint = Color.White, modifier = Modifier.size(11.dp))
+                                                Icon(Icons.Filled.Remove, contentDescription = "remove", tint = Color.White, modifier = Modifier.size(10.dp))
                                             }
 
                                             Text(
                                                 text = qtyInCart.toString(),
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp,
-                                                modifier = Modifier.padding(horizontal = 3.dp)
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 2.dp)
                                             )
 
                                             IconButton(
                                                 onClick = {
                                                     viewModel.addToCart(dish, partner)
                                                 },
-                                                modifier = Modifier.size(24.dp)
+                                                modifier = Modifier.size(20.dp)
                                             ) {
-                                                Icon(Icons.Filled.Add, contentDescription = "add", tint = Color.White, modifier = Modifier.size(11.dp))
+                                                Icon(Icons.Filled.Add, contentDescription = "add", tint = Color.White, modifier = Modifier.size(10.dp))
                                             }
                                         }
                                     }
@@ -5152,9 +6120,9 @@ fun CheckoutCartScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val pastOrdersFlow = remember(currentUser?.phone) { viewModel.getOrdersForUser(currentUser?.phone ?: "") }
     val pastOrders by pastOrdersFlow.collectAsState(initial = emptyList())
-    val totalLoyaltyPoints = pastOrders.sumOf { ((it.totalAmount / 10).toInt().coerceAtLeast(1) - it.redeemedPoints) }.coerceAtLeast(0)
-    var redeemLoyaltyPoints by remember(totalLoyaltyPoints) { mutableStateOf(totalLoyaltyPoints >= 100) }
-    val loyaltyDiscount = if (redeemLoyaltyPoints) (totalLoyaltyPoints * 0.1).coerceAtMost(subtotal) else 0.0
+    val totalLoyaltyPoints = pastOrders.sumOf { ((it.totalAmount / 10).toInt() - it.redeemedPoints) }.coerceAtLeast(0)
+    var redeemLoyaltyPoints by remember { mutableStateOf(false) }
+    val loyaltyDiscount = if (redeemLoyaltyPoints) (totalLoyaltyPoints * 0.10).coerceAtMost(subtotal) else 0.0
     val finalTotalAmount = (totalAmount - loyaltyDiscount).coerceAtLeast(0.0)
 
     var couponField by remember { mutableStateOf("") }
@@ -5165,6 +6133,17 @@ fun CheckoutCartScreen(
     var sliderTipValue by remember { mutableFloatStateOf(0f) }
     var showConfirmOrderDialog by remember { mutableStateOf(false) }
     var isAddressConfirmed by remember { mutableStateOf(false) }
+
+    val isSessionRestoring = remember(currentUser) {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null && currentUser == null
+    }
+
+    LaunchedEffect(Unit) {
+        if (com.example.BuildConfig.DEBUG) {
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            android.util.Log.d("LyoAuthDebug", "Auth UID when checkout opens: $uid")
+        }
+    }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -5265,23 +6244,43 @@ fun CheckoutCartScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color(0x1AFFFFFF))
-                ) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "back", tint = Color.White)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color(0x1AFFFFFF))
+                    ) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "back", tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "Lyo AI Food Delivery Cart",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = "Seamless Checkout Desk",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                androidx.compose.material3.TextButton(
+                    onClick = { viewModel.clearCart() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = LyoColors.NonVegRed),
+                    modifier = Modifier.testTag("clear_cart_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.DeleteSweep,
+                        contentDescription = "Clear",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "CLEAR CART",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             LazyColumn(
@@ -5863,7 +6862,7 @@ fun CheckoutCartScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "சேமிப்பு மதிப்பு: ₹${(totalLoyaltyPoints * 0.1).toInt()} (1 Point = ₹0.10)",
+                                    text = "சேமிப்பு மதிப்பு: ₹${String.format("%.2f", totalLoyaltyPoints * 0.10)} (10 Points = ₹1.00)",
                                     color = LyoColors.TextSecondary,
                                     fontSize = 11.sp
                                 )
@@ -6039,8 +7038,13 @@ fun CheckoutCartScreen(
                         )
                     }
                     
+                    val isButtonEnabled = !isBelowMin && !isSessionRestoring
                     LyoButton(
-                        text = if (isBelowMin) "NOT ELIGIBLE (NEED ₹${remainingAmount.toInt()} MORE)" else "CONFIRM TRANSACTION & BOOK COURIER",
+                        text = when {
+                            isSessionRestoring -> "Restoring Session..."
+                            isBelowMin -> "NOT ELIGIBLE (NEED ₹${remainingAmount.toInt()} MORE)"
+                            else -> "CONFIRM TRANSACTION & BOOK COURIER"
+                        },
                         onClick = {
                             if (!isBelowMin) {
                                 if (deliveryLat == 0.0 || deliveryLng == 0.0 || deliveryAddress.isBlank()) {
@@ -6054,11 +7058,11 @@ fun CheckoutCartScreen(
                                 }
                             }
                         },
-                        colors = if (isBelowMin) ButtonDefaults.buttonColors(containerColor = Color(0x33EF4444), contentColor = Color.White.copy(alpha = 0.5f)) else ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                        colors = if (isBelowMin || isSessionRestoring) ButtonDefaults.buttonColors(containerColor = Color(0x33EF4444), contentColor = Color.White.copy(alpha = 0.5f)) else ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("buy_button"),
-                        enabled = !isBelowMin
+                        enabled = isButtonEnabled
                     )
                 }
             }
@@ -6076,27 +7080,24 @@ fun CheckoutCartScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "டெலிவரி முகவரி சரிபார்ப்பு 📍",
+                            text = "Confirm Delivery Address",
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                     }
+                    
                     Spacer(modifier = Modifier.height(10.dp))
                     
                     Text(
-                        text = "உங்களுக்கு இந்த அட்ரஸ் தான் வர வேண்டுமா? தயவுசெய்து சரிபார்க்கவும்:",
+                        text = "Is this the correct delivery address?",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = LyoColors.AccentOrange,
                         lineHeight = 17.sp
                     )
-                    Text(
-                        text = "(Is this the correct delivery address you want?)",
-                        fontSize = 11.sp,
-                        color = Color.LightGray,
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Address Display Box
                     Column(
@@ -6124,7 +7125,7 @@ fun CheckoutCartScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Coordinates / வரைபடம்: $deliveryLat, $deliveryLng",
+                                    text = "Coordinates: $deliveryLat, $deliveryLng",
                                     fontSize = 10.sp,
                                     color = Color.LightGray
                                 )
@@ -6151,19 +7152,12 @@ fun CheckoutCartScreen(
                             colors = CheckboxDefaults.colors(checkedColor = LyoColors.VegGreen)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Column {
-                            Text(
-                                text = "ஆம், இந்த முகவரி சரியானது தான்! ✅",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "(Yes, my delivery address is correct!)",
-                                color = Color.LightGray,
-                                fontSize = 10.sp
-                            )
-                        }
+                        Text(
+                            text = "Yes, this is my delivery address",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -6173,38 +7167,33 @@ fun CheckoutCartScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color(0xFF1E293B), shape = RoundedCornerShape(10.dp))
-                            .padding(12.dp)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Total Payable / மொத்த தொகை:", color = LyoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Total Payable", color = LyoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Text("₹${finalTotalAmount.toInt()}", color = LyoColors.AccentOrange, fontSize = 15.sp, fontWeight = FontWeight.Black)
                     }
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Row(
-                        horizontalArrangement = Arrangement.End,
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        TextButton(
-                            onClick = { showConfirmOrderDialog = false }
-                        ) {
-                            Text("Cancel / ரத்து செய்", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
                         Button(
                             onClick = {
                                 if (partner.id != initialVendorId) {
                                     Toast.makeText(
                                         context,
-                                        "உணவகம் மாறிவிட்டது! தயவுசெய்து மீண்டும் கார்ட்டை சரிபார்க்கவும். (Restaurant changed! Please go back and check your cart.)",
+                                        "Restaurant changed! Please go back and check your cart.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                     showConfirmOrderDialog = false
                                 } else if (deliveryLat == 0.0 || deliveryLng == 0.0 || deliveryAddress.isBlank()) {
                                     Toast.makeText(
                                         context,
-                                        "தயவுசெய்து உங்கள் முகவரியை Map-ல் select பண்ணவும் அல்லது GPS Auto-detect பயன்படுத்தவும் — இது இல்லாமல் டெலிவரி நபர் உங்கள் வீட்டைக் கண்டுபிடிக்க முடியாது!",
+                                        "Please pick your delivery address coordinates on the map or use GPS auto-detect.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                     showConfirmOrderDialog = false
@@ -6225,13 +7214,36 @@ fun CheckoutCartScreen(
                                 containerColor = LyoColors.VegGreen,
                                 disabledContainerColor = Color.White.copy(alpha = 0.12f)
                             ),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("confirm_order_button")
                         ) {
                             Text(
-                                text = "Confirm Order / ஆர்டர் செய் ✓",
+                                text = "Confirm Order",
                                 color = if (isAddressConfirmed) Color.White else Color.White.copy(alpha = 0.4f),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { showConfirmOrderDialog = false },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("cancel_order_button")
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -6427,157 +7439,243 @@ fun VendorBanner(
                         )
                     )
                     if (address.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(1.dp))
-                        Text(
-                            text = address,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Normal,
-                            color = Color.White.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = androidx.compose.ui.text.TextStyle(
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black.copy(alpha = 0.84f),
-                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
-                                    blurRadius = 2f
-                                )
-                            )
-                        )
-                    }
-                }
+                        Sp    var showSupportSuccessPopup by remember { mutableStateOf(false) }
+
+    if (showSupportSuccessPopup) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showSupportSuccessPopup = false },
+            icon = {
                 Icon(
-                    imageVector = iconSymbol,
+                    imageVector = Icons.Filled.CheckCircle,
                     contentDescription = null,
-                    tint = Color(0x18FFFFFF),
-                    modifier = Modifier.size(44.dp).align(Alignment.Bottom)
+                    tint = Color(0xFF22C55E),
+                    modifier = Modifier.size(48.dp)
                 )
-            }
-        } else {
-            // Elegant subtle top-right corner floating category tag on the image!
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .background(Color(0x990F172A), RoundedCornerShape(6.dp))
-                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+            },
+            title = {
+                Text(
+                    text = "Request Submitted Successfully",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Text(
+                    text = "✅ Your support request has been submitted successfully.\n\nஎங்களது நிர்வாகி விரைவில் உங்களை தொடர்பு கொள்வார்.",
+                    color = Color.LightGray,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showSupportSuccessPopup = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF141720),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    if (showLyoSupportPopupState) {
+        var supportMessage by remember { mutableStateOf("") }
+        var isSubmittingMessage by remember { mutableStateOf(false) }
+
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.showLyoSupportPopup.value = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.HeadsetMic,
+                        contentDescription = "support icon",
+                        tint = LyoColors.AccentOrange,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "உதவி மையம் 📞💬",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "அன்பான எடப்பாடி மக்களே! 🌾 லியோ ஏ ஐ புரியாத மொழிகளில் வினவப்பட்டாலோ அல்லது ஏதேனும் ஆர்டர் அல்லது மெனு சந்தேகங்கள் இருப்பின், உடனடியாக எங்களது Coscoom Creative Tech Solutions தலைமை நிர்வாகி (CEO) Anantharaj.R அவர்களை தொடர்பு கொள்ளவும்.",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0x1A00E5FF)),
+                        border = BorderStroke(1.dp, Color(0x6600E5FF))
                     ) {
-                        Icon(
-                            imageVector = iconSymbol,
-                            contentDescription = null,
-                            tint = LyoColors.AmberYellow,
-                            modifier = Modifier.size(10.dp)
-                        )
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Coscoom Creative Tech Solutions",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "தலைமை நிர்வாகி: Anantharaj.R\nதொடர்பு எண்: 8778148899\nஇடம்: எடப்பாடி, சேலம் மாவட்டம்.",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                lineHeight = 13.sp
+                            )
+                        }
+                    }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                try {
+                                    com.example.WhatsAppHelper.sendMessage(
+                                        context,
+                                        "8778148899",
+                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
+                                    )
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(38.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.Send, contentDescription = "whatsapp", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Text("WhatsApp", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+ 
+                        Button(
+                            onClick = {
+                                try {
+                                    val dialIntent = android.content.Intent(
+                                        android.content.Intent.ACTION_DIAL,
+                                        android.net.Uri.parse("tel:8778148899")
+                                    )
+                                    context.startActivity(dialIntent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(38.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.Phone, contentDescription = "call", tint = Color.White, modifier = Modifier.size(12.dp))
+                                Text("Call", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Or write your query directly below:",
+                        color = LyoColors.TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = supportMessage,
+                        onValueChange = { supportMessage = it },
+                        placeholder = { Text("உங்கள் சந்தேகத்தை இங்கே பதிவிடவும் (e.g. Need help with my order #105)", color = LyoColors.TextSecondary, fontSize = 10.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = LyoColors.AccentOrange,
+                            unfocusedBorderColor = Color(0x33FFFFFF)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(80.dp),
+                        maxLines = 3
+                    )
+
+                    Button(
+                        onClick = {
+                            val msg = supportMessage.trim()
+                            if (msg.isNotBlank()) {
+                                isSubmittingMessage = true
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        val ticketMap = mapOf(
+                                            "message" to msg,
+                                            "timestamp" to System.currentTimeMillis(),
+                                            "userId" to (currentUser?.uid ?: "anonymous"),
+                                            "phone" to (currentUser?.phone ?: ""),
+                                            "userName" to (currentUser?.name ?: "Anonymous"),
+                                            "status" to "PENDING"
+                                        )
+                                        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                            .collection("support_tickets")
+                                            .add(ticketMap)
+                                            .await()
+                                        
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            isSubmittingMessage = false
+                                            supportMessage = ""
+                                            viewModel.showLyoSupportPopup.value = false
+                                            showSupportSuccessPopup = true
+                                        }
+                                    } catch (e: Exception) {
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            isSubmittingMessage = false
+                                            Toast.makeText(context, "Error submitting ticket: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = supportMessage.isNotBlank() && !isSubmittingMessage,
+                        modifier = Modifier.fillMaxWidth().height(38.dp).testTag("submit_support_request_btn")
+                    ) {
                         Text(
-                            text = normalizedType.uppercase(),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White,
-                            letterSpacing = 0.5.sp
+                            text = if (isSubmittingMessage) "Submitting..." else "SUBMIT REQUEST / கோரிக்கையை அனுப்பவும்",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     }
                 }
-            }
-        }
-
-        if (isOnHoliday) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xAA020617))
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color(0xFFDC2626), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "CLOSED TODAY",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun StoreInfoRow(
-    labelEn: String,
-    labelTa: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = LyoColors.TextSecondary,
-            modifier = Modifier.size(18.dp).padding(top = 2.dp)
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.showLyoSupportPopup.value = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
+                ) {
+                    Text("மூடு / Close ✖", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF141720),
+            shape = RoundedCornerShape(16.dp)
         )
-        Spacer(modifier = Modifier.width(10.dp))
-        Column {
-            Text(
-                text = labelEn,
-                fontSize = 11.sp,
-                color = LyoColors.TextSecondary,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(1.dp))
-            Text(
-                text = value,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
-            )
-        }
-    }
-}
-
-@Composable
-fun LyoAiChatbotSection(
-    viewModel: StorefrontViewModel,
-    onNavigateToVendor: (Long) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val messages by viewModel.lyoAiMessages.collectAsState(initial = emptyList())
-    val isLoading by viewModel.isLyoAiLoading.collectAsState(initial = false)
-    val liveCart by viewModel.activeCart.collectAsState(initial = emptyMap())
-    val currentVendor by viewModel.activeVendor.collectAsState()
-    val cartSubtotal by viewModel.cartSubtotal.collectAsState(initial = 0.0)
-    val cartDeliveryFee by viewModel.cartDeliveryFee.collectAsState(initial = 0.0)
-    val cartTotalAmount by viewModel.cartTotalAmount.collectAsState(initial = 0.0)
-    val selectedPaymentMethod by viewModel.selectedPaymentMethod.collectAsState(initial = "")
-    val showLyoSupportPopupState by viewModel.showLyoSupportPopup.collectAsState(initial = false)
-    var userText by remember { mutableStateOf("") }
-    var showClearCartConfirm by remember { mutableStateOf(false) }
-    var showPlaceOrderConfirm by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        viewModel.initLyoAiChat()
-    }
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-
-    val context = LocalContext.current
-    val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
+    } {
             val data = result.data
             val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
             val spokenText = results?.firstOrNull() ?: ""
@@ -6657,7 +7755,7 @@ fun LyoAiChatbotSection(
                                     com.example.WhatsAppHelper.sendMessage(
                                         context,
                                         "8778148899",
-                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
+                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
                                     )
                                 } catch (e: Exception) {
                                     e.printStackTrace()
@@ -6838,6 +7936,7 @@ fun LyoAiChatbotSection(
                         items(suggestions.size, key = { suggestions[it].second }) { idx ->
                             val s = suggestions[idx]
                             Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color(0x11FFFFFF))
@@ -6845,7 +7944,8 @@ fun LyoAiChatbotSection(
                                     .clickable {
                                         viewModel.sendLyoAiPrompt(s.second, context)
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text(s.first, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
@@ -6876,6 +7976,7 @@ fun LyoAiChatbotSection(
                         items(actions.size, key = { actions[it].first }) { idx ->
                             val act = actions[idx]
                             Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color(0x1A22C55E))
@@ -6894,7 +7995,8 @@ fun LyoAiChatbotSection(
                                             ).show()
                                         }
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text(act.first, color = Color(0xFF22C55E), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
                             }
@@ -6919,8 +8021,8 @@ fun LyoAiChatbotSection(
                     } else {
                         Brush.verticalGradient(
                             colors = listOf(
-                                LyoGlassDesignTokens.GlassCardBgGlow,
-                                LyoGlassDesignTokens.GlassCardBg
+                                Color(0xFF0E1D34),
+                                Color(0xFF09111F)
                             )
                         )
                     }
@@ -7763,19 +8865,28 @@ fun LyoAiChatbotSection(
                     ) {
                         Button(
                             onClick = {
-                                viewModel.navigationTrigger.value = "CHECKOUT"
+                                if (com.example.BuildConfig.DEBUG) {
+                                    val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                                    android.util.Log.d("LyoAuthDebug", "--- CLICKED GO TO CHECKOUT ---")
+                                    android.util.Log.d("LyoAuthDebug", "• FirebaseAuth Current User UID: ${fbUser?.uid ?: "NULL"}")
+                                    android.util.Log.d("LyoAuthDebug", "• Local Repository User UID: ${currentUser?.uid ?: "NULL"}")
+                                }
+                                if (!isSessionRestoring) {
+                                    viewModel.navigationTrigger.value = "CHECKOUT"
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF1E293B),
                                 contentColor = Color.White
                             ),
+                            enabled = !isSessionRestoring,
                             border = BorderStroke(1.dp, Color(0x22FFFFFF)),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(vertical = 6.dp)
                         ) {
                             Text(
-                                text = "GO TO CHECKOUT 💳",
+                                text = if (isSessionRestoring) "LOADING..." else "GO TO CHECKOUT 💳",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             )
@@ -7799,14 +8910,21 @@ fun LyoAiChatbotSection(
                         } else {
                             Button(
                                  onClick = {
-                                    val usr = viewModel.currentUser.value
+                                    if (com.example.BuildConfig.DEBUG) {
+                                        val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                                        android.util.Log.d("LyoAuthDebug", "--- CLICKED CHATBOT FAST ORDER ---")
+                                        android.util.Log.d("LyoAuthDebug", "• FirebaseAuth Current User UID: ${fbUser?.uid ?: "NULL"}")
+                                        android.util.Log.d("LyoAuthDebug", "• Local Repository User UID: ${currentUser?.uid ?: "NULL"}")
+                                    }
+                                    val usr = currentUser
                                     val savedAddrs = viewModel.savedAddresses.value
                                     val defaultAddr = savedAddrs.find { it.isDefault }
                                     val finalAddress = defaultAddr?.addressLine ?: usr?.address ?: ""
                                     val finalLat = defaultAddr?.latitude ?: usr?.lat ?: 0.0
                                     val finalLng = defaultAddr?.longitude ?: usr?.lng ?: 0.0
 
-                                    if (usr == null) {
+                                    val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                                    if (usr == null && firebaseUser == null) {
                                         Toast.makeText(context, "Please login first to place an order! 🔐", Toast.LENGTH_LONG).show()
                                         viewModel.navigationTrigger.value = "LOGIN"
                                     } else if (isBelowMin) {
@@ -7822,12 +8940,16 @@ fun LyoAiChatbotSection(
                                     contentColor = if (isBelowMin) Color.LightGray else Color.White
                                 ),
                                 shape = RoundedCornerShape(10.dp),
-                                enabled = true,
+                                enabled = !isSessionRestoring,
                                 modifier = Modifier.weight(1.4f),
                                 contentPadding = PaddingValues(vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = if (isBelowMin) "⚠️ BELOW MIN ORDER" else "⚡ CHATBOT FAST ORDER 🚀",
+                                    text = when {
+                                        isSessionRestoring -> "RESTORING SESSION..."
+                                        isBelowMin -> "⚠️ BELOW MIN ORDER"
+                                        else -> "⚡ CHATBOT FAST ORDER 🚀"
+                                    },
                                     fontWeight = FontWeight.Black,
                                     fontSize = 10.sp
                                 )
@@ -7844,12 +8966,47 @@ fun LyoAiChatbotSection(
                 .fillMaxWidth()
                 .background(Color(0xFF090D16))
         ) {
+            // Always-visible Tamil quick-query chips
+            androidx.compose.foundation.lazy.LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                val tamilQueries = listOf(
+                    "சிறந்த உணவகங்கள்? 🏪" to "what are the best restaurant recommendations?",
+                    "இன்றைய ஆஃபர்கள்? 🎟️" to "what are today's special offers and discounts?",
+                    "ஆர்டர் எங்கே உள்ளது? 🛵" to "where is my current live order status?"
+                )
+                items(tamilQueries.size, key = { tamilQueries[it].first }) { index ->
+                    val (label, queryText) = tamilQueries[index]
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(LyoColors.AccentOrange.copy(alpha = 0.15f))
+                            .border(1.dp, LyoColors.AccentOrange.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                            .clickable {
+                                viewModel.sendLyoAiPrompt(queryText, context)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = LyoColors.AccentOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
             val quickChips = viewModel.getLyoAiQuickChips()
             if (quickChips.isNotEmpty()) {
                 androidx.compose.foundation.lazy.LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
@@ -7866,10 +9023,10 @@ fun LyoAiChatbotSection(
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = chip.first,
-                                color = LyoColors.AccentOrange,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                  text = chip.first,
+                                  color = LyoColors.AccentOrange,
+                                  fontSize = 11.sp,
+                                  fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -8065,13 +9222,14 @@ fun LyoAiChatbotSection(
                         onClick = {
                             showPlaceOrderConfirm = false
                             val usr = viewModel.currentUser.value
+                            val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
                             val savedAddrs = viewModel.savedAddresses.value
                             val defaultAddr = savedAddrs.find { it.isDefault }
-                            if (usr != null) {
+                            if (usr != null || firebaseUser != null) {
                                 viewModel.proceedToCheckout(
-                                    address = defaultAddr?.addressLine ?: usr.address,
-                                    lat = defaultAddr?.latitude ?: usr.lat,
-                                    lng = defaultAddr?.longitude ?: usr.lng
+                                    address = defaultAddr?.addressLine ?: usr?.address ?: "",
+                                    lat = defaultAddr?.latitude ?: usr?.lat ?: 11.5812,
+                                    lng = defaultAddr?.longitude ?: usr?.lng ?: 77.8465
                                 ) { generatedOrderId ->
                                     viewModel.selectedTabState.value = "TRACKER"
                                     Toast.makeText(context, "சாட்பாட் மூலமாக ஆர்டர் வெற்றிகரமாக சமர்ப்பிக்கப்பட்டது! 🛵", Toast.LENGTH_LONG).show()
@@ -8741,11 +9899,17 @@ fun PhotoGalleryExplorerDialog(
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(if (isHit) Color(0xAAEF4444) else Color(0x99000000))
                                             .clickable {
-                                                val nextHit = !isHit
-                                                userHits[item.id] = nextHit
-                                                val newCount = count + (if (nextHit) 1 else -1)
-                                                hitCounts[item.id] = newCount
-                                                sharedPrefs.edit().putBoolean("hit_${item.id}", nextHit).putInt("count_${item.id}", newCount).apply()
+                                                if (viewModel.currentUser.value == null) {
+                                                    android.widget.Toast.makeText(context, "Please login first to add favorites! 🔐", android.widget.Toast.LENGTH_LONG).show()
+                                                    viewModel.pendingLoginAction.value = com.example.ui.viewmodels.StorefrontViewModel.PendingLoginAction.ViewProfile
+                                                    viewModel.navigationTrigger.value = "LOGIN"
+                                                } else {
+                                                    val nextHit = !isHit
+                                                    userHits[item.id] = nextHit
+                                                    val newCount = count + (if (nextHit) 1 else -1)
+                                                    hitCounts[item.id] = newCount
+                                                    sharedPrefs.edit().putBoolean("hit_${item.id}", nextHit).putInt("count_${item.id}", newCount).apply()
+                                                }
                                             }
                                             .padding(horizontal = 6.dp, vertical = 3.dp)
                                     ) {

@@ -110,7 +110,7 @@ object WhatsAppHelper {
         val itemsStr = items.joinToString("\n") { "   • ${it.nameEn} × ${it.quantity} — ₹${(it.price * it.quantity).toInt()}" }
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🛍️  *LYO FOOD DELIVERY — ORDER CONFIRMED*
+🛍️  *LYO AI FOOD DELIVERY — ORDER CONFIRMED*
 ━━━━━━━━━━━━━━━━━━━━━━━
 வணக்கம் $customerName! 🙏
 
@@ -128,7 +128,7 @@ $itemsStr
 
 ⏱️ *30–45 நிமிடங்களில் தங்களது இல்லம் வந்தடைவோம்!*
 
-நன்றி! 🙏 — *Lyo AI*
+நன்றி! 🙏 — *Lyo AI Food Delivery*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }
@@ -147,7 +147,7 @@ $itemsStr
 ━━━━━━━━━━━━━━━━━━━━━━━
 🔔 *புதிய KOT — NEW KITCHEN ORDER*
 ━━━━━━━━━━━━━━━━━━━━━━━
-🏪 *உணவகம்:* Lyo Partner
+🏪 *உணவகம்:* Lyo AI Food Delivery Partner
 
 🆔 *ஆர்டர் ஐடி (Order ID):* *#${order.id}*
 🕐 *நேரம் (Time):* $time
@@ -163,7 +163,7 @@ $itemsStr
 
 ⚡ *உணவினை உடனே தயார் செய்யுமாறு கேட்டுக்கொள்கிறோம்!*
 
-நன்றி! 🙏 — *Lyo AI*
+நன்றி! 🙏 — *Lyo AI Food Delivery*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }
@@ -182,7 +182,7 @@ $itemsStr
         val discount = if (order.couponDiscount > 0) "\n🎁 தள்ளுபடி (Discount): -₹${order.couponDiscount.toInt()}" else ""
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🧾 *LYO FOOD DELIVERY — INVOICE / பில்*
+🧾 *LYO AI FOOD DELIVERY — INVOICE / பில்*
 ━━━━━━━━━━━━━━━━━━━━━━━
 Bill No: *#${order.id}*
 Date: $date
@@ -201,7 +201,7 @@ $itemsStr
 💳 *கட்டண முறை (Payment Mode):* Cash on Delivery
 ━━━━━━━━━━━━━━━━━━━━━━━
 
-எங்களது சேவையைப் பயன்படுத்தியதற்கு நன்றி! 🙏 — *Lyo AI*
+எங்களது சேவையைப் பயன்படுத்தியதற்கு நன்றி! 🙏 — *Lyo AI Food Delivery*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }

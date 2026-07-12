@@ -4,8 +4,9 @@ import android.util.Log
 import com.example.data.database.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.tasks.await
 
-class LyoRepository(private val db: AppDatabase) {
+class LyoRepository(val db: AppDatabase) {
 
     // Global GST Config
     var gstEnabled: Boolean = false
@@ -17,18 +18,42 @@ class LyoRepository(private val db: AppDatabase) {
         gstRate = prefs.getFloat("gst_rate", 5.0f).toDouble()
     }
 
-    fun updateGstSettings(context: android.content.Context, enabled: Boolean, rate: Double) {
+    fun setGstSettingsLocally(context: android.content.Context?, enabled: Boolean, rate: Double) {
         gstEnabled = enabled
         gstRate = rate
-        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("gst_enabled", enabled)
-            .putFloat("gst_rate", rate.toFloat())
-            .apply()
+        context?.let { ctx ->
+            val prefs = ctx.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("gst_enabled", enabled)
+                .putFloat("gst_rate", rate.toFloat())
+                .apply()
+        }
+    }
+
+    fun updateGstSettings(context: android.content.Context, enabled: Boolean, rate: Double) {
+        setGstSettingsLocally(context, enabled, rate)
+        // Also sync to Firestore live config!
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val gstMap = mapOf(
+                    "gstEnabled" to enabled,
+                    "gstRate" to rate
+                )
+                dbInstance.collection("app_settings").document("global").set(gstMap, com.google.firebase.firestore.SetOptions.merge())
+                Log.d("LyoRepository", "Synced GST settings to Firestore: enabled=$enabled, rate=$rate")
+            } catch (e: Exception) {
+                Log.w("LyoRepository", "Error syncing GST settings to Firestore: ${e.message}")
+            }
+        }
     }
 
     // Live In-Memory States
     val currentUser = MutableStateFlow<User?>(null)
+    var adminLoginCredentials: Pair<String, String>? = null
+    val isAuthRestoring = MutableStateFlow(true)
+    val activeSessions = MutableStateFlow<List<DeviceSession>>(emptyList())
+    val remoteLogoutTriggered = MutableStateFlow<Boolean>(false)
     val currentVendor = MutableStateFlow<Vendor?>(null)
     val cart = MutableStateFlow<Map<MenuItem, Int>>(emptyMap()) // MenuItem -> Quantity
     val activeLiveOrder = MutableStateFlow<Order?>(null)
@@ -39,6 +64,13 @@ class LyoRepository(private val db: AppDatabase) {
     val appPauseMessageEn = MutableStateFlow("")
     val appPauseMessageTa = MutableStateFlow("")
 
+    // Global Success Confirmation State
+    val globalSuccessMessage = MutableStateFlow<String?>(null)
+
+    fun showSuccess(msg: String) {
+        globalSuccessMessage.value = msg
+    }
+
     fun initAppPauseSettings(context: android.content.Context) {
         val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
         isAppPaused.value = prefs.getBoolean("is_app_paused", false)
@@ -46,16 +78,22 @@ class LyoRepository(private val db: AppDatabase) {
         appPauseMessageTa.value = prefs.getString("app_pause_message_ta", "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!") ?: "நாங்கள் தற்போது தற்காலிக விடுப்பில் உள்ளோம். விரைவில் மீண்டும் வருகிறோம்!"
     }
 
-    fun updateAppPauseSettings(context: android.content.Context, paused: Boolean, msgEn: String, msgTa: String) {
+    fun setAppPauseSettingsLocally(context: android.content.Context?, paused: Boolean, msgEn: String, msgTa: String) {
         isAppPaused.value = paused
         appPauseMessageEn.value = msgEn
         appPauseMessageTa.value = msgTa
-        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("is_app_paused", paused)
-            .putString("app_pause_message_en", msgEn)
-            .putString("app_pause_message_ta", msgTa)
-            .apply()
+        context?.let { ctx ->
+            val prefs = ctx.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("is_app_paused", paused)
+                .putString("app_pause_message_en", msgEn)
+                .putString("app_pause_message_ta", msgTa)
+                .apply()
+        }
+    }
+
+    fun updateAppPauseSettings(context: android.content.Context, paused: Boolean, msgEn: String, msgTa: String) {
+        setAppPauseSettingsLocally(context, paused, msgEn, msgTa)
 
         // Also sync to Firestore live config!
         CoroutineScope(Dispatchers.IO).launch {
@@ -75,6 +113,75 @@ class LyoRepository(private val db: AppDatabase) {
     }
 
     init {
+        com.google.firebase.auth.FirebaseAuth.getInstance().addAuthStateListener { auth ->
+            val firebaseUser = auth.currentUser
+            if (firebaseUser != null) {
+                val uid = firebaseUser.uid
+                val current = currentUser.value
+                if (current == null || (current.uid != uid && current.role != "ADMIN" && current.uid != "anantharaj_superadmin_uid")) {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        Log.d("LyoRepository", "AuthStateListener: Firebase user connected (UID: $uid). Restoring session...")
+                        var recoveredUser = db.userDao.getUserByPhone(uid)
+                        if (recoveredUser == null) {
+                            val phone = firebaseUser.phoneNumber ?: firebaseUser.email ?: ""
+                            if (phone.isNotEmpty()) {
+                                recoveredUser = db.userDao.getUserByPhone(phone)
+                            }
+                        }
+                        if (recoveredUser == null) {
+                            try {
+                                val doc = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                    .collection("users").document(uid).get().await()
+                                if (doc.exists()) {
+                                    val rawRole = doc.getString("role")
+                                    if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                                        Log.e("LyoRepository", "AuthStateListener: Missing, empty, or invalid role.")
+                                    } else {
+                                        val phone = doc.getString("phone") ?: ""
+                                        val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
+                                        recoveredUser = User(
+                                            phone = phone,
+                                            name = doc.getString("name") ?: "",
+                                            email = doc.getString("email") ?: "",
+                                            address = doc.getString("address") ?: "",
+                                            lat = doc.getDouble("lat") ?: 11.5812,
+                                            lng = doc.getDouble("lng") ?: 77.8465,
+                                            isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                                            role = role,
+                                            vehicleNo = doc.getString("vehicleNo") ?: "",
+                                            isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                                            salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                                            salaryRate = doc.getDouble("salaryRate") ?: 0.0,
+                                            uid = uid
+                                        )
+                                        db.userDao.insertUser(recoveredUser)
+                                    }
+                                } else {
+                                    Log.e("LyoRepository", "AuthStateListener: Profile document missing in Firestore.")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("LyoRepository", "AuthStateListener: Error fetching profile from Firestore: ${e.message}")
+                            }
+                        } else {
+                            val cachedRole = recoveredUser.role
+                            if (cachedRole.isEmpty() || cachedRole !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                                Log.e("LyoRepository", "AuthStateListener: Cached user role invalid or missing.")
+                                recoveredUser = null
+                            }
+                        }
+                        if (recoveredUser != null) {
+                            currentUser.value = recoveredUser
+                            Log.d("LyoRepository", "AuthStateListener: Session restored successfully for: ${recoveredUser.phone}")
+                        } else {
+                            Log.e("LyoRepository", "AuthStateListener: Session recovery skipped/deferred (could be active login/registration in progress).")
+                        }
+                    }
+                }
+            } else {
+                Log.d("LyoRepository", "AuthStateListener: Firebase user is null. Keeping local/cached session intact.")
+            }
+        }
+
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             currentUser.map { it?.phone }.distinctUntilChanged().collectLatest { phone ->
                 if (phone != null) {
@@ -118,6 +225,10 @@ class LyoRepository(private val db: AppDatabase) {
                 }
             }
         }
+    }
+
+    fun triggerRemoteLogout() {
+        remoteLogoutTriggered.value = true
     }
 
     // DAOs
@@ -167,6 +278,7 @@ class LyoRepository(private val db: AppDatabase) {
     val allRiders: Flow<List<User>> = db.userDao.getAllRidersFlow()
     val allCustomers: Flow<List<User>> = db.userDao.getAllCustomersFlow()
     val allAdmins: Flow<List<User>> = db.userDao.getAllAdminsFlow()
+    val allMenuItems: Flow<List<MenuItem>> = db.menuItemDao.getAllMenuItemsFlow()
 
     fun getCategoriesForVendor(vendorId: Long): Flow<List<Category>> =
         db.categoryDao.getCategoriesForVendor(vendorId)
@@ -206,45 +318,69 @@ class LyoRepository(private val db: AppDatabase) {
 
     suspend fun findUser(phone: String): User? = withContext(Dispatchers.IO) {
         var user = db.userDao.getUserByPhone(phone)
-        if (user == null && LyoFirebaseHelper.isInitialized) {
-            user = LyoFirebaseHelper.getUserByPhoneFromFirestore(phone)
-            if (user != null) {
-                db.userDao.insertUser(user)
+        if ((user == null || user.uid.isBlank()) && LyoFirebaseHelper.isInitialized) {
+            val firestoreUser = LyoFirebaseHelper.getUserByPhoneFromFirestore(phone)
+            if (firestoreUser != null) {
+                user = firestoreUser
+                db.userDao.insertUser(firestoreUser)
             }
         }
         user
     }
 
     suspend fun registerUser(user: User, plaintextPassword: String? = null) = withContext(Dispatchers.IO) {
-        db.userDao.insertUser(user)
-        
-        // Save database users list to non-volatile local shared file backup
-        LyoFirebaseHelper.appContext?.let { context ->
-            try {
-                val allUsers = db.userDao.getAllUsers()
-                LyoLocalBackupHelper.backupUsers(allUsers, context)
-            } catch (e: Exception) {
-                Log.e("LyoRepository", "Local background user backup failed: ${e.message}")
-            }
-
-            // Save password hash locally for offline login verification
-            if (!plaintextPassword.isNullOrBlank()) {
-                try {
-                    val hash = LyoFirebaseHelper.hashPassword(plaintextPassword)
-                    val sharedPrefs = context.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
-                    sharedPrefs.edit().putString("pass_hash_${user.phone}", hash).apply()
-                    Log.d("LyoRepository", "Saved offline password hash for phone: ${user.phone}")
-                } catch (e: Exception) {
-                    Log.e("LyoRepository", "Failed to save offline password hash: ${e.message}")
-                }
-            }
-        }
-
+        var firebaseRegistered = false
+        var finalUser = user
         if (LyoFirebaseHelper.isInitialized) {
             try {
-                LyoFirebaseHelper.registerInFirebase(user, plaintextPassword)
+                val authInstance = LyoFirebaseHelper.auth
+                val email = "${LyoFirebaseHelper.normalizePhone(user.phone)}@lyofoods.in"
+                var uid = authInstance?.currentUser?.let {
+                    if (it.email?.lowercase() == email.lowercase()) it.uid else null
+                }
+                if (uid == null) {
+                    uid = LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: LyoFirebaseHelper.getUidByPhone(user.phone)
+                }
+                if (uid != null) {
+                    finalUser = user.copy(uid = uid)
+                }
+                
+                LyoFirebaseHelper.registerInFirebase(finalUser, plaintextPassword)
+                firebaseRegistered = true
+                
+                val finalUid = LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: finalUser.uid
+                if (finalUid.isNotBlank() && finalUid != finalUser.uid) {
+                    finalUser = finalUser.copy(uid = finalUid)
+                }
             } catch (e: Exception) {
-                Log.e("LyoRepository", "Firebase registration failed, but local registration completed: ${e.message}")
+                Log.e("LyoRepository", "Firebase registration/sync failed, rejecting registration: ${e.message}")
+                throw e
+            }
+        } else {
+            firebaseRegistered = true
+        }
+        
+        if (firebaseRegistered) {
+            db.userDao.insertUser(finalUser)
+            
+            LyoFirebaseHelper.appContext?.let { context ->
+                try {
+                    val allUsers = db.userDao.getAllUsers()
+                    LyoLocalBackupHelper.backupUsers(allUsers, context)
+                } catch (e: Exception) {
+                    Log.e("LyoRepository", "Local background user backup failed: ${e.message}")
+                }
+
+                if (!plaintextPassword.isNullOrBlank()) {
+                    try {
+                        val hash = LyoFirebaseHelper.hashPassword(plaintextPassword)
+                        val sharedPrefs = context.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
+                        sharedPrefs.edit().putString("pass_hash_${finalUser.phone}", hash).apply()
+                        Log.d("LyoRepository", "Saved offline password hash for phone: ${finalUser.phone}")
+                    } catch (e: Exception) {
+                        Log.e("LyoRepository", "Failed to save offline password hash: ${e.message}")
+                    }
+                }
             }
         }
     }
@@ -255,6 +391,62 @@ class LyoRepository(private val db: AppDatabase) {
             LyoFirebaseHelper.deleteUserFromFirestore(user.phone)
         } catch (e: Exception) {
             Log.e("LyoRepository", "Firebase Firestore delete customer background deferred: ${e.message}")
+        }
+    }
+
+    suspend fun deleteRiderWithAuthCleanup(rider: User) = withContext(Dispatchers.IO) {
+        // 1. Delete from local Room database immediately so UI updates instantly
+        db.userDao.deleteUserByPhone(rider.phone)
+        
+        val authInstance = com.google.firebase.auth.FirebaseAuth.getInstance()
+        val firestoreInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        
+        // 2. Perform Firebase / Firestore cleanup
+        try {
+            val riderUid = LyoFirebaseHelper.getUidByPhone(rider.phone) ?: rider.uid
+            if (riderUid.isNotBlank()) {
+                // Fetch rider's doc to get passwordHash before deleting
+                val doc = firestoreInstance.collection("users").document(riderUid).get().await()
+                val passwordHash = doc.getString("passwordHash") ?: ""
+                val email = doc.getString("email") ?: "${rider.phone.trim()}@lyofoods.in"
+                
+                if (passwordHash.isNotBlank()) {
+                    val currentAdmin = currentUser.value
+                    val adminCreds = adminLoginCredentials
+                    
+                    Log.d("LyoRepository", "Attempting Auth cleanup for rider: $email")
+                    try {
+                        // Sign in as rider temporarily
+                        authInstance.signInWithEmailAndPassword(email, passwordHash).await()
+                        // Delete rider's Firebase Auth account
+                        authInstance.currentUser?.delete()?.await()
+                        Log.d("LyoRepository", "Successfully deleted rider Firebase Auth account.")
+                    } catch (e: Exception) {
+                        Log.e("LyoRepository", "Failed deleting rider Firebase Auth account: ${e.message}")
+                    }
+                    
+                    // Re-authenticate Admin
+                    if (adminCreds != null && currentAdmin != null) {
+                        try {
+                            val adminEmail = "${adminCreds.first.trim()}@lyofoods.in"
+                            val adminPass = adminCreds.second
+                            val adminHash = LyoFirebaseHelper.hashPassword(adminPass)
+                            authInstance.signInWithEmailAndPassword(adminEmail, adminHash).await()
+                            currentUser.value = currentAdmin
+                            Log.d("LyoRepository", "Successfully re-authenticated Admin session.")
+                        } catch (e: Exception) {
+                            Log.e("LyoRepository", "Failed to re-authenticate Admin session: ${e.message}")
+                        }
+                    }
+                }
+                
+                // Delete Firestore documents
+                firestoreInstance.collection("users").document(riderUid).delete().await()
+                firestoreInstance.collection("admins").document(riderUid).delete().await()
+                Log.d("LyoRepository", "Deleted rider documents from Firestore.")
+            }
+        } catch (e: Exception) {
+            Log.e("LyoRepository", "Error in deleteRiderWithAuthCleanup: ${e.message}")
         }
     }
 
@@ -337,10 +529,36 @@ class LyoRepository(private val db: AppDatabase) {
         val total = subtotal + gst + deliveryFee + tipAmount - couponDiscount
         val otp = (1000..9999).random().toString() // Randomized delivery security OTP
         
-        // Generate a highly unique 16-digit numeric ID to prevent any collisions on Firestore across devices!
-        val ts = System.currentTimeMillis() / 1000L // 10 digits
-        val rand = (100000..999999).random() // 6 digits
-        val uniqueOrderId = ts * 1000000L + rand
+        val sortedItems = itemsList.sortedBy { it.first.id }.joinToString("-") { "${it.first.id}:${it.second}" }
+        val tempUniqueOrderId = (System.currentTimeMillis() / 1000L) * 1000000L + (100000..999999).random()
+        
+        // 1. Check idempotency on Firestore first
+        val checkedOrderId = LyoFirebaseHelper.checkOrCreateIdempotencyKey(
+            userId = userId,
+            vendorId = vendor.id,
+            itemsSignature = sortedItems,
+            newOrderId = tempUniqueOrderId
+        )
+        
+        val uniqueOrderId: Long
+        val isDuplicate: Boolean
+        if (checkedOrderId != 0L && checkedOrderId != tempUniqueOrderId) {
+            uniqueOrderId = checkedOrderId
+            isDuplicate = true
+            Log.d("LyoRepository", "Idempotency key match: Reusing existing order ID $uniqueOrderId")
+        } else {
+            uniqueOrderId = tempUniqueOrderId
+            isDuplicate = false
+        }
+
+        if (isDuplicate) {
+            val existingLocalOrder = db.orderDao.getOrderById(uniqueOrderId)
+            if (existingLocalOrder != null) {
+                activeLiveOrder.value = existingLocalOrder
+                clearCart()
+                return@withContext existingLocalOrder
+            }
+        }
  
         val newOrder = Order(
             id = uniqueOrderId, // Pass directly so Room uses this unique ID instead of autoincrementing from 1
@@ -388,6 +606,13 @@ class LyoRepository(private val db: AppDatabase) {
         while (attempts < 3 && !syncSuccess) {
             attempts++
             try {
+                if (com.example.BuildConfig.DEBUG) {
+                    android.util.Log.d("LyoAuthDebug", "--- WRITING ORDER TO FIRESTORE (ek_orders) ---")
+                    android.util.Log.d("LyoAuthDebug", "• Document/Order ID: ${savedOrder.id}")
+                    android.util.Log.d("LyoAuthDebug", "• Order userId field: ${savedOrder.userId}")
+                    android.util.Log.d("LyoAuthDebug", "• Current FirebaseAuth user UID: ${com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "NULL"}")
+                    android.util.Log.d("LyoAuthDebug", "• Total Payable Amount: ₹${savedOrder.totalAmount}")
+                }
                 LyoFirebaseHelper.syncOrderToFirestore(savedOrder)
                 syncSuccess = true
             } catch (e: Exception) {
@@ -423,7 +648,7 @@ class LyoRepository(private val db: AppDatabase) {
         LyoFirebaseHelper.appContext?.let { ctx ->
             com.example.ui.screens.LyoNotificationHelper.showPushNotification(
                 ctx,
-                "Lyo Foods • ஆர்டர் செய்யப்பட்டது 🎉",
+                "Lyo AI Food Delivery • ஆர்டர் செய்யப்பட்டது 🎉",
                 "ஆர்டர் #${finalOrder.id} எடப்பாடியில் வெற்றிகரமாக பதிவுபெற்றுள்ளது! விரைவில் உங்கள் இல்லம் வந்தடையும். 🛵"
             )
         }
@@ -453,7 +678,24 @@ class LyoRepository(private val db: AppDatabase) {
 
     suspend fun saveOrderFromFirestore(order: Order) = withContext(Dispatchers.IO) {
         val existing = db.orderDao.getOrderById(order.id)
+        if (existing != null) {
+            // Rule 6: Realtime listeners must never overwrite a local CANCELLED order with an older Firestore status.
+            if (existing.status == "CANCELLED" && order.status != "CANCELLED") {
+                Log.d("LyoRepository", "Rule 6: Prevented overwriting local CANCELLED order #${order.id} with status ${order.status}")
+                return@withContext
+            }
+        }
         db.orderDao.insertOrder(order)
+        
+        // Log status change if it's a test order
+        if (LyoLiveTestTracker.isTestOrder(order)) {
+            when (order.status) {
+                "ACCEPTED" -> LyoLiveTestTracker.logAdminAcceptance(order.id)
+                "DELIVERING" -> LyoLiveTestTracker.logDeparture(order.id)
+                "DELIVERED" -> LyoLiveTestTracker.logCompletion(order.id)
+            }
+        }
+
         // If it is the activeLiveOrder, update its state flow too!
         val live = activeLiveOrder.value
         if (live != null && live.id == order.id) {
@@ -483,11 +725,65 @@ class LyoRepository(private val db: AppDatabase) {
 
     suspend fun saveDeliveryRideFromFirestore(ride: DeliveryRide) = withContext(Dispatchers.IO) {
         db.deliveryRideDao.insertDeliveryRide(ride)
+        val order = db.orderDao.getOrderById(ride.orderId)
+        if (order != null && LyoLiveTestTracker.isTestOrder(order)) {
+            LyoLiveTestTracker.logGpsCoordinate(ride.orderId, ride.currentLat, ride.currentLng)
+            if (ride.status == "DELIVERING") {
+                LyoLiveTestTracker.logDeparture(ride.orderId)
+            } else if (ride.status == "DELIVERED") {
+                LyoLiveTestTracker.logCompletion(ride.orderId)
+            }
+        }
     }
 
-    suspend fun updateOrderStatus(orderId: Long, status: String) = withContext(Dispatchers.IO) {
+    suspend fun cancelOrderCustomer(orderId: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        val result = LyoFirebaseHelper.cancelOrderCustomerTransaction(orderId)
+        if (result.isSuccess) {
+            db.orderDao.updateOrderStatus(orderId, "CANCELLED")
+            val live = activeLiveOrder.value
+            if (live != null && live.id == orderId) {
+                activeLiveOrder.value = live.copy(status = "CANCELLED")
+            }
+            Result.success(Unit)
+        } else {
+            Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
+        }
+    }
+
+    suspend fun updateOrderStatus(orderId: Long, status: String): Result<Unit> = withContext(Dispatchers.IO) {
         val oldOrder = db.orderDao.getOrderById(orderId)
+        if (oldOrder != null) {
+            if (oldOrder.status == "CANCELLED" || oldOrder.status == "DELIVERED") {
+                Log.w("LyoRepository", "Cannot update order status: Order #${orderId} is already ${oldOrder.status}")
+                return@withContext Result.failure(Exception("Cannot modify an order that is already ${oldOrder.status}."))
+            }
+        }
+        
+        // Rule 7: Admin acceptance must also use runTransaction
+        if (status == "ACCEPTED") {
+            val txResult = LyoFirebaseHelper.adminAcceptOrderTransaction(orderId)
+            if (txResult.isFailure) {
+                val errorMsg = txResult.exceptionOrNull()?.message ?: "Unknown error"
+                Log.e("LyoRepository", "Admin acceptance failed: $errorMsg")
+                withContext(Dispatchers.Main) {
+                    LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(ctx, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                return@withContext Result.failure(Exception(errorMsg))
+            }
+        }
+
         db.orderDao.updateOrderStatus(orderId, status)
+        
+        val testOrder = db.orderDao.getOrderById(orderId)
+        if (testOrder != null && LyoLiveTestTracker.isTestOrder(testOrder)) {
+            when (status) {
+                "ACCEPTED" -> LyoLiveTestTracker.logAdminAcceptance(orderId)
+                "DELIVERING" -> LyoLiveTestTracker.logDeparture(orderId)
+                "DELIVERED" -> LyoLiveTestTracker.logCompletion(orderId)
+            }
+        }
         
         // Update live order cache if matched
         val live = activeLiveOrder.value
@@ -498,7 +794,10 @@ class LyoRepository(private val db: AppDatabase) {
         val updatedOrder = db.orderDao.getOrderById(orderId)
         if (updatedOrder != null) {
             try {
-                LyoFirebaseHelper.syncOrderToFirestore(updatedOrder)
+                // If status is ACCEPTED, it is already synced/updated via transaction
+                if (status != "ACCEPTED") {
+                    LyoFirebaseHelper.syncOrderToFirestore(updatedOrder)
+                }
             } catch (e: Exception) {
                 Log.e("LyoRepository", "Background update order sync failed: ${e.message}")
             }
@@ -551,11 +850,20 @@ class LyoRepository(private val db: AppDatabase) {
                     currentLat = assignedRider?.lat ?: 11.5850, // Point near Salem Road, Idappadi
                     currentLng = assignedRider?.lng ?: 77.8420,
                     totalDistance = order.deliveryFee / 10.0, // mock calculation
-                    earnings = (order.deliveryFee * 0.8) + order.tipAmount + 15.0 // earnings base: 80% delivery fee + tips + local allowance
+                    earnings = (order.deliveryFee * 0.8) + order.tipAmount + 15.0, // earnings base: 80% delivery fee + tips + local allowance
+                    riderUid = assignedRider?.uid ?: ""
                 )
                 db.deliveryRideDao.insertDeliveryRide(ride)
+                if (LyoLiveTestTracker.isTestOrder(order)) {
+                    LyoLiveTestTracker.logRiderAssignment(orderId)
+                }
                 val finalRide = ride
                 LyoFirebaseHelper.syncDeliveryRideToFirestore(finalRide)
+                try {
+                    LyoFirebaseHelper.syncOrderToFirestore(order)
+                } catch (e: Exception) {
+                    Log.e("LyoRepository", "Failed syncing order rider uid on ready for pickup: ${e.message}")
+                }
 
                 // Dispatch assignment notification
                 LyoFirebaseHelper.appContext?.let { ctx ->
@@ -567,6 +875,7 @@ class LyoRepository(private val db: AppDatabase) {
                 }
             }
         }
+        Result.success(Unit)
     }
 
     // Driver Operations
@@ -586,6 +895,16 @@ class LyoRepository(private val db: AppDatabase) {
         val oldRide = db.deliveryRideDao.getRideById(ride.id)
         db.deliveryRideDao.updateDeliveryRide(ride)
         LyoFirebaseHelper.syncDeliveryRideToFirestore(ride)
+        
+        val order = db.orderDao.getOrderById(ride.orderId)
+        if (order != null && LyoLiveTestTracker.isTestOrder(order)) {
+            LyoLiveTestTracker.logGpsCoordinate(ride.orderId, ride.currentLat, ride.currentLng)
+            if (ride.status == "DELIVERING") {
+                LyoLiveTestTracker.logDeparture(ride.orderId)
+            } else if (ride.status == "DELIVERED") {
+                LyoLiveTestTracker.logCompletion(ride.orderId)
+            }
+        }
         
         if (oldRide != null && oldRide.status != ride.status) {
             LyoFirebaseHelper.appContext?.let { ctx ->
@@ -621,11 +940,25 @@ class LyoRepository(private val db: AppDatabase) {
         try {
             userDao.deleteUserByPhone("9000000002")
             userDao.deleteUserByPhone("9000000003")
+            val dummyRiderPhones = listOf("9999910001", "9999910002", "9999910003", "9999910004", "9999910005")
+            for (p in dummyRiderPhones) {
+                userDao.deleteUserByPhone(p)
+            }
             if (LyoFirebaseHelper.isInitialized) {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        LyoFirebaseHelper.firestore?.collection("users")?.document("9000000002")?.delete()
-                        LyoFirebaseHelper.firestore?.collection("users")?.document("9000000003")?.delete()
+                        val fs = LyoFirebaseHelper.firestore
+                        if (fs != null) {
+                            val dummyPhones = listOf("9000000002", "9000000003") + dummyRiderPhones
+                            for (phone in dummyPhones) {
+                                val query = fs.collection("users").whereEqualTo("phone", phone).get().await()
+                                for (doc in query.documents) {
+                                    fs.collection("users").document(doc.id).delete().await()
+                                    fs.collection("admins").document(doc.id).delete().await()
+                                    Log.d("LyoRepository", "Deleted dummy user with phone $phone and uid ${doc.id} from Firestore")
+                                }
+                            }
+                        }
                     } catch (e: Exception) {
                         Log.e("LyoRepository", "Firebase deletion of dummy users failed: ${e.message}")
                     }
@@ -635,20 +968,66 @@ class LyoRepository(private val db: AppDatabase) {
             Log.e("LyoRepository", "Local deletion of dummy users failed: ${e.message}")
         }
 
-        val existingVendors = db.vendorDao.getAllVendorsList()
+        val existingGlobalCategories = db.categoryDao.getCategoriesForVendorList(-1L)
+        if (existingGlobalCategories.isEmpty()) {
+            val defaultGlobals = listOf(
+                Category(vendorId = -1L, nameEn = "Restaurant", nameTa = "உணவகம்", sortOrder = 0, iconKey = "Restaurant", accentColor = "#16C7E8", isActive = true),
+                Category(vendorId = -1L, nameEn = "Cafe", nameTa = "காபி கடை", sortOrder = 1, iconKey = "Coffee", accentColor = "#FF7A1A", isActive = true),
+                Category(vendorId = -1L, nameEn = "Hotel", nameTa = "ஹோட்டல்", sortOrder = 2, iconKey = "LocalDining", accentColor = "#16A56B", isActive = true),
+                Category(vendorId = -1L, nameEn = "Bakery", nameTa = "பேக்கரி", sortOrder = 3, iconKey = "Cake", accentColor = "#D94A52", isActive = true),
+                Category(vendorId = -1L, nameEn = "Snack Shop", nameTa = "சிற்றுண்டி", sortOrder = 4, iconKey = "LocalPizza", accentColor = "#A855F7", isActive = true),
+                Category(vendorId = -1L, nameEn = "Dhaba", nameTa = "தாபா", sortOrder = 5, iconKey = "Store", accentColor = "#EC4899", isActive = true)
+            )
+            for (cat in defaultGlobals) {
+                db.categoryDao.insertCategory(cat)
+            }
+        }
+
+        var existingVendors = db.vendorDao.getAllVendorsList()
         if (existingVendors.isNotEmpty()) {
             // Already seeded previously. DO NOT re-seed or overwrite anything!
             return@withContext
         }
 
-        // 1. Seed Default Admin, Support, Customer, and Rider Users (Only seed Super Admin now)
+        // Firestore is the SINGLE SOURCE OF TRUTH.
+        // Before seeding, check if Firestore already contains any vendors.
+        // If Firestore is not empty, we MUST skip seeding to avoid overwriting or seeding duplicate data.
+        var isFirestoreEmpty = true
+        if (LyoFirebaseHelper.isInitialized) {
+            try {
+                // Wait up to 3000ms for response
+                kotlinx.coroutines.withTimeoutOrNull(3000) {
+                    val snapshot = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("vendors")
+                        .limit(1)
+                        .get()
+                        .await()
+                    if (!snapshot.isEmpty) {
+                        isFirestoreEmpty = false
+                        Log.d("LyoRepository", "seedDatabaseIfNeeded: Firestore contains vendors. Skipping local seeding to respect Firestore single-source-of-truth.")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("LyoRepository", "seedDatabaseIfNeeded: Error checking Firestore vendors: ${e.message}")
+            }
+        }
+
+        if (!isFirestoreEmpty) {
+            return@withContext
+        }
+
+        // 1. Seed Support, Customer, and Rider Users
         val seedUsers = listOf(
-            User("Anantharajmech", "Eswaran Super Admin", "superadmin@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN")
+            User("9999900001", "Test Customer 1", "testcustomer1@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
+            User("9999900002", "Test Customer 2", "testcustomer2@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
+            User("9999900003", "Test Customer 3", "testcustomer3@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
+            User("9999900004", "Test Customer 4", "testcustomer4@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
+            User("9999900005", "Test Customer 5", "testcustomer5@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER")
         )
 
         for (u in seedUsers) {
             userDao.insertUser(u)
-            val seedPass = if (u.phone == "Anantharajmech") "AnanthEinstein" else null
+            val seedPass = "LyoTest123"
             
             // Save password hash locally for offline login verification during seeding
             if (seedPass != null) {
@@ -950,6 +1329,18 @@ class LyoRepository(private val db: AppDatabase) {
             ))
         } catch (e: Exception) {
             Log.e("LyoRepository", "Error seeding default reviews: ${e.message}")
+        }
+
+        // Push the newly seeded data to Firestore so Firestore is fully populated
+        if (LyoFirebaseHelper.isInitialized) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    Log.d("LyoRepository", "Uploading seeded database to Firestore...")
+                    syncAllLocalToFirestore()
+                } catch (e: Exception) {
+                    Log.e("LyoRepository", "Failed to upload seeded database to Firestore: ${e.message}")
+                }
+            }
         }
     }
 
@@ -1264,18 +1655,17 @@ class LyoRepository(private val db: AppDatabase) {
             Log.e("LyoRepository", "Error fetching vendor categories for deletion: ${e.message}")
         }
 
+        // Delete from Firestore FIRST synchronously
+        try {
+            LyoFirebaseHelper.deleteVendorFromFirestore(vendor.id)
+        } catch (e: Exception) {
+            Log.e("LyoRepository", "Firestore deleteVendor failed: ${e.message}")
+            throw e
+        }
+
         db.menuItemDao.deleteMenuItemsByVendor(vendor.id)
         db.categoryDao.deleteCategoriesByVendor(vendor.id)
         db.vendorDao.deleteVendor(vendor)
-        
-        // Fire and forget Firestore delete in background to avoid blocking the UI thread or local DB
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
-            try {
-                LyoFirebaseHelper.deleteVendorFromFirestore(vendor.id)
-            } catch (e: Exception) {
-                Log.e("LyoRepository", "Firestore deleteVendor background deferred: ${e.message}")
-            }
-        }
     }
 
     suspend fun seedMenuForVendor(vendorId: Long, type: String) {

@@ -5,16 +5,16 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
-    @Query("SELECT * FROM users WHERE phone = :phone OR email = :phone LIMIT 1")
+    @Query("SELECT * FROM users WHERE phone = :phone OR email = :phone OR uid = :phone LIMIT 1")
     suspend fun getUserByPhone(phone: String): User?
 
-    @Query("SELECT * FROM users WHERE phone = :phone LIMIT 1")
+    @Query("SELECT * FROM users WHERE phone = :phone OR uid = :phone LIMIT 1")
     fun getUserFlow(phone: String): Flow<User?>
 
-    @Query("SELECT * FROM users WHERE role = 'DELIVERY'")
+    @Query("SELECT * FROM users WHERE role = 'DELIVERY' OR role = 'RIDER'")
     fun getAllRidersFlow(): Flow<List<User>>
 
-    @Query("SELECT * FROM users WHERE role = 'DELIVERY' LIMIT 1")
+    @Query("SELECT * FROM users WHERE role = 'DELIVERY' OR role = 'RIDER' LIMIT 1")
     suspend fun getRiderForAssignment(): User?
 
     @Query("SELECT * FROM users WHERE role = 'CUSTOMER'")
@@ -37,6 +37,9 @@ interface UserDao {
 
     @Query("DELETE FROM users WHERE phone = :phone")
     suspend fun deleteUserByPhone(phone: String)
+
+    @Query("DELETE FROM users WHERE role = 'DELIVERY' OR role = 'RIDER'")
+    suspend fun clearAllRiders()
 }
 
 @Dao
@@ -61,6 +64,9 @@ interface VendorDao {
 
     @Query("DELETE FROM vendors WHERE id = :id")
     suspend fun deleteVendorById(id: Long)
+
+    @Query("DELETE FROM vendors")
+    suspend fun clearAllVendors()
 }
 
 @Dao
@@ -88,6 +94,9 @@ interface CategoryDao {
 
     @Query("DELETE FROM categories WHERE vendorId = :vendorId")
     suspend fun deleteCategoriesByVendor(vendorId: Long)
+
+    @Query("DELETE FROM categories")
+    suspend fun clearAllCategories()
 }
 
 @Dao
@@ -95,8 +104,14 @@ interface MenuItemDao {
     @Query("SELECT * FROM menu_items WHERE vendorId = :vendorId")
     fun getMenuItemsForVendor(vendorId: Long): Flow<List<MenuItem>>
 
+    @Query("SELECT * FROM menu_items WHERE id = :id LIMIT 1")
+    suspend fun getMenuItemById(id: Long): MenuItem?
+
     @Query("SELECT * FROM menu_items")
     suspend fun getAllMenuItemsList(): List<MenuItem>
+
+    @Query("SELECT * FROM menu_items")
+    fun getAllMenuItemsFlow(): Flow<List<MenuItem>>
 
     @Query("SELECT * FROM menu_items WHERE categoryId = :categoryId")
     fun getMenuItemsForCategory(categoryId: Long): Flow<List<MenuItem>>
@@ -130,6 +145,9 @@ interface MenuItemDao {
 
     @Query("DELETE FROM menu_items WHERE vendorId = :vendorId")
     suspend fun deleteMenuItemsByVendor(vendorId: Long)
+
+    @Query("DELETE FROM menu_items")
+    suspend fun clearAllMenuItems()
 }
 
 @Dao
@@ -157,6 +175,9 @@ interface OrderDao {
 
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun updateOrderStatus(orderId: Long, status: String)
+
+    @Query("DELETE FROM orders WHERE id = :id")
+    suspend fun deleteOrderById(id: Long)
 }
 
 @Dao
@@ -214,6 +235,22 @@ interface PromoBannerDao {
 
     @Delete
     suspend fun deletePromoBanner(banner: PromoBanner)
+
+    // Lyo Notifications Queries
+    @Query("SELECT * FROM lyo_notifications ORDER BY timestamp DESC")
+    fun getAllNotifications(): Flow<List<LyoNotification>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNotification(notification: LyoNotification)
+
+    @Query("UPDATE lyo_notifications SET isRead = 1 WHERE id = :id")
+    suspend fun markNotificationAsRead(id: String)
+
+    @Query("UPDATE lyo_notifications SET isRead = 1")
+    suspend fun markAllNotificationsAsRead()
+
+    @Query("DELETE FROM lyo_notifications")
+    suspend fun clearAllNotifications()
 }
 
 @Dao
@@ -254,4 +291,17 @@ interface ReviewDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReview(review: Review): Long
 }
+
+@Dao
+interface MissingDictionaryWordDao {
+    @Query("SELECT * FROM missing_dictionary_words ORDER BY firstSeenAt DESC")
+    fun getAllMissingWordsFlow(): Flow<List<MissingDictionaryWord>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMissingWord(word: MissingDictionaryWord)
+
+    @Query("DELETE FROM missing_dictionary_words")
+    suspend fun clearAllMissingWords()
+}
+
 

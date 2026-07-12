@@ -1,11 +1,17 @@
 import java.util.Properties
 
+// NOTE: For production-ready Firebase integration, the real 'google-services.json' file
+// must be downloaded from the Firebase Console for the project 'lyo-food-delivery'
+// and placed inside the 'app' module at 'app/google-services.json'.
+// This is the single primary Firebase Android configuration source for com.lyo.fooddelivery.
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
+  alias(libs.plugins.google.services)
 }
 
 val secretsProperties = Properties().apply {
@@ -31,16 +37,28 @@ android {
     versionCode = 1
     versionName = "1.0"
 
-    val firebaseApiKey = (project.findProperty("FIREBASE_API_KEY") as? String)?.ifEmpty { null }
-        ?: secretsProperties.getProperty("FIREBASE_API_KEY") ?: ""
-    val firebaseAppId = (project.findProperty("FIREBASE_APP_ID") as? String)?.ifEmpty { null }
-        ?: secretsProperties.getProperty("FIREBASE_APP_ID") ?: ""
-    val firebaseProjectId = (project.findProperty("FIREBASE_PROJECT_ID") as? String)?.ifEmpty { null }
-        ?: secretsProperties.getProperty("FIREBASE_PROJECT_ID") ?: ""
-    val firebaseDatabaseUrl = (project.findProperty("FIREBASE_DATABASE_URL") as? String)?.ifEmpty { null }
-        ?: secretsProperties.getProperty("FIREBASE_DATABASE_URL") ?: ""
-    val firebaseStorageBucket = (project.findProperty("FIREBASE_STORAGE_BUCKET") as? String)?.ifEmpty { null }
-        ?: secretsProperties.getProperty("FIREBASE_STORAGE_BUCKET") ?: ""
+    val googleServicesFile = file("${projectDir}/google-services.json")
+    var parsedProjectId = ""
+    var parsedStorageBucket = ""
+    var parsedAppId = ""
+    var parsedApiKey = ""
+
+    if (googleServicesFile.exists()) {
+      val text = googleServicesFile.readText()
+      fun extractValue(regexStr: String): String {
+        return Regex(regexStr).find(text)?.groupValues?.get(1) ?: ""
+      }
+      parsedProjectId = extractValue("\"project_id\":\\s*\"([^\"]+)\"")
+      parsedStorageBucket = extractValue("\"storage_bucket\":\\s*\"([^\"]+)\"")
+      parsedAppId = extractValue("\"mobilesdk_app_id\":\\s*\"([^\"]+)\"")
+      parsedApiKey = extractValue("\"current_key\":\\s*\"([^\"]+)\"")
+    }
+
+    val firebaseApiKey = parsedApiKey.ifEmpty { "AIzaSyCj35HL7MOIQMc1sXV1AGcRGt7DSkRabXk" }
+    val firebaseAppId = parsedAppId.ifEmpty { "1:604469873807:android:ae70018a97af4cfab2b4fa" }
+    val firebaseProjectId = parsedProjectId.ifEmpty { "lyo-ai-food-delivery" }
+    val firebaseStorageBucket = parsedStorageBucket.ifEmpty { "lyo-ai-food-delivery.firebasestorage.app" }
+    val firebaseDatabaseUrl = "https://$firebaseProjectId-default-rtdb.firebaseio.com"
 
     buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
     buildConfigField("String", "FIREBASE_APP_ID", "\"$firebaseAppId\"")
@@ -114,6 +132,9 @@ dependencies {
   implementation(platform(libs.firebase.bom))
   implementation(libs.firebase.auth)
   implementation(libs.firebase.firestore)
+  implementation(libs.firebase.messaging)
+  implementation(libs.firebase.appcheck.playintegrity)
+  implementation(libs.firebase.appcheck.debug)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)

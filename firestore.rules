@@ -2,106 +2,98 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isUserOwner(userId) {
-      return request.auth.uid == userId ||
-             (exists(/databases/$(database)/documents/users/$(userId)) &&
-              get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid);
+    function hasAnyRole(roles) {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return hasAnyRole(['ADMIN']);
     }
 
-    match /orders/{orderId} {
-      allow read: if isAdmin() || (isAuthenticated() && (
-        isUserOwner(resource.data.userId) ||
-        (resource.data.assignedPartnerId != null && isUserOwner(resource.data.assignedPartnerId))
-      ));
-      allow list: if isAdmin();
-      allow create: if isAuthenticated();
-      allow update: if isAdmin() || (isAuthenticated() && (
-        isUserOwner(resource.data.userId) ||
-        (resource.data.assignedPartnerId != null && isUserOwner(resource.data.assignedPartnerId))
-      ));
-      allow delete: if false;
-    }
-
-    match /delivery_partners/{partnerId} {
-      allow write: if isAuthenticated() && (
-        partnerId == request.auth.uid || isUserOwner(partnerId));
-      allow read: if isAdmin() || (isAuthenticated() && (
-        partnerId == request.auth.uid || isUserOwner(partnerId) ||
-        (resource.data.activeOrderId != null &&
-         exists(/databases/$(database)/documents/orders/$(resource.data.activeOrderId)) &&
-         get(/databases/$(database)/documents/orders/$(resource.data.activeOrderId)).data.userId == request.auth.uid)
-      ));
-    }
-
-    match /delivery_rides/{rideId} {
-      allow read: if isAdmin() || (isAuthenticated() && (
-        isUserOwner(resource.data.riderPhone) ||
-        (resource.data.orderId != null &&
-         exists(/databases/$(database)/documents/orders/$(resource.data.orderId)) &&
-         get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.userId == request.auth.uid)
-      ));
-      allow list: if isAdmin();
-      allow create: if isAdmin() || (isAuthenticated() && isUserOwner(request.resource.data.riderPhone));
-      allow update: if isAdmin() || (isAuthenticated() && isUserOwner(resource.data.riderPhone));
-      allow delete: if isAdmin();
-    }
-
+    // --- Users ---
     match /users/{userId} {
-      allow create: if isAuthenticated() && (
-        request.auth.uid == userId &&
-        (request.resource.data.role == 'CUSTOMER' || request.resource.data.role == 'RIDER' || isAdmin())
-      );
-      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
-      allow update: if isAdmin() || (
-        isAuthenticated() && request.auth.uid == userId &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isActive', 'isActiveRider', 'uid']))
-      );
+      allow get: if isAuthenticated() && (request.auth.uid == userId || hasAnyRole(['ADMIN', 'RIDER']));
       allow list: if isAdmin();
+      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow delete: if isAdmin();
+
+      match /sessions/{sessionId} {
+        allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
+      match /deviceTokens/{tokenId} {
+        allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
     }
 
-    // NEW — previously had NO rules at all (default deny in this file)
+    // --- Admins ---
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- Vendors ---
     match /vendors/{vendorId} {
-      allow read: if true; // public menu browsing, no login wall on storefront
-      allow write: if isAdmin();
+      allow read: if true; // Guest catalog view allowed
+      allow write, delete: if isAdmin();
     }
+
+    // --- Categories ---
     match /categories/{categoryId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if true; // Guest catalog view allowed
+      allow write, delete: if isAdmin();
     }
+
+    // --- Menu Items ---
     match /menu_items/{itemId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if true; // Guest catalog view allowed
+      allow write, delete: if isAdmin();
     }
 
+    // --- Promo Banners ---
     match /promo_banners/{bannerId} {
-      allow read: if true;
+      allow read: if true; // Guest catalog view allowed
+      allow write, delete: if isAdmin();
+    }
+
+    // --- App Settings ---
+    match /app_settings/{settingId} {
+      allow read: if true; // Read allowed for all
       allow write: if isAdmin();
     }
 
-    match /order_messages/{orderId}/messages/{messageId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+    // --- Orders ---
+    match /ek_orders/{orderId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER']));
+      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER']));
       allow delete: if isAdmin();
     }
 
-    // NEW — small allow-list collection so isAdmin() can work without
-    // needing a Firestore query-by-field inside security rules.
-    // Document ID = the Firebase Auth UID of each admin user.
-    // Only an existing admin (or, the very first time, a manual console
-    // entry) can add new admin UIDs here.
-    match /admins/{adminUid} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+    // --- Delivery Rides ---
+    match /delivery_rides/{rideId} {
+      allow read: if isAuthenticated(); // Customers need to track rides, riders and admins too
+      allow write: if isAuthenticated() && hasAnyRole(['ADMIN', 'RIDER']);
+    }
+
+    // --- Order Messages (Chat) ---
+    match /order_messages/{orderId} {
+      allow read, write: if isAuthenticated();
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // --- Idempotency Keys ---
+    match /idempotency_keys/{keyId} {
+      allow read, write: if isAuthenticated();
     }
   }
 }
+

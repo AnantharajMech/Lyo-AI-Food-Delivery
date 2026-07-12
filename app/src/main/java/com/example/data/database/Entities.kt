@@ -17,7 +17,8 @@ data class User(
     val vehicleNo: String = "",
     val isActiveRider: Boolean = true,
     val salaryType: String = "MONTHLY", // "MONTHLY" or "PER_KM"
-    val salaryRate: Double = 0.0
+    val salaryRate: Double = 0.0,
+    val uid: String = ""
 )
 
 @Entity(tableName = "vendors")
@@ -46,7 +47,8 @@ data class Vendor(
     val sortOrder: Int = 0,
     val isDynamicDelivery: Boolean = false,
     val autoOpenTime: String = "",
-    val autoCloseTime: String = ""
+    val autoCloseTime: String = "",
+    val status: String = "ACTIVE"
 )
 
 @Entity(tableName = "categories", indices = [Index(value = ["vendorId"])])
@@ -58,7 +60,10 @@ data class Category(
     val sortOrder: Int = 0,
     val isHidden: Boolean = false,
     val autoOpenTime: String = "",
-    val autoCloseTime: String = ""
+    val autoCloseTime: String = "",
+    val iconKey: String = "Restaurant",
+    val accentColor: String = "#16C7E8",
+    val isActive: Boolean = true
 )
 
 @Entity(tableName = "menu_items", indices = [Index(value = ["vendorId"]), Index(value = ["categoryId"])])
@@ -121,7 +126,9 @@ data class DeliveryRide(
     val currentLng: Double,
     val totalDistance: Double,
     val earnings: Double,
-    val otpVerified: Boolean = false
+    val otpVerified: Boolean = false,
+    val riderUid: String = "",
+    val locationTimestamp: Long = 0L
 )
 
 @Entity(tableName = "promo_banners")
@@ -129,7 +136,20 @@ data class PromoBanner(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val code: String,
     val description: String,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val status: String = "ACTIVE",
+    val title: String = "",
+    val validity: String = "",
+    val deepLink: String = ""
+)
+
+@Entity(tableName = "lyo_notifications")
+data class LyoNotification(
+    @PrimaryKey val id: String,
+    val title: String,
+    val message: String,
+    val timestamp: Long,
+    val isRead: Boolean = false
 )
 
 @Entity(tableName = "saved_addresses", indices = [Index(value = ["userId"])])
@@ -307,5 +327,21 @@ object LyoDeliveryPricingEngine {
         return Math.round(finalFee).toDouble()
     }
 }
+
+data class DeviceSession(
+    val deviceId: String = "",
+    val deviceName: String = "",
+    val osVersion: String = "",
+    val loginTime: Long = 0L,
+    val lastActive: Long = 0L
+)
+
+@androidx.room.Entity(tableName = "missing_dictionary_words")
+data class MissingDictionaryWord(
+    @androidx.room.PrimaryKey val word: String,
+    val firstSeenAt: Long = System.currentTimeMillis()
+)
+
+
 
 
