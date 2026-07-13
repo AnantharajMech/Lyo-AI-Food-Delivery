@@ -521,49 +521,94 @@ fun DeliveryPartnerDashboardScreen(
         ) {
             item {
                 // Header Stats Dashboard
-                Row(
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp, 12.dp)
-                        .background(LyoColors.CardSlate, RoundedCornerShape(12.dp))
-                        .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(12.dp))
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = LyoColors.CardSlate),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, LyoColors.GlassBorder)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Lyo AI Food Delivery Custom Logo Icon / Avatar
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(LyoColors.VegGreen),
-                            contentAlignment = Alignment.Center
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Row 1: Brand Logo, App Name, and Logout Button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            androidx.compose.material3.Text(
-                                text = "Lyo",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            androidx.compose.material3.Text(
-                                text = "Lyo AI Food Delivery",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = LyoColors.TextPrimary
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                androidx.compose.material3.Text(
-                                    text = "Rider Panel",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = LyoColors.TextSecondary
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                // Lyo AI Food Delivery Custom Logo Icon / Avatar
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(LyoColors.VegGreen),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    androidx.compose.material3.Text(
+                                        text = "Lyo",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    androidx.compose.material3.Text(
+                                        text = "Lyo AI Food Delivery",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = LyoColors.TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    androidx.compose.material3.Text(
+                                        text = "Rider Portal",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = LyoColors.TextSecondary
+                                    )
+                                }
+                            }
+
+                            // Logout Button - Clear, Prominent, Safe
+                            IconButton(
+                                onClick = onLogoutClick,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .testTag("rider_logout_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Logout,
+                                    contentDescription = "Logout",
+                                    tint = LyoColors.NonVegRed,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                // Active ride status indicator: Available / Busy / Offline
+                            }
+                        }
+
+                        // Divider Line
+                        HorizontalDivider(
+                            color = LyoColors.GlassBorder,
+                            thickness = 1.dp
+                        )
+
+                        // Row 2: Active Availability Status and Online/Offline Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Status indicator: Available / Busy / Offline
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 val statusText = if (currentUserState?.isActiveRider == true) {
                                     if (activeDeliveringRide != null) "BUSY" else "AVAILABLE"
                                 } else {
@@ -576,59 +621,50 @@ fun DeliveryPartnerDashboardScreen(
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .size(6.dp)
+                                        .size(8.dp)
                                         .clip(CircleShape)
                                         .background(statusColor)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 androidx.compose.material3.Text(
                                     text = statusText,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = statusColor
-                                )
-                            }
-                        }
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        currentUserState?.let { user ->
-                            val isOnline = user.isActiveRider
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(if (isOnline) LyoColors.CardSlate else Color(0x11FFFFFF))
-                                    .clickable { viewModel.toggleRiderStatus() }
-                                    .border(1.dp, if (isOnline) LyoColors.AmberYellow else LyoColors.GlassBorder, RoundedCornerShape(20.dp))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(if (isOnline) LyoColors.AmberYellow else LyoColors.TextSecondary, CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isOnline) "ஆன்லைன் (Online)" else "ஆஃப்லைன் (Offline)",
-                                    color = if (isOnline) LyoColors.AmberYellow else LyoColors.TextSecondary,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Black,
+                                    color = statusColor,
+                                    letterSpacing = 0.5.sp
                                 )
                             }
-                        }
 
-                        IconButton(
-                            onClick = onLogoutClick,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(LyoColors.CardSlate)
-                        ) {
-                            Icon(Icons.Filled.Logout, contentDescription = "logout", tint = LyoColors.NonVegRed, modifier = Modifier.size(16.dp))
+                            // Toggle Status Switch Pill
+                            currentUserState?.let { user ->
+                                val isOnline = user.isActiveRider
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(if (isOnline) LyoColors.VegGreen.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f))
+                                        .clickable { viewModel.toggleRiderStatus() }
+                                        .border(
+                                            1.dp,
+                                            if (isOnline) LyoColors.VegGreen else LyoColors.GlassBorder,
+                                            RoundedCornerShape(20.dp)
+                                        )
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(if (isOnline) LyoColors.VegGreen else LyoColors.TextSecondary, CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isOnline) "ஆன்லைன் (Online)" else "ஆஃப்லைன் (Offline)",
+                                        color = if (isOnline) LyoColors.VegGreen else LyoColors.TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1364,14 +1400,30 @@ fun RiderPerformanceDashboardCard(
                 Button(
                     onClick = { showCashoutDialog = true },
                     colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AmberYellow),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().height(36.dp),
-                    contentPadding = PaddingValues(0.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.AccountBalance, contentDescription = "bank", tint = LyoColors.DarkCyanBg, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("வங்கி மாற்றக் கோரிக்கை (Instant Cashout 💸)", color = LyoColors.DarkCyanBg, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AccountBalance,
+                            contentDescription = "bank",
+                            tint = LyoColors.DarkCyanBg,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "வங்கி மாற்றக் கோரிக்கை (Instant Cashout 💸)",
+                            color = LyoColors.DarkCyanBg,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
 

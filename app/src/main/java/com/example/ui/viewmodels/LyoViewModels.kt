@@ -68,14 +68,7 @@ fun resolveSmartGeocodeTamilNadu(address: String, currentLat: Double, currentLng
 }
 
 fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val r = 6371.0 // Radius of the earth in km
-    val latDistance = Math.toRadians(lat2 - lat1)
-    val lonDistance = Math.toRadians(lon2 - lon1)
-    val a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
-            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-            Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2)
-    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return r * c
+    return com.example.data.database.LyoLocationEngine.calculateRoadDistance(lat1, lon1, lat2, lon2)
 }
 
 enum class LyoConvStage {
@@ -750,9 +743,28 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
             val defaultAddress = addresses.find { it.isDefault }
             val finalLat = defaultAddress?.latitude ?: user.lat
             val finalLng = defaultAddress?.longitude ?: user.lng
+            val isRain = repository.rainSurchargeEnabled
+            val isPeak = repository.peakHourSurchargeEnabled
+            val zoneMultiplier = repository.deliveryZoneMultiplier
+            
             val mapped = vendors.map { vendor ->
                 val dist = calculateDistance(finalLat, finalLng, vendor.lat, vendor.lng)
-                vendor.copy(distance = dist)
+                val fee = com.example.data.database.LyoDeliveryPricingEngine.calculateDeliveryFee(
+                    distanceKm = dist,
+                    subtotal = 0.0, // Subtotal is zero for home screen list view calculations
+                    isDynamicDelivery = vendor.isDynamicDelivery,
+                    baseDeliveryFee = vendor.deliveryFee,
+                    freeDeliveryThreshold = vendor.freeDeliveryThreshold,
+                    maxDeliveryRadiusKm = vendor.visibilityRadiusKm,
+                    isRainEnabled = isRain,
+                    isPeakHour = isPeak,
+                    deliveryZoneMultiplier = zoneMultiplier
+                )
+                val eta = com.example.data.database.LyoLocationEngine.calculateETA(
+                    distanceKm = dist,
+                    isPeakHour = isPeak
+                )
+                vendor.copy(distance = dist, deliveryFee = fee, deliveryTime = eta)
             }
             val filtered = mapped.filter { it.distance <= Math.max(it.visibilityRadiusKm, 999999.0) }
             if (filtered.isNotEmpty()) {
@@ -766,6 +778,58 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val aiRecommendations: StateFlow<List<com.example.data.ai.AIRecommendation>> = currentUser
+        .flatMapLatest { user ->
+            if (user != null) {
+                combine(
+                    allVendors,
+                    repository.allMenuItems,
+                    repository.getOrdersForUser(user.phone),
+                    repository.allRiders
+                ) { vendorsList, itemsList, ordersList, ridersList ->
+                    val activeRiders = ridersList.count { it.isActiveRider }
+                    com.example.data.ai.RecommendationEngine.calculateRecommendations(
+                        vendors = vendorsList,
+                        menuItems = itemsList,
+                        pastOrders = ordersList,
+                        activeRidersCount = activeRiders,
+                        currentLat = user.lat,
+                        currentLng = user.lng,
+                        searchQuery = ""
+                    )
+                }
+            } else {
+                flowOf(emptyList())
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val aiRecommendations: StateFlow<List<com.example.data.ai.AIRecommendation>> = currentUser
+        .flatMapLatest { user ->
+            if (user != null) {
+                combine(
+                    allVendors,
+                    repository.allMenuItems,
+                    repository.getOrdersForUser(user.phone),
+                    repository.allRiders
+                ) { vendorsList, itemsList, ordersList, ridersList ->
+                    val activeRiders = ridersList.count { it.isActiveRider }
+                    com.example.data.ai.RecommendationEngine.calculateRecommendations(
+                        vendors = vendorsList,
+                        menuItems = itemsList,
+                        pastOrders = ordersList,
+                        activeRidersCount = activeRiders,
+                        currentLat = user.lat,
+                        currentLng = user.lng,
+                        searchQuery = ""
+                    )
+                }
+            } else {
+                flowOf(emptyList())
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allPromoBanners: StateFlow<List<PromoBanner>> = repository.allPromoBanners
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -775,6 +839,20 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
     fun markNotificationAsRead(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.db.promoBannerDao.markNotificationAsRead(id)
+        }
+    }
+
+    fun trackOrderFromNotification(orderId: Long, notificationId: String, onComplete: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.db.promoBannerDao.markNotificationAsRead(notificationId)
+            val order = repository.db.orderDao.getOrderById(orderId)
+            if (order != null) {
+                withContext(Dispatchers.Main) {
+                    repository.activeLiveOrder.value = order
+                    selectedTabState.value = "TRACKER"
+                    onComplete()
+                }
+            }
         }
     }
 
@@ -1001,6 +1079,9 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
         }
         viewModelScope.launch {
             try {
+                // Production-grade quality validation check
+                com.example.data.database.LyoLocationEngine.validateAddress(addressLine)
+                
                 repository.saveAddress(SavedAddress(
                     userId = user.phone,
                     name = name,
@@ -1011,8 +1092,18 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                 ))
                 onSuccess()
             } catch (e: Exception) {
-                onError("error: ${e.localizedMessage}")
+                onError(e.localizedMessage ?: "error saving address")
             }
+        }
+    }
+
+    fun setAddressAsPrimary(address: SavedAddress) {
+        viewModelScope.launch {
+            // Persist as primary/default in saved_addresses list (local + Firestore synced)
+            repository.saveAddress(address.copy(isDefault = true))
+            
+            // Instantly update current User's active address and coordinates so home screen & all views refresh!
+            updateUserPrimaryAddress(address.addressLine, address.latitude, address.longitude)
         }
     }
 
@@ -1276,6 +1367,12 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                 val openVendors = allVendors.filter { !it.isOnHoliday }
                 val allItems = try { repository.menuItemDao.getAllMenuItemsList() } catch (e: Exception) { emptyList() }
                 
+                val userVal = repository.currentUser.value
+                val pastOrdersVal = if (userVal != null) {
+                    try { repository.db.orderDao.getOrdersForUserList(userVal.phone) } catch (e: Exception) { emptyList() }
+                } else emptyList()
+                val activeRidersCountVal = try { repository.db.userDao.getAllUsers().count { it.role == "DELIVERY" && it.isActiveRider } } catch (e: Exception) { 1 }
+
                 if (wantsRestaurant) {
                     val filteredVendors = when {
                         isVegOnly -> openVendors.filter { isPureVegKitchen(it, allItems) }
@@ -1292,24 +1389,42 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                             "🏪 **எடப்பாடியில் உள்ள சிறந்த உணவகங்கள் (Top Restaurants):**"
                         }
                         
+                        // Calculate scores with the multi-factor upgraded engine
+                        val scoredRecommendations = com.example.data.ai.RecommendationEngine.calculateRecommendations(
+                            vendors = filteredVendors,
+                            menuItems = allItems,
+                            pastOrders = pastOrdersVal,
+                            activeRidersCount = activeRidersCountVal,
+                            currentLat = userVal?.lat ?: 0.0,
+                            currentLng = userVal?.lng ?: 0.0,
+                            searchQuery = "",
+                            weatherState = "CLEAR"
+                        )
+
                         val sb = java.lang.StringBuilder()
                         sb.append(title).append("\n\n")
-                        filteredVendors.sortedByDescending { it.rating }.forEachIndexed { index, vendor ->
+                        scoredRecommendations.take(5).forEachIndexed { index, rec ->
+                            val vendor = rec.vendor
+                            val scorePercent = rec.aiScore
                             val vegSymbol = if (isPureVegKitchen(vendor, allItems)) "🟢 [Pure Veg]" else "🔴 [Veg & Non-Veg]"
-                            sb.append("${index + 1}️⃣ **${vendor.nameTa.ifEmpty { vendor.name }}** (${vendor.name}) - ⭐${vendor.rating}\n")
-                            sb.append("   🛵 டெலிவரி கட்டணம்: ₹${vendor.deliveryFee.toInt()} | குறைந்தபட்ச ஆர்டர்: ₹${vendor.minOrderAmount.toInt()} | $vegSymbol\n\n")
+                            sb.append("${index + 1}️⃣ **${vendor.nameTa.ifEmpty { vendor.name }}** (${vendor.name}) - ✨ **$scorePercent% AI Match**\n")
+                            sb.append("   ⭐ Rating: ⭐${vendor.rating} | 🛵 Delivery: ₹${vendor.deliveryFee.toInt()} | $vegSymbol\n")
+                            rec.reasons.forEach { reason ->
+                                sb.append("   🔹 $reason\n")
+                            }
+                            sb.append("\n")
                         }
                         sb.append("விருப்பமான ஹோட்டலின் பெயரைச் சொல்லுங்கள் அண்ணே! அதன் மெனுவை காட்டுகிறேன்! 😊")
 
                         // Populate lastStageRecommendedItems with first item of recommended vendors
                         val recItems = mutableListOf<Pair<MenuItem, Vendor>>()
-                        filteredVendors.sortedByDescending { it.rating }.forEach { vendor ->
-                            val item = allItems.find { it.vendorId == vendor.id }
+                        scoredRecommendations.take(5).forEach { rec ->
+                            val item = allItems.find { it.vendorId == rec.vendor.id }
                             if (item != null) {
-                                recItems.add(Pair(item, vendor))
+                                recItems.add(Pair(item, rec.vendor))
                             }
                         }
-                        lastStageRecommendedItems = recItems.take(5)
+                        lastStageRecommendedItems = recItems
 
                         return sb.toString()
                     } else {
@@ -1332,10 +1447,24 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                     }
                     
                     if (filteredItems.isNotEmpty()) {
+                        val scoredRecsMap = com.example.data.ai.RecommendationEngine.calculateRecommendations(
+                            vendors = openVendors,
+                            menuItems = allItems,
+                            pastOrders = pastOrdersVal,
+                            activeRidersCount = activeRidersCountVal,
+                            currentLat = userVal?.lat ?: 0.0,
+                            currentLng = userVal?.lng ?: 0.0,
+                            searchQuery = "",
+                            weatherState = "CLEAR"
+                        ).associateBy { it.vendor.id }
+
                         val sortedPairs = filteredItems.mapNotNull { item ->
                             val v = openVendorMap[item.vendorId]
-                            if (v != null) Pair(item, v) else null
-                        }.sortedByDescending { it.second.rating }
+                            if (v != null) {
+                                val score = scoredRecsMap[v.id]?.aiScore ?: 50
+                                Triple(item, v, score)
+                            } else null
+                        }.sortedByDescending { it.third }
                         
                         val topItems = sortedPairs.take(5)
                         
@@ -1349,14 +1478,20 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                         
                         val sb = java.lang.StringBuilder()
                         sb.append(title).append("\n\n")
-                        topItems.forEachIndexed { index, (item, vendor) ->
+                        topItems.forEachIndexed { index, (item, vendor, score) ->
                             val vegSymbol = if (item.isVeg) "🟢" else "🔴"
-                            sb.append("${index + 1}️⃣ $vegSymbol **${item.nameTa.ifEmpty { item.nameEn }}** (${item.nameEn}) - ₹${item.price.toInt()}\n")
-                            sb.append("   🏪 ஹோட்டல்: *${vendor.nameTa.ifEmpty { vendor.name }}* (ரேட்டிங்: ⭐${vendor.rating})\n\n")
+                            val scorePercent = score
+                            sb.append("${index + 1}️⃣ $vegSymbol **${item.nameTa.ifEmpty { item.nameEn }}** (${item.nameEn}) - ₹${item.price.toInt()} [✨ **$scorePercent% AI Match**]\n")
+                            sb.append("   🏪 ஹோட்டல்: *${vendor.nameTa.ifEmpty { vendor.name }}* (ரேட்டிங்: ⭐${vendor.rating})\n")
+                            val rec = scoredRecsMap[vendor.id]
+                            if (rec != null && rec.reasons.isNotEmpty()) {
+                                sb.append("   🔹 ${rec.reasons.first()}\n")
+                            }
+                            sb.append("\n")
                         }
                         sb.append("ஏதாவது ஒன்று வேண்டுமா? பெயர் சொல்லுங்கள் அண்ணே! 😊")
 
-                        lastStageRecommendedItems = topItems
+                        lastStageRecommendedItems = topItems.map { Pair(it.first, it.second) }
 
                         return sb.toString()
                     } else {
@@ -1867,17 +2002,45 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                 val matchedOptions = getFuzzyMatchedMenuItems(prompt, allMenuItems)
                 aiRecommendBasketOptions.value = matchedOptions
 
+                // Compile real-time metrics for Admin Knowledge & platform telemetry
+                val activeBanners = repository.promoBannerDao.getAllPromoBannersList()
+                val allOrders = repository.db.orderDao.getAllOrders().firstOrNull() ?: emptyList()
+                val todayStart = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                val todayOrdersList = allOrders.filter { it.timestamp >= todayStart }
+                val todayOrdersCount = todayOrdersList.size
+                val cancelledOrdersCount = allOrders.count { it.status == "CANCELLED" }
+                val completedOrders = allOrders.filter { it.status == "DELIVERED" }
+                val totalRevenue = completedOrders.sumOf { it.totalAmount }
+                
+                val ridersList = repository.db.userDao.getAllRidersFlow().firstOrNull() ?: emptyList()
+                val activeRidersCount = ridersList.count { it.isActiveRider }
+                val onlineVendorsCount = vendorsList.count { !it.isOnHoliday }
+                val offlineVendorsCount = vendorsList.count { it.isOnHoliday }
+
+                // Compile budget options and free delivery list for direct contextual answering
+                val cheapItems = allMenuItems.filter { it.first.price <= 150.0 && !it.second.isOnHoliday }.take(8)
+                val freeDeliveryVendors = vendorsList.filter { !it.isOnHoliday && (it.deliveryFee == 0.0 || it.freeDeliveryThreshold <= 500.0) }
+
                 val contextBuilder = StringBuilder()
                 contextBuilder.append("""
                     # ROLE & GENERAL PERSONALITY
-                    You are LYO AI (லியோ ஏ ஐ), the friendly, super-intelligent, prestigious mascot AI conversational guide for 'Lyo' food delivery platform in Edappadi, Salem.
-                    - Tone: Maintain an extremely happy, joyful, encouraging, and welcoming personality (கஸ்டமர்களை குஷிப்படுத்தும் மாபெரும் மகிழ்ச்சியான பாங்கு!).
+                    You are LYO AI (லியோ ஏ ஐ), the central intelligent assistant, real-time AI guide, and friendly mascot for the 'Lyo' food delivery platform in Edappadi, Salem.
+                    - Tone: Maintain an extremely happy, joyful, encouraging, welcoming, and polite personality (கஸ்டமர்களை குஷிப்படுத்தும் மாபெரும் மகிழ்ச்சியான பாங்கு!).
                     - Emojis: Frequently use nice food, delivery, and greeting emojis (🌾, 🛵, 🍲, 🛒, ✨, 🥳, 🥦).
                     - Language: Answer in a friendly, conversational blend of elegant Spoken Tamil (எடப்பாடி வட்டார தமிழ் பாணி) and polite English. Keep responses easy, natural, and friendly—never speak like a scripted robot or script reader. Let Gemini decide the exact phrasing.
                     
                     # GEOGRAPHICAL LOCALIZATION
                     - Centered in Edappadi, Salem, Tamil Nadu!
-                    - Greet customers warmly as 'அன்பார்ந்த எடப்பாடி மக்களே! 🌾' or 'எடப்பாடி சிட்டி மக்களே! 🛵'. Show local familiarity with landmarks: Jalakandapuram Road, Sangagiri Main Road, Jalakandapuram Bypass, etc.
+                    - Greet customers warmly as 'அன்பார்ந்த எடப்பாடி மக்களே! 🌾' or 'எடப்பாடி சிட்டி மக்களே! 🛵'. Show local familiarity with landmarks: Jalakandapuram Road, Sangagiri Main Road, Jalakandapuram Bypass, Bus Stand, Konganapuram, poolampatti etc.
+                    
+                    # REAL-TIME MEMORY & SINGLE SOURCE OF TRUTH (FIRESTORE)
+                    - You are deeply synchronized with Firestore and Room. Whenever an Admin or Vendor edits, deletes, or adds restaurants, categories, menu items, or offers, you IMMEDIATELY know and apply these changes. No retraining or manual indexing is required.
+                    - STRICT QUALITY RULE: Never hallucinate. Never invent restaurants. Never invent riders. Never invent orders. If the requested data doesn't exist, state clearly: "மன்னிக்கவும், அந்த தகவலை என்னால் கண்டுபிடிக்க முடியவில்லை (I couldn't find that information)."
                     
                     # REASSURANCE RULE
                     - If the customer asks for a food item not present in our database, explain enthusiastically and bilingually that they can contact Coscoom Creative Tech Solutions at 8778148899 (WhatsApp/Call) to place a custom order! Do not say "Not Available" coldly.
@@ -1965,11 +2128,19 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                             // Fetch associated DeliveryRide if any
                             val ride = repository.getRideForOrder(ord.id)
                             if (ride != null) {
+                                val riderProfile = if (ride.riderPhone.isNotEmpty()) repository.userDao.getUserByPhone(ride.riderPhone) else null
+                                val vehiclePlate = riderProfile?.vehicleNo ?: "TN 30 LYO 1122"
+                                val distToCustomer = calculateDistance(ride.currentLat, ride.currentLng, ord.customerLat, ord.customerLng)
+                                val calculatedEtaMin = (distToCustomer * 2.8 + 4.0).toInt().coerceAtLeast(3)
+
                                 contextBuilder.append("\n  * Realtime Delivery Ride:")
                                 contextBuilder.append("\n    - Rider Name: ${ride.riderName}")
                                 contextBuilder.append("\n    - Rider Phone Number: ${ride.riderPhone}")
+                                contextBuilder.append("\n    - Rider Vehicle Plate: $vehiclePlate")
                                 contextBuilder.append("\n    - Ride Delivery Status: ${ride.status}") // ACCEPTED, PICKING_UP, DELIVERING, COMPLETED
-                                contextBuilder.append("\n    - Rider Location coordinates: Lat ${ride.currentLat}, Lng ${ride.currentLng}")
+                                contextBuilder.append("\n    - Rider Live Coordinates: Lat ${ride.currentLat}, Lng ${ride.currentLng}")
+                                contextBuilder.append("\n    - Precise Distance to Customer: ${String.format("%.2f", distToCustomer)} km")
+                                contextBuilder.append("\n    - Accurate Estimated Arrival Time (ETA): $calculatedEtaMin minutes")
                                 contextBuilder.append("\n    - OTP Verified? ${if (ride.otpVerified) "YES (Delivered successfully)" else "NO"}")
                             } else {
                                 contextBuilder.append("\n  * Realtime Delivery Ride: No delivery partner assigned yet.")
@@ -1994,6 +2165,32 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                     contextBuilder.append("\nActive Customer: Guest.")
                 }
 
+                // PRIVILEGED ADMIN ACCESS CONTROL
+                val isUserAdmin = user != null && (user.role == "ADMIN" || user.phone == "anantharaj_superadmin_uid" || user.uid == "anantharaj_superadmin_uid" || user.email.contains("admin"))
+                if (isUserAdmin) {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n🔑 PRIVILEGED ADMIN ACCESS: GRANTED")
+                    contextBuilder.append("\nREAL-TIME STORE PLATFORM STATISTICS:")
+                    contextBuilder.append("\n- Total Registered Orders: ${allOrders.size}")
+                    contextBuilder.append("\n- Placed Orders Today: $todayOrdersCount")
+                    contextBuilder.append("\n- Total Cancelled Orders: $cancelledOrdersCount")
+                    contextBuilder.append("\n- Platform Gross Sales Revenue: ₹${totalRevenue.toInt()}")
+                    contextBuilder.append("\n- Registered Delivery Riders: ${ridersList.size} (${activeRidersCount} active online)")
+                    contextBuilder.append("\n- Open Online Hotels: $onlineVendorsCount")
+                    contextBuilder.append("\n- Closed Offline Hotels: $offlineVendorsCount")
+                    contextBuilder.append("\n- Pinned Banner Campaigns: ${activeBanners.size}")
+                    contextBuilder.append("\n\nADMIN AUDIT RULES:")
+                    contextBuilder.append("\n- You are fully authorized to discuss these statistics with this user.")
+                    contextBuilder.append("\n- Provide highly encouraging business insights bilingually to the Admin.")
+                    contextBuilder.append("\n==========================================\n")
+                } else {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n🔒 PRIVILEGED ADMIN ACCESS: DENIED")
+                    contextBuilder.append("\n- Under NO circumstances are you allowed to disclose total revenue, today's order stats, cancelled orders counts, or gross platform parameters to this customer.")
+                    contextBuilder.append("\n- If they ask for administrative metrics, answer politely: \"மன்னிக்கவும் அண்ணே/அக்கா, இந்த விவரங்களைப் பார்க்க நிர்வாகி (Admin) கணக்கு தேவை! 🔒\"")
+                    contextBuilder.append("\n==========================================\n")
+                }
+
                 // All vendors (for "which shops are available?" queries)
                 val allVendorList = repository.vendorDao.getAllVendorsList()
                 val openVendors = allVendorList.filter { !it.isOnHoliday }
@@ -2009,6 +2206,27 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                     }
                 }
                 contextBuilder.append("\n==========================================\n")
+
+                // Cheap foods section for budget-friendly queries under ₹150
+                if (cheapItems.isNotEmpty()) {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n💰 BUDGET-FRIENDLY DISHES (UNDER ₹150) FOR RECOMMENDATIONS:")
+                    cheapItems.forEach { (item, vendor) ->
+                        contextBuilder.append("\n- Item: '${item.nameTa.ifEmpty { item.nameEn }}' | Price: ₹${item.price.toInt()} | At Hotel: '${vendor.nameTa.ifEmpty { vendor.name }}'")
+                    }
+                    contextBuilder.append("\n==========================================\n")
+                }
+
+                // Free delivery restaurants / offers
+                if (freeDeliveryVendors.isNotEmpty()) {
+                    contextBuilder.append("\n==========================================")
+                    contextBuilder.append("\n🎁 RESTAURANTS WITH FREE DELIVERY OR SPECIAL COUPON OFFERS:")
+                    freeDeliveryVendors.forEach { v ->
+                        val promoStr = if (v.isCouponEnabled) "Use Coupon '${v.couponCode}' for ₹${v.couponDiscount.toInt()} off (Min order ₹${v.couponMinOrder.toInt()})" else "Free Delivery threshold: ₹${v.freeDeliveryThreshold.toInt()}"
+                        contextBuilder.append("\n- Restaurant: '${v.nameTa.ifEmpty { v.name }}' | Rating: ⭐${v.rating} | $promoStr")
+                    }
+                    contextBuilder.append("\n==========================================\n")
+                }
 
                 // Append strict pre-matching results so Lyo AI doesn't hallucinate or recommend invalid stores
                 if (matchedOptions.isNotEmpty()) {
@@ -2033,7 +2251,6 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                     contextBuilder.append("\n==========================================\n")
                 }
 
-                val activeBanners = repository.promoBannerDao.getAllPromoBannersList()
                 val pinnedBroadcast = activeBanners.find { it.code == "AI_BROADCAST_PROMO" }
                 if (pinnedBroadcast != null) {
                     contextBuilder.append("\n[ADMIN PRIORITY PINNED BROADCAST: '${pinnedBroadcast.description}']")
@@ -2255,7 +2472,10 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
             isDynamicDelivery = vendor.isDynamicDelivery,
             baseDeliveryFee = vendor.deliveryFee,
             freeDeliveryThreshold = vendor.freeDeliveryThreshold,
-            maxDeliveryRadiusKm = vendor.visibilityRadiusKm
+            maxDeliveryRadiusKm = vendor.visibilityRadiusKm,
+            isRainEnabled = repository.rainSurchargeEnabled,
+            isPeakHour = repository.peakHourSurchargeEnabled,
+            deliveryZoneMultiplier = repository.deliveryZoneMultiplier
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
@@ -2458,7 +2678,10 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                 isDynamicDelivery = vendor.isDynamicDelivery,
                 baseDeliveryFee = vendor.deliveryFee,
                 freeDeliveryThreshold = vendor.freeDeliveryThreshold,
-                maxDeliveryRadiusKm = vendor.visibilityRadiusKm
+                maxDeliveryRadiusKm = vendor.visibilityRadiusKm,
+                isRainEnabled = repository.rainSurchargeEnabled,
+                isPeakHour = repository.peakHourSurchargeEnabled,
+                deliveryZoneMultiplier = repository.deliveryZoneMultiplier
             )
         }
         val applied = appliedCoupon.value
@@ -2613,6 +2836,16 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                 val resolvedLoc = resolveSmartGeocodeTamilNadu(address, lat, lng)
                 val finalLat = resolvedLoc.first
                 val finalLng = resolvedLoc.second
+
+                // Dynamic service area boundary check!
+                val dist = calculateDistance(finalLat, finalLng, vendor.lat, vendor.lng)
+                if (dist > vendor.visibilityRadiusKm) {
+                    isPlacingOrder.value = false
+                    orderSuccessDialogTitle.value = "சேவை வரம்பிற்கு வெளியே (Outside Service Area)"
+                    orderSuccessDialogText.value = "மன்னிக்கவும், உங்கள் முகவரி இந்த உணவகத்தின் சேவை வரம்பிற்கு வெளியே உள்ளது (அதிகபட்ச வரம்பு: ${vendor.visibilityRadiusKm} கிமீ | தற்போதைய தூரம்: ${String.format(java.util.Locale.US, "%.1f", dist)} கிமீ). (Sorry, your address is outside of this restaurant's delivery radius. Max: ${vendor.visibilityRadiusKm} km | Your distance: ${String.format(java.util.Locale.US, "%.1f", dist)} km)."
+                    showOrderSuccessDialog.value = true
+                    return@launch
+                }
 
                 // Update and persist the user's primary address & coordinates first so it auto-prefills next time
                 val updatedUser = finalUser.copy(address = address, lat = finalLat, lng = finalLng)
@@ -4086,68 +4319,142 @@ I have parsed the menu with 3 categories and 12 items.
         }
 
         val vId: Long
-        if (existingVendor != null) {
-            vId = existingVendor.id
-            val updatedVendor = existingVendor.copy(
-                nameTa = rNameTa.ifBlank { existingVendor.nameTa },
-                type = rType,
-                address = rLoc,
-                phone = rContact.ifBlank { existingVendor.phone },
-                bannerUrl = if (rPhoto.isNotBlank()) rPhoto else existingVendor.bannerUrl,
-                visibilityRadiusKm = 99999.0,
-                lat = state.lat,
-                lng = state.lng,
-                autoOpenTime = existingVendor.autoOpenTime.ifBlank { "09:00 AM" },
-                autoCloseTime = existingVendor.autoCloseTime.ifBlank { "10:00 PM" },
-                status = "ACTIVE"
-            )
-            repository.vendorDao.updateVendor(updatedVendor)
-            try { LyoFirebaseHelper.syncVendorToFirestore(updatedVendor) } catch (e: Exception) { Log.e("SmartMenu", "Vendor sync error: ${e.message}") }
-            repository.categoryDao.deleteCategoriesByVendor(vId)
-            repository.menuItemDao.deleteMenuItemsByVendor(vId)
-            try { LyoFirebaseHelper.clearMenuAndCategoriesFromFirestore(vId) } catch (e: Exception) { Log.e("SmartMenu", "Clear error: ${e.message}") }
-        } else {
-            vId = generateUniqueLongId()
-            val newVendor = Vendor(
-                id = vId,
-                name = rName, nameTa = rNameTa, type = rType,
-                rating = 4.8, distance = 1.8, deliveryTime = 25, deliveryFee = 40.0,
-                address = rLoc, lat = state.lat, lng = state.lng,
-                bannerUrl = if (rPhoto.isNotBlank()) rPhoto else rType.lowercase(),
-                phone = rContact, visibilityRadiusKm = 99999.0,
-                autoOpenTime = "09:00 AM", autoCloseTime = "10:00 PM",
-                status = "ACTIVE"
-            )
-            repository.vendorDao.insertVendor(newVendor)
-            try { LyoFirebaseHelper.syncVendorToFirestore(newVendor) } catch (e: Exception) { Log.e("SmartMenu", "Vendor sync error: ${e.message}") }
-        }
+        var createdVendor: Vendor? = null
+        var originalVendor: Vendor? = null
+        var originalCategories: List<Category>? = null
+        var originalMenuItems: List<MenuItem>? = null
 
-        menuMap.forEach { (rawCatKey, itemsList) ->
-            val parts = rawCatKey.split("__AND__")
-            val catNameEn = parts.getOrNull(0)?.trim() ?: rawCatKey
-            val catNameTa = parts.getOrNull(1)?.trim() ?: catNameEn
-            val categoryId = generateUniqueLongId()
-            val catObj = Category(id = categoryId, vendorId = vId, nameEn = catNameEn, nameTa = catNameTa)
-            repository.categoryDao.insertCategory(catObj)
-            try { LyoFirebaseHelper.syncCategoryToFirestore(catObj) } catch (e: Exception) { Log.e("SmartMenu", "Cat sync error: ${e.message}") }
-            itemsList.forEach { iDraft ->
-                val rawMeat = iDraft.meatType.lowercase().trim()
-                val isVegDish = !(rawMeat.contains("chicken") || rawMeat.contains("mutton") || rawMeat.contains("meat") || rawMeat.contains("fish") || rawMeat.contains("egg") || rawMeat.contains("non"))
-                val finalNameTa = iDraft.itemNameTa.ifBlank { iDraft.itemName }
+        val createdCategoryIds = mutableListOf<Long>()
+        val createdMenuItemIds = mutableListOf<Long>()
 
-                val itemId = generateUniqueLongId()
-                val itemObj = MenuItem(
-                    id = itemId, vendorId = vId, categoryId = categoryId,
-                    nameEn = iDraft.itemName, nameTa = finalNameTa,
-                    descEn = "Delicious ${iDraft.itemName} prepared fresh.",
-                    descTa = "சுவையான $finalNameTa உடனுக்குடன் தயாரிக்கப்பட்டது.",
-                    price = iDraft.price,
-                    isVeg = isVegDish,
-                    isAvailable = true, imageUrl = ""
+        try {
+            if (existingVendor != null) {
+                vId = existingVendor.id
+                originalVendor = existingVendor
+                originalCategories = repository.categoryDao.getCategoriesForVendorList(vId)
+                originalMenuItems = repository.menuItemDao.getMenuItemsForVendorList(vId)
+
+                val updatedVendor = existingVendor.copy(
+                    nameTa = rNameTa.ifBlank { existingVendor.nameTa },
+                    type = rType,
+                    address = rLoc,
+                    phone = rContact.ifBlank { existingVendor.phone },
+                    bannerUrl = if (rPhoto.isNotBlank()) rPhoto else existingVendor.bannerUrl,
+                    visibilityRadiusKm = 99999.0,
+                    lat = state.lat,
+                    lng = state.lng,
+                    autoOpenTime = existingVendor.autoOpenTime.ifBlank { "09:00 AM" },
+                    autoCloseTime = existingVendor.autoCloseTime.ifBlank { "10:00 PM" },
+                    status = "ACTIVE"
                 )
-                repository.menuItemDao.insertMenuItem(itemObj)
-                try { LyoFirebaseHelper.syncMenuItemToFirestore(itemObj) } catch (e: Exception) { Log.e("SmartMenu", "Item sync error: ${e.message}") }
+                
+                // Write to Firestore first
+                LyoFirebaseHelper.syncVendorToFirestore(updatedVendor)
+                repository.vendorDao.updateVendor(updatedVendor)
+
+                LyoFirebaseHelper.clearMenuAndCategoriesFromFirestore(vId)
+                repository.categoryDao.deleteCategoriesByVendor(vId)
+                repository.menuItemDao.deleteMenuItemsByVendor(vId)
+            } else {
+                vId = generateUniqueLongId()
+                val newVendor = Vendor(
+                    id = vId,
+                    name = rName, nameTa = rNameTa, type = rType,
+                    rating = 4.8, distance = 1.8, deliveryTime = 25, deliveryFee = 40.0,
+                    address = rLoc, lat = state.lat, lng = state.lng,
+                    bannerUrl = if (rPhoto.isNotBlank()) rPhoto else rType.lowercase(),
+                    phone = rContact, visibilityRadiusKm = 99999.0,
+                    autoOpenTime = "09:00 AM", autoCloseTime = "10:00 PM",
+                    status = "ACTIVE"
+                )
+                
+                // Write to Firestore first
+                LyoFirebaseHelper.syncVendorToFirestore(newVendor)
+                repository.vendorDao.insertVendor(newVendor)
+                createdVendor = newVendor
             }
+
+            menuMap.forEach { (rawCatKey, itemsList) ->
+                val parts = rawCatKey.split("__AND__")
+                val catNameEn = parts.getOrNull(0)?.trim() ?: rawCatKey
+                val catNameTa = parts.getOrNull(1)?.trim() ?: catNameEn
+                val categoryId = generateUniqueLongId()
+                val catObj = Category(id = categoryId, vendorId = vId, nameEn = catNameEn, nameTa = catNameTa)
+                
+                // Write to Firestore first
+                LyoFirebaseHelper.syncCategoryToFirestore(catObj)
+                repository.categoryDao.insertCategory(catObj)
+                createdCategoryIds.add(categoryId)
+
+                itemsList.forEach { iDraft ->
+                    val rawMeat = iDraft.meatType.lowercase().trim()
+                    val isVegDish = !(rawMeat.contains("chicken") || rawMeat.contains("mutton") || rawMeat.contains("meat") || rawMeat.contains("fish") || rawMeat.contains("egg") || rawMeat.contains("non"))
+                    val finalNameTa = iDraft.itemNameTa.ifBlank { iDraft.itemName }
+
+                    val itemId = generateUniqueLongId()
+                    val itemObj = MenuItem(
+                        id = itemId, vendorId = vId, categoryId = categoryId,
+                        nameEn = iDraft.itemName, nameTa = finalNameTa,
+                        descEn = "Delicious ${iDraft.itemName} prepared fresh.",
+                        descTa = "சுவையான $finalNameTa உடனுக்குடன் தயாரிக்கப்பட்டது.",
+                        price = iDraft.price,
+                        isVeg = isVegDish,
+                        isAvailable = true, imageUrl = ""
+                    )
+                    
+                    // Write to Firestore first
+                    LyoFirebaseHelper.syncMenuItemToFirestore(itemObj)
+                    repository.menuItemDao.insertMenuItem(itemObj)
+                    createdMenuItemIds.add(itemId)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SmartMenu", "Publish draft failed with exception, rolling back changes: ${e.message}", e)
+            try {
+                if (createdVendor != null) {
+                    // It was a new vendor creation. Delete everything.
+                    for (itemId in createdMenuItemIds) {
+                        try { LyoFirebaseHelper.deleteMenuItemFromFirestore(itemId) } catch (ignore: Exception) {}
+                        repository.menuItemDao.deleteMenuItemById(itemId)
+                    }
+                    for (catId in createdCategoryIds) {
+                        try { LyoFirebaseHelper.deleteCategoryFromFirestore(catId) } catch (ignore: Exception) {}
+                        repository.categoryDao.deleteCategoryById(catId)
+                    }
+                    try { LyoFirebaseHelper.deleteVendorFromFirestore(createdVendor.id) } catch (ignore: Exception) {}
+                    repository.vendorDao.deleteVendor(createdVendor)
+                } else if (originalVendor != null) {
+                    // It was an edit. Restore old state.
+                    // First, clean up any new partial additions from Firestore and Room
+                    for (itemId in createdMenuItemIds) {
+                        try { LyoFirebaseHelper.deleteMenuItemFromFirestore(itemId) } catch (ignore: Exception) {}
+                        repository.menuItemDao.deleteMenuItemById(itemId)
+                    }
+                    for (catId in createdCategoryIds) {
+                        try { LyoFirebaseHelper.deleteCategoryFromFirestore(catId) } catch (ignore: Exception) {}
+                        repository.categoryDao.deleteCategoryById(catId)
+                    }
+                    
+                    // Revert vendor back to original values
+                    try { LyoFirebaseHelper.syncVendorToFirestore(originalVendor) } catch (ignore: Exception) {}
+                    repository.vendorDao.updateVendor(originalVendor)
+
+                    // Re-insert original categories
+                    originalCategories?.forEach { cat ->
+                        try { LyoFirebaseHelper.syncCategoryToFirestore(cat) } catch (ignore: Exception) {}
+                        repository.categoryDao.insertCategory(cat)
+                    }
+
+                    // Re-insert original menu items
+                    originalMenuItems?.forEach { item ->
+                        try { LyoFirebaseHelper.syncMenuItemToFirestore(item) } catch (ignore: Exception) {}
+                        repository.menuItemDao.insertMenuItem(item)
+                    }
+                }
+            } catch (rollbackError: Exception) {
+                Log.e("SmartMenu", "Error while performing rollback: ${rollbackError.message}", rollbackError)
+            }
+            throw e
         }
     }
 
@@ -4168,7 +4475,7 @@ I have parsed the menu with 3 categories and 12 items.
             resultText = "Gemini API key not configured."
         } else {
             try {
-                val client = okhttp3.OkHttpClient.Builder()
+                val client = sharedHttpClient.newBuilder()
                     .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                     .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
@@ -5066,8 +5373,34 @@ class DeliveryViewModel(val repository: LyoRepository) : ViewModel() {
     }
 
     fun acceptDelivery(ride: DeliveryRide) {
+        val user = currentUser.value ?: return
         viewModelScope.launch {
-            val updated = ride.copy(status = "PICKING_UP")
+            // Execute Firestore transaction block to enforce single concurrency lock on accepting the order
+            val txResult = com.example.data.repository.LyoFirebaseHelper.riderAcceptOrderTransaction(
+                rideId = ride.id,
+                orderId = ride.orderId,
+                riderUid = user.uid,
+                riderName = user.name,
+                riderPhone = user.phone
+            )
+            
+            if (txResult.isFailure) {
+                val errorMsg = txResult.exceptionOrNull()?.message ?: "Acceptance transaction failed."
+                Log.e("DeliveryViewModel", "Failed to accept order: $errorMsg")
+                com.example.data.repository.LyoFirebaseHelper.appContext?.let { ctx ->
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(ctx, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                return@launch
+            }
+
+            val updated = ride.copy(
+                status = "PICKING_UP",
+                riderUid = user.uid,
+                riderName = user.name,
+                riderPhone = user.phone
+            )
             repository.updateRide(updated)
             repository.updateOrderStatus(ride.orderId, "ACCEPTED")
             
@@ -5172,6 +5505,13 @@ class DeliveryViewModel(val repository: LyoRepository) : ViewModel() {
         val callback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 val lastLocation = locationResult.lastLocation ?: return
+                
+                // Run security validation checks first
+                if (!com.example.util.GpsSecurityValidator.validateLocation(ride.id, lastLocation)) {
+                    Log.w("DeliveryViewModel", "GPS security validation failed in ViewModel. Discarding.")
+                    return
+                }
+
                 val lat = lastLocation.latitude
                 val lng = lastLocation.longitude
 
@@ -5211,6 +5551,13 @@ class DeliveryViewModel(val repository: LyoRepository) : ViewModel() {
     fun verifyDeliveryOTP(ride: DeliveryRide, onSuccess: () -> Unit) {
         val input = otpInputVal.value.trim()
         viewModelScope.launch {
+            // Prevent accidental duplicate delivery completion
+            val latestRide = repository.getRideById(ride.id)
+            if (latestRide == null || latestRide.status == "COMPLETED" || latestRide.otpVerified) {
+                otpErrorState.value = "This delivery ride has already been completed."
+                return@launch
+            }
+
             val orderPair = repository.getOrderWithItems(ride.orderId)
             val order = orderPair.first
             val correctOTP = order?.otpCode ?: ""
@@ -5219,7 +5566,7 @@ class DeliveryViewModel(val repository: LyoRepository) : ViewModel() {
                 otpErrorState.value = null
                 stopRealGpsTracking()
                 simulationJobs.remove(ride.id)?.cancel()
-                val updated = ride.copy(status = "COMPLETED", otpVerified = true)
+                val updated = latestRide.copy(status = "COMPLETED", otpVerified = true)
                 repository.updateRide(updated)
                 repository.updateOrderStatus(ride.orderId, "DELIVERED")
                 

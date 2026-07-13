@@ -756,7 +756,10 @@ class MainActivity : ComponentActivity() {
                     DeliveryPartnerDashboardScreen(
                       viewModel = deliveryViewModel,
                       onLogoutClick = {
-                        sharedPrefs.edit().remove("logged_user_phone").apply()
+                        sharedPrefs.edit()
+                          .remove("logged_user_phone")
+                          .remove("logged_user_password_hash")
+                          .apply()
                         authViewModel.logout()
                         currentRoute = "LOGIN"
                       }

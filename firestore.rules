@@ -77,16 +77,30 @@ service cloud.firestore {
 
     // --- Delivery Rides ---
     match /delivery_rides/{rideId} {
-      allow read: if isAuthenticated(); // Customers need to track rides, riders and admins too
+      allow read: if isAuthenticated() && (
+        hasAnyRole(['ADMIN', 'RIDER']) ||
+        (exists(/databases/$(database)/documents/ek_orders/$(string(resource.data.orderId))) &&
+         get(/databases/$(database)/documents/ek_orders/$(string(resource.data.orderId))).data.userId == request.auth.uid)
+      );
       allow write: if isAuthenticated() && hasAnyRole(['ADMIN', 'RIDER']);
     }
 
     // --- Order Messages (Chat) ---
     match /order_messages/{orderId} {
-      allow read, write: if isAuthenticated();
+      function canAccessOrderChat() {
+        return isAuthenticated() && (
+          hasAnyRole(['ADMIN']) ||
+          (exists(/databases/$(database)/documents/ek_orders/$(orderId)) && (
+            get(/databases/$(database)/documents/ek_orders/$(orderId)).data.userId == request.auth.uid ||
+            get(/databases/$(database)/documents/ek_orders/$(orderId)).data.riderUid == request.auth.uid ||
+            hasAnyRole(['RIDER'])
+          ))
+        );
+      }
+      allow read, write: if canAccessOrderChat();
       
       match /messages/{messageId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if canAccessOrderChat();
       }
     }
 

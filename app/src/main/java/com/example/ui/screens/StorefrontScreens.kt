@@ -44,6 +44,11 @@ import com.example.data.database.SavedPaymentMethod
 import com.example.data.database.Review
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.Date
 import com.example.ui.viewmodels.StorefrontViewModel
 import com.example.ui.viewmodels.LyoMessage
 import androidx.compose.ui.geometry.Offset
@@ -76,6 +81,7 @@ fun StorefrontDashboardScreen(
     onNavigateToAdmin: (() -> Unit)? = null
 ) {
     val vendors by viewModel.allVendors.collectAsState(initial = emptyList())
+    val aiRecommendations by viewModel.aiRecommendations.collectAsState(initial = emptyList())
     val promoBanners by viewModel.allPromoBanners.collectAsState(initial = emptyList())
     val searchQuery by viewModel.searchQueries.collectAsState(initial = "")
     val activeFilter by viewModel.selectedCategoryFilter.collectAsState(initial = "All")
@@ -89,6 +95,8 @@ fun StorefrontDashboardScreen(
     val pauseMsgTa by viewModel.appPauseMessageTa.collectAsState()
 
     val selectedTab by viewModel.selectedTabState.collectAsState(initial = "")
+    val notificationHistory by viewModel.notificationHistory.collectAsState()
+    val unreadCount = notificationHistory.count { !it.isRead }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -490,8 +498,6 @@ fun StorefrontDashboardScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     
                     // Premium Notification Bell Icon with dynamic Badge
-                    val notificationHistory by viewModel.notificationHistory.collectAsState()
-                    val unreadCount = notificationHistory.count { !it.isRead }
                     Box(
                         modifier = Modifier
                             .size(38.dp)
@@ -814,7 +820,16 @@ fun StorefrontDashboardScreen(
                                                 .background(if (isUnread) Color(0xFF1E293B).copy(alpha = 0.8f) else Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
                                                 .border(1.dp, borderCol, RoundedCornerShape(12.dp))
                                                 .clickable {
-                                                    viewModel.markNotificationAsRead(item.id)
+                                                    val regex = Regex("#(\\d+)")
+                                                    val match = regex.find(item.title + " " + item.message)
+                                                    val orderId = match?.groupValues?.get(1)?.toLongOrNull()
+                                                    if (orderId != null) {
+                                                        viewModel.trackOrderFromNotification(orderId, item.id) {
+                                                            showNotificationCenterDialog = false
+                                                        }
+                                                    } else {
+                                                        viewModel.markNotificationAsRead(item.id)
+                                                    }
                                                 }
                                                 .padding(12.dp)
                                         ) {
@@ -823,7 +838,7 @@ fun StorefrontDashboardScreen(
                                                 if (isUnread) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .padding(top = 4.dp, end = 8.dp)
+                                                            .padding(top = 8.dp, end = 8.dp)
                                                             .size(8.dp)
                                                             .clip(CircleShape)
                                                             .background(LyoColors.AmberYellow)
@@ -831,6 +846,26 @@ fun StorefrontDashboardScreen(
                                                 } else {
                                                     Spacer(modifier = Modifier.width(12.dp))
                                                 }
+                                                
+                                                // Dynamic premium category icon
+                                                val iconForNotif = remember(item.title, item.message) {
+                                                    val text = (item.title + " " + item.message).lowercase()
+                                                    when {
+                                                        text.contains("rider") || text.contains("சவாரி") || text.contains("🛵") -> Icons.Filled.DirectionsBike
+                                                        text.contains("offer") || text.contains("சலுகை") || text.contains("promo") -> Icons.Filled.LocalOffer
+                                                        text.contains("ஆர்டர்") || text.contains("order") -> Icons.Filled.ShoppingCart
+                                                        else -> Icons.Filled.Notifications
+                                                    }
+                                                }
+                                                Icon(
+                                                    imageVector = iconForNotif,
+                                                    contentDescription = null,
+                                                    tint = if (isUnread) LyoColors.AmberYellow else Color.Gray.copy(alpha = 0.7f),
+                                                    modifier = Modifier
+                                                        .padding(top = 2.dp, end = 8.dp)
+                                                        .size(18.dp)
+                                                )
+
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(
                                                         text = item.title,
@@ -1049,6 +1084,103 @@ fun StorefrontDashboardScreen(
                             // 3. HIGH-FIDELITY HERO BANNERS (Compact offer carousel placed directly below Category chips)
                             item {
                                 LiquidHeroBanners(promoBanners = promoBanners)
+                            }
+
+                            // ✨ LYO AI PERSONALIZED RECOMMENDATIONS CAROUSEL
+                            if (aiRecommendations.isNotEmpty() && searchQuery.isBlank() && activeFilter == "All") {
+                                item {
+                                    Text(
+                                        text = "✨ LYO AI PERSONALIZED RECOMMENDATIONS",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = LyoColors.AccentOrange,
+                                        letterSpacing = 1.5.sp,
+                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
+                                    )
+                                    
+                                    LazyRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        items(aiRecommendations.take(6)) { rec ->
+                                            val vendor = rec.vendor
+                                            Card(
+                                                modifier = Modifier
+                                                    .width(180.dp)
+                                                    .clickable { onNavigateToVendor(vendor.id) },
+                                                colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+                                                border = BorderStroke(1.dp, Color(0x33F8FAFC)),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    // Sparkle Badge + AI Score
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .background(LyoColors.VegGreen.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "AI Score ${rec.aiScore}%",
+                                                                color = LyoColors.VegGreen,
+                                                                fontSize = 9.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Star,
+                                                            contentDescription = "rating",
+                                                            tint = LyoColors.AccentOrange,
+                                                            modifier = Modifier.size(10.dp)
+                                                        )
+                                                    }
+                                                    
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    
+                                                    Text(
+                                                        text = vendor.nameTa.ifEmpty { vendor.name },
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = vendor.name,
+                                                        color = LyoColors.TextSecondary,
+                                                        fontSize = 9.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    
+                                                    // Reasons list (first 2 reasons)
+                                                    rec.reasons.take(2).forEach { reason ->
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.padding(vertical = 1.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "• $reason",
+                                                                color = LyoColors.TextSecondary,
+                                                                fontSize = 8.sp,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             // Spacer to provide clean layout
@@ -2208,17 +2340,19 @@ fun CustomerProfileSection(
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        listOf("Home", "Office", "Other").forEach { type ->
+                        listOf("Home", "Work", "Favorite", "Recent", "Other").forEach { type ->
                             val isSelected = if (type == "Other") {
-                                newAddressLabel != "Home" && newAddressLabel != "Office" && newAddressLabel.isNotBlank()
+                                newAddressLabel != "Home" && newAddressLabel != "Work" && newAddressLabel != "Favorite" && newAddressLabel != "Recent" && newAddressLabel.isNotBlank()
                             } else {
                                 newAddressLabel == type
                             }
                             val labelTa = when (type) {
                                 "Home" -> "வீடு"
-                                "Office" -> "அலுவலகம்"
+                                "Work" -> "வேலை"
+                                "Favorite" -> "விருப்பம்"
+                                "Recent" -> "அண்மை"
                                 else -> "இதர"
                             }
                             Box(
@@ -2240,26 +2374,28 @@ fun CustomerProfileSection(
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center,
-                                    modifier = Modifier.fillMaxHeight().padding(horizontal = 4.dp)
+                                    modifier = Modifier.fillMaxHeight().padding(horizontal = 2.dp)
                                 ) {
                                     Icon(
                                         imageVector = when (type) {
                                             "Home" -> Icons.Filled.Home
-                                            "Office" -> Icons.Filled.Work
+                                            "Work" -> Icons.Filled.Work
+                                            "Favorite" -> Icons.Filled.Favorite
+                                            "Recent" -> Icons.Filled.History
                                             else -> Icons.Filled.Place
                                         },
                                         contentDescription = type,
                                         tint = if (isSelected) LyoColors.AccentOrange else Color.LightGray,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "$type / $labelTa",
-                                        fontSize = 10.sp,
+                                        text = "$type\n$labelTa",
+                                        fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isSelected) LyoColors.AccentOrange else Color.LightGray,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                        lineHeight = 11.sp,
+                                        lineHeight = 9.sp,
                                         maxLines = 2
                                     )
                                 }
@@ -2268,7 +2404,7 @@ fun CustomerProfileSection(
                     }
 
                     // If "Other" or custom is selected, show a small text field to specify the custom name
-                    if (newAddressLabel != "Home" && newAddressLabel != "Office") {
+                    if (newAddressLabel != "Home" && newAddressLabel != "Work" && newAddressLabel != "Favorite" && newAddressLabel != "Recent") {
                         OutlinedTextField(
                             value = if (newAddressLabel == "Custom") "" else newAddressLabel,
                             onValueChange = { newAddressLabel = it },
@@ -2323,7 +2459,7 @@ fun CustomerProfileSection(
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // GPS Detect button
                         Box(
@@ -2352,10 +2488,37 @@ fun CustomerProfileSection(
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Filled.MyLocation, contentDescription = "GPS", tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("GPS Detect 🛰️", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("GPS Detect", color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Search & Pin button
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x1110B981))
+                                .border(1.dp, Color(0x3310B981), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    if (newAddressLine.isNotBlank()) {
+                                        val (resolvedLat, resolvedLng) = com.example.ui.viewmodels.resolveSmartGeocodeTamilNadu(newAddressLine, 11.5812, 77.8465)
+                                        newAddressLat = resolvedLat
+                                        newAddressLng = resolvedLng
+                                        Toast.makeText(ctx, "🔍 Address verified & pinned to: $resolvedLat, $resolvedLng", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(ctx, "தயவுசெய்து முகவரியை முதலில் உள்ளிடவும்! (Enter address first!)", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Filled.Search, contentDescription = "Search Pin", tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("Search & Pin", color = Color(0xFF10B981), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -2370,10 +2533,10 @@ fun CustomerProfileSection(
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Filled.Map, contentDescription = "Map Select", tint = LyoColors.AccentOrange, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Pick on Map 🗺️", color = LyoColors.AccentOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("Pick on Map", color = LyoColors.AccentOrange, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -2527,6 +2690,10 @@ fun CustomerProfileSection(
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFF0F172A))
                             .border(1.dp, if (addr.isDefault) Color(0x3338BDF8) else Color(0x11FFFFFF), RoundedCornerShape(16.dp))
+                            .clickable {
+                                viewModel.setAddressAsPrimary(addr)
+                                Toast.makeText(context, "📍 Primary Delivery Address set to: ${addr.name}", Toast.LENGTH_SHORT).show()
+                            }
                             .padding(14.dp)
                     ) {
                         Row(
@@ -2542,8 +2709,15 @@ fun CustomerProfileSection(
                                         .background(Color(0x1638BDF8)),
                                     contentAlignment = Alignment.Center
                                 ) {
+                                    val adIcon = when {
+                                        addr.name.contains("Home", ignoreCase = true) -> Icons.Filled.Home
+                                        addr.name.contains("Work", ignoreCase = true) || addr.name.contains("Office", ignoreCase = true) -> Icons.Filled.Work
+                                        addr.name.contains("Favorite", ignoreCase = true) || addr.name.contains("Fav", ignoreCase = true) -> Icons.Filled.Favorite
+                                        addr.name.contains("Recent", ignoreCase = true) -> Icons.Filled.History
+                                        else -> Icons.Filled.Place
+                                    }
                                     Icon(
-                                        imageVector = if (addr.name.contains("Work", ignoreCase = true) || addr.name.contains("Office", ignoreCase = true)) Icons.Filled.Work else Icons.Filled.Home,
+                                        imageVector = adIcon,
                                         contentDescription = "address_type",
                                         tint = Color(0xFF38BDF8),
                                         modifier = Modifier.size(18.dp)
@@ -7439,7 +7613,178 @@ fun VendorBanner(
                         )
                     )
                     if (address.isNotBlank()) {
-                        Sp    var showSupportSuccessPopup by remember { mutableStateOf(false) }
+                        Spacer(modifier = Modifier.height(1.dp))
+                        Text(
+                            text = address,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = Color.White.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = androidx.compose.ui.text.TextStyle(
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black.copy(alpha = 0.84f),
+                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                    blurRadius = 2f
+                                )
+                            )
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = iconSymbol,
+                    contentDescription = null,
+                    tint = Color(0x18FFFFFF),
+                    modifier = Modifier.size(44.dp).align(Alignment.Bottom)
+                )
+            }
+        } else {
+            // Elegant subtle top-right corner floating category tag on the image!
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .background(Color(0x990F172A), RoundedCornerShape(6.dp))
+                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = iconSymbol,
+                            contentDescription = null,
+                            tint = LyoColors.AmberYellow,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            text = normalizedType.uppercase(),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        if (isOnHoliday) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xAA020617))
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color(0xFFDC2626), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "CLOSED TODAY",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StoreInfoRow(
+    labelEn: String,
+    labelTa: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = LyoColors.TextSecondary,
+            modifier = Modifier.size(18.dp).padding(top = 2.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column {
+            Text(
+                text = labelEn,
+                fontSize = 11.sp,
+                color = LyoColors.TextSecondary,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(1.dp))
+            Text(
+                text = value,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun LyoAiChatbotSection(
+    viewModel: StorefrontViewModel,
+    onNavigateToVendor: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val messages by viewModel.lyoAiMessages.collectAsState(initial = emptyList())
+    val currentUser by viewModel.currentUser.collectAsState()
+    val isSessionRestoring = remember(currentUser) {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null && currentUser == null
+    }
+    val isLoading by viewModel.isLyoAiLoading.collectAsState(initial = false)
+    val liveCart by viewModel.activeCart.collectAsState(initial = emptyMap())
+    val currentVendor by viewModel.activeVendor.collectAsState()
+    val cartSubtotal by viewModel.cartSubtotal.collectAsState(initial = 0.0)
+    val cartDeliveryFee by viewModel.cartDeliveryFee.collectAsState(initial = 0.0)
+    val cartTotalAmount by viewModel.cartTotalAmount.collectAsState(initial = 0.0)
+    val selectedPaymentMethod by viewModel.selectedPaymentMethod.collectAsState(initial = "")
+    val showLyoSupportPopupState by viewModel.showLyoSupportPopup.collectAsState(initial = false)
+    var userText by remember { mutableStateOf("") }
+    var showClearCartConfirm by remember { mutableStateOf(false) }
+    var showPlaceOrderConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.initLyoAiChat()
+    }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    val context = LocalContext.current
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val data = result.data
+            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = results?.firstOrNull() ?: ""
+            if (spokenText.isNotBlank()) {
+                viewModel.sendLyoAiPrompt(spokenText, context)
+            }
+        }
+    }
+
+    // Auto scroll down when messages size changes
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    var showSupportSuccessPopup by remember { mutableStateOf(false) }
 
     if (showSupportSuccessPopup) {
         androidx.compose.material3.AlertDialog(
@@ -7661,137 +8006,6 @@ fun VendorBanner(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.showLyoSupportPopup.value = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
-                ) {
-                    Text("மூடு / Close ✖", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color(0xFF141720),
-            shape = RoundedCornerShape(16.dp)
-        )
-    } {
-            val data = result.data
-            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val spokenText = results?.firstOrNull() ?: ""
-            if (spokenText.isNotBlank()) {
-                viewModel.sendLyoAiPrompt(spokenText, context)
-            }
-        }
-    }
-
-    // Auto scroll down when messages size changes
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
-    if (showLyoSupportPopupState) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { viewModel.showLyoSupportPopup.value = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Filled.HeadsetMic,
-                        contentDescription = "support icon",
-                        tint = LyoColors.AccentOrange,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "உதவி மையம் 📞💬",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "அன்பான எடப்பாடி மக்களே! 🌾 லியோ ஏ ஐ புரியாத மொழிகளில் வினவப்பட்டாலோ அல்லது ஏதேனும் ஆர்டர் அல்லது மெனு சந்தேகங்கள் இருப்பின், உடனடியாக எங்களது Coscoom Creative Tech Solutions தலைமை நிர்வாகி (CEO) Anantharaj.R அவர்களை தொடர்பு கொள்ளவும்.",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                    
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0x1A00E5FF)),
-                        border = BorderStroke(1.dp, Color(0x6600E5FF))
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Coscoom Creative Tech Solutions",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF),
-                                fontSize = 12.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "தலைமை நிர்வாகி: Anantharaj.R\nதொடர்பு எண்: 8778148899\nஇடம்: எடப்பாடி, சேலம் மாவட்டம்.",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                try {
-                                    com.example.WhatsAppHelper.sendMessage(
-                                        context,
-                                        "8778148899",
-                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
-                                    )
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f).height(44.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Filled.Send, contentDescription = "whatsapp", tint = Color.White, modifier = Modifier.size(16.dp))
-                                Text("WhatsApp", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
-
-                        Button(
-                            onClick = {
-                                try {
-                                    val dialIntent = android.content.Intent(
-                                        android.content.Intent.ACTION_DIAL,
-                                        android.net.Uri.parse("tel:8778148899")
-                                    )
-                                    context.startActivity(dialIntent)
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f).height(44.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Filled.Phone, contentDescription = "call", tint = Color.White, modifier = Modifier.size(14.dp))
-                                Text("Call", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
                     }
                 }
             },

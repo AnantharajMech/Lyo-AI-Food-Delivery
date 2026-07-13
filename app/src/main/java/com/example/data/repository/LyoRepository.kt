@@ -12,10 +12,18 @@ class LyoRepository(val db: AppDatabase) {
     var gstEnabled: Boolean = false
     var gstRate: Double = 5.0
 
+    // Global Dynamic Surcharge Config
+    var rainSurchargeEnabled: Boolean = false
+    var peakHourSurchargeEnabled: Boolean = false
+    var deliveryZoneMultiplier: Double = 1.0
+
     fun initGstSettings(context: android.content.Context) {
         val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
         gstEnabled = prefs.getBoolean("gst_enabled", false)
         gstRate = prefs.getFloat("gst_rate", 5.0f).toDouble()
+        rainSurchargeEnabled = prefs.getBoolean("rain_surcharge_enabled", false)
+        peakHourSurchargeEnabled = prefs.getBoolean("peak_hour_surcharge_enabled", false)
+        deliveryZoneMultiplier = prefs.getFloat("delivery_zone_multiplier", 1.0f).toDouble()
     }
 
     fun setGstSettingsLocally(context: android.content.Context?, enabled: Boolean, rate: Double) {
@@ -44,6 +52,34 @@ class LyoRepository(val db: AppDatabase) {
                 Log.d("LyoRepository", "Synced GST settings to Firestore: enabled=$enabled, rate=$rate")
             } catch (e: Exception) {
                 Log.w("LyoRepository", "Error syncing GST settings to Firestore: ${e.message}")
+            }
+        }
+    }
+
+    fun updateSurchargeSettings(context: android.content.Context, rain: Boolean, peak: Boolean, zoneMultiplier: Double) {
+        rainSurchargeEnabled = rain
+        peakHourSurchargeEnabled = peak
+        deliveryZoneMultiplier = zoneMultiplier
+        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("rain_surcharge_enabled", rain)
+            .putBoolean("peak_hour_surcharge_enabled", peak)
+            .putFloat("delivery_zone_multiplier", zoneMultiplier.toFloat())
+            .apply()
+
+        // Sync to Firestore live config!
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val surchargeMap = mapOf(
+                    "rainSurchargeEnabled" to rain,
+                    "peakHourSurchargeEnabled" to peak,
+                    "deliveryZoneMultiplier" to zoneMultiplier
+                )
+                dbInstance.collection("app_settings").document("global").set(surchargeMap, com.google.firebase.firestore.SetOptions.merge())
+                Log.d("LyoRepository", "Synced Surcharge settings to Firestore")
+            } catch (e: Exception) {
+                Log.w("LyoRepository", "Error syncing Surcharges to Firestore: ${e.message}")
             }
         }
     }
@@ -250,12 +286,54 @@ class LyoRepository(val db: AppDatabase) {
     suspend fun saveAddress(address: SavedAddress) = withContext(Dispatchers.IO) {
         if (address.isDefault) {
             db.savedAddressDao.clearDefaultsForUser(address.userId)
+            try {
+                val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                dbInstance.collection("users").document(address.userId).collection("saved_addresses")
+                    .whereEqualTo("isDefault", true)
+                    .get()
+                    .addOnSuccessListener { querySnapshot ->
+                        for (doc in querySnapshot.documents) {
+                            doc.reference.update("isDefault", false)
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.w("LyoRepository", "Error clearing defaults in Firestore: ${e.message}")
+            }
         }
-        db.savedAddressDao.insertAddress(address)
+        val newId = db.savedAddressDao.insertAddress(address)
+        val finalAddress = if (address.id == 0L) address.copy(id = newId) else address
+        
+        try {
+            val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val addrMap = mapOf(
+                "id" to finalAddress.id,
+                "userId" to finalAddress.userId,
+                "name" to finalAddress.name,
+                "addressLine" to finalAddress.addressLine,
+                "isDefault" to finalAddress.isDefault,
+                "latitude" to finalAddress.latitude,
+                "longitude" to finalAddress.longitude
+            )
+            dbInstance.collection("users").document(finalAddress.userId)
+                .collection("saved_addresses").document(finalAddress.id.toString())
+                .set(addrMap)
+            Log.d("LyoRepository", "Synced saved address ${finalAddress.id} to Firestore")
+        } catch (e: Exception) {
+            Log.w("LyoRepository", "Error syncing saved address to Firestore: ${e.message}")
+        }
     }
 
     suspend fun deleteAddress(address: SavedAddress) = withContext(Dispatchers.IO) {
         db.savedAddressDao.deleteAddress(address)
+        try {
+            val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            dbInstance.collection("users").document(address.userId)
+                .collection("saved_addresses").document(address.id.toString())
+                .delete()
+            Log.d("LyoRepository", "Deleted saved address ${address.id} from Firestore")
+        } catch (e: Exception) {
+            Log.w("LyoRepository", "Error deleting saved address from Firestore: ${e.message}")
+        }
     }
 
     fun getSavedPaymentMethodsForUser(userId: String): Flow<List<SavedPaymentMethod>> =
@@ -345,7 +423,10 @@ class LyoRepository(val db: AppDatabase) {
                     finalUser = user.copy(uid = uid)
                 }
                 
-                LyoFirebaseHelper.registerInFirebase(finalUser, plaintextPassword)
+                val success = LyoFirebaseHelper.registerInFirebase(finalUser, plaintextPassword)
+                if (!success) {
+                    throw Exception("Firebase write returned false. Registration aborted.")
+                }
                 firebaseRegistered = true
                 
                 val finalUid = LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: finalUser.uid
@@ -357,7 +438,7 @@ class LyoRepository(val db: AppDatabase) {
                 throw e
             }
         } else {
-            firebaseRegistered = true
+            throw IllegalStateException("Firebase is not initialized. Cannot register/update account without Firebase connection.")
         }
         
         if (firebaseRegistered) {

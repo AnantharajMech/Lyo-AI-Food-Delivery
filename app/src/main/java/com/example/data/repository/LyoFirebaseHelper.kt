@@ -86,10 +86,42 @@ object LyoFirebaseHelper {
                     Log.e(TAG, "Failed to initialize Firebase App Check: ${appCheckEx.message}", appCheckEx)
                 }
             } catch (e: Exception) {
-                throw IllegalStateException(
-                    "Firebase Android configuration is missing or invalid. Download google-services.json for com.lyo.fooddelivery from Firebase Console and place it in app/google-services.json.",
-                    e
-                )
+                try {
+                    Log.w(TAG, "Resource-based initialization failed, attempting programmatic fallback: ${e.message}")
+                    val options = FirebaseOptions.Builder()
+                        .setApiKey(BuildConfig.FIREBASE_API_KEY)
+                        .setApplicationId(BuildConfig.FIREBASE_APP_ID)
+                        .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
+                        .setDatabaseUrl(BuildConfig.FIREBASE_DATABASE_URL)
+                        .setStorageBucket(BuildConfig.FIREBASE_STORAGE_BUCKET)
+                        .build()
+                    FirebaseApp.initializeApp(context, options)
+                    isInitialized = true
+                    Log.d(TAG, "Firebase initialized successfully from programmatic options fallback")
+
+                    // Initialize Firebase App Check immediately upon app startup
+                    try {
+                        val firebaseAppCheck = FirebaseAppCheck.getInstance()
+                        if (BuildConfig.DEBUG) {
+                            firebaseAppCheck.installAppCheckProviderFactory(
+                                DebugAppCheckProviderFactory.getInstance()
+                            )
+                            Log.d(TAG, "Firebase App Check initialized with Debug provider (fallback)")
+                        } else {
+                            firebaseAppCheck.installAppCheckProviderFactory(
+                                PlayIntegrityAppCheckProviderFactory.getInstance()
+                            )
+                            Log.d(TAG, "Firebase App Check initialized with Play Integrity provider (fallback)")
+                        }
+                    } catch (appCheckEx: Exception) {
+                        Log.e(TAG, "Failed to initialize Firebase App Check (fallback): ${appCheckEx.message}", appCheckEx)
+                    }
+                } catch (fallbackEx: Exception) {
+                    throw IllegalStateException(
+                        "Firebase Android configuration is missing or invalid. Download google-services.json for com.lyo.fooddelivery from Firebase Console and place it in app/google-services.json or configure environment variables.",
+                        fallbackEx
+                    )
+                }
             }
 
             // Configure Firestore offline persistence & unlimited cache
@@ -837,6 +869,7 @@ object LyoFirebaseHelper {
             Log.d(TAG, "Synced vendor ${vendor.name} to Firestore")
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing vendor ${vendor.name}: ${e.message}")
+            throw e
         }
     }
 
@@ -858,6 +891,7 @@ object LyoFirebaseHelper {
             Log.d(TAG, "Deleted vendor $vendorId from Firestore complete")
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting vendor $vendorId: ${e.message}")
+            throw e
         }
     }
 
@@ -875,6 +909,7 @@ object LyoFirebaseHelper {
             Log.d(TAG, "Cleared categories & menu items from Firestore for vendor $vendorId")
         } catch (e: Exception) {
             Log.e(TAG, "Failed clearing categories & menu items from Firestore for vendor $vendorId: ${e.message}")
+            throw e
         }
     }
 
@@ -894,6 +929,7 @@ object LyoFirebaseHelper {
             dbInstance.collection("categories").document(category.id.toString()).set(catMap, SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing category: ${e.message}")
+            throw e
         }
     }
 
@@ -909,6 +945,7 @@ object LyoFirebaseHelper {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting category from Firestore: ${e.message}")
+            throw e
         }
     }
 
@@ -933,6 +970,7 @@ object LyoFirebaseHelper {
             dbInstance.collection("menu_items").document(item.id.toString()).set(itemMap, SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing menu item: ${e.message}")
+            throw e
         }
     }
 
@@ -942,6 +980,7 @@ object LyoFirebaseHelper {
             dbInstance.collection("menu_items").document(itemId.toString()).delete().await()
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting menu item: ${e.message}")
+            throw e
         }
     }
 
@@ -959,6 +998,7 @@ object LyoFirebaseHelper {
             dbInstance.collection("promo_banners").document(docId).set(bannerMap, SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing promo banner: ${e.message}")
+            throw e
         }
     }
 
@@ -969,6 +1009,7 @@ object LyoFirebaseHelper {
             dbInstance.collection("promo_banners").document(docId).delete().await()
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting promo banner: ${e.message}")
+            throw e
         }
     }
 
@@ -1159,6 +1200,72 @@ object LyoFirebaseHelper {
                     "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                 )
                 transaction.update(docRef, updates)
+                null
+            }.await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun riderAcceptOrderTransaction(
+        rideId: Long,
+        orderId: Long,
+        riderUid: String,
+        riderName: String,
+        riderPhone: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val dbInstance = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
+        try {
+            dbInstance.runTransaction { transaction ->
+                val orderRef = dbInstance.collection("ek_orders").document(orderId.toString())
+                val rideRef = dbInstance.collection("delivery_rides").document(rideId.toString())
+                
+                val orderSnapshot = transaction.get(orderRef)
+                val rideSnapshot = transaction.get(rideRef)
+                
+                if (orderSnapshot.exists()) {
+                    val existingRiderUid = orderSnapshot.getString("riderUid")
+                    val existingStatus = orderSnapshot.getString("status") ?: "PENDING"
+                    if (!existingRiderUid.isNullOrBlank() && existingRiderUid != riderUid) {
+                        throw Exception("Order already accepted by another rider! / ஆர்டர் ஏற்கனவே வேறொரு நபரால் ஏற்கப்பட்டது!")
+                    }
+                    if (existingStatus == "CANCELLED") {
+                        throw Exception("Order cancelled by customer. / ஆர்டர் வாடிக்கையாளரால் ரத்து செய்யப்பட்டது.")
+                    }
+                }
+                
+                if (rideSnapshot.exists()) {
+                    val existingRiderUid = rideSnapshot.getString("riderUid")
+                    val existingStatus = rideSnapshot.getString("status") ?: "ACCEPTED"
+                    if (!existingRiderUid.isNullOrBlank() && existingRiderUid != riderUid) {
+                        throw Exception("Ride already accepted by another rider!")
+                    }
+                    if (existingStatus == "COMPLETED" || existingStatus == "DELIVERED") {
+                        throw Exception("Ride is already completed!")
+                    }
+                }
+                
+                // Update Order document in Firestore
+                val orderUpdates = mapOf(
+                    "status" to "ACCEPTED",
+                    "riderUid" to riderUid,
+                    "riderName" to riderName,
+                    "riderPhone" to riderPhone,
+                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+                transaction.update(orderRef, orderUpdates)
+                
+                // Update Ride document in Firestore
+                val rideUpdates = mapOf(
+                    "status" to "PICKING_UP",
+                    "riderUid" to riderUid,
+                    "riderName" to riderName,
+                    "riderPhone" to riderPhone,
+                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+                transaction.update(rideRef, rideUpdates)
+                
                 null
             }.await()
             Result.success(Unit)

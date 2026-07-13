@@ -6,6 +6,10 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkRequest
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -25,6 +29,7 @@ class LocationTrackingService : Service() {
     private var lastLat = 0.0
     private var lastLng = 0.0
     private var rideId = 0L
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     companion object {
         const val EXTRA_RIDE_ID = "ride_id"
@@ -38,6 +43,7 @@ class LocationTrackingService : Service() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
+        registerNetworkResilience()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -64,7 +70,7 @@ class LocationTrackingService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Lyo GPS Location Tracking",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Lyo system active GPS runner for live delivery updates"
             }
@@ -79,9 +85,36 @@ class LocationTrackingService : Service() {
             .setContentText("அருகிலுள்ள வாடிக்கையாளருக்கு உங்களது நேரடி இருப்பிடம் பகிர்கிறது... (Active dynamic GPS updates)")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
+    }
+
+    private fun registerNetworkResilience() {
+        try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (connectivityManager != null) {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                networkCallback = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        super.onAvailable(network)
+                        android.util.Log.d("TRACK_NET", "Internet connection restored. Forcing Firestore sync resume...")
+                        try {
+                            FirebaseFirestore.getInstance().enableNetwork().addOnCompleteListener {
+                                android.util.Log.d("TRACK_NET", "Firestore network successfully enabled / synchronized.")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("TRACK_NET", "Failed enabling Firestore network: ${e.message}")
+                        }
+                    }
+                }
+                connectivityManager.registerNetworkCallback(request, networkCallback!!)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("TRACK_NET", "Failed to register network resilience callback: ${e.message}")
+        }
     }
 
     private fun startLocationUpdates() {
@@ -94,6 +127,12 @@ class LocationTrackingService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
+                    // Run security validation checks first
+                    if (!com.example.util.GpsSecurityValidator.validateLocation(rideId, location)) {
+                        android.util.Log.w("GPS_SEC", "GPS security validation failed for location. Discarding.")
+                        return
+                    }
+
                     val lat = location.latitude
                     val lng = location.longitude
 
@@ -142,6 +181,14 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         if (::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+        networkCallback?.let { callback ->
+            try {
+                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                connectivityManager?.unregisterNetworkCallback(callback)
+            } catch (e: Exception) {
+                android.util.Log.e("TRACK_NET", "Failed to unregister network resilience callback: ${e.message}")
+            }
         }
         serviceScope.cancel()
         super.onDestroy()
