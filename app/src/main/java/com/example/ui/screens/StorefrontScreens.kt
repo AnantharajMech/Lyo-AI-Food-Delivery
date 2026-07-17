@@ -37,6 +37,7 @@ import com.example.data.database.OrderItem
 import com.example.data.database.Category
 import com.example.data.database.isCurrentlyOpen
 import com.example.data.database.isCurrentlyVisible
+import com.example.data.database.getPromoOffer
 import com.example.data.database.isCurrentlyAvailable
 import com.example.data.database.isTrulyVeg
 import com.example.data.database.SavedAddress
@@ -551,7 +552,8 @@ fun StorefrontDashboardScreen(
                 val activeSessions by viewModel.repository.activeSessions.collectAsState()
                 val myDeviceId = remember { com.example.data.repository.LyoFirebaseHelper.getDeviceId(context) }
                 val otherSessionsCount = activeSessions.count { it.deviceId != myDeviceId }
-                if (otherSessionsCount > 0) {
+                var isMultiDeviceBannerDismissed by remember(currentUser?.phone) { mutableStateOf(false) }
+                if (otherSessionsCount > 0 && !isMultiDeviceBannerDismissed) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -561,26 +563,43 @@ fun StorefrontDashboardScreen(
                             .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
                             .padding(10.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Warning,
-                                contentDescription = "warning",
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "Multiple devices are logged in with this account!",
-                                    color = Color(0xFF92400E),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = "warning",
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Text(
-                                    text = "உங்கள் கணக்கு வேறு சாதனங்களிலும் லாகின் செய்யப்பட்டுள்ளது.",
-                                    color = Color(0xFF92400E).copy(alpha = 0.8f),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Multiple devices are logged in with this account!",
+                                        color = Color(0xFF92400E),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "உங்கள் கணக்கு வேறு சாதனங்களிலும் லாகின் செய்யப்பட்டுள்ளது.",
+                                        color = Color(0xFF92400E).copy(alpha = 0.8f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { isMultiDeviceBannerDismissed = true }) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = Color(0xFF92400E),
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
@@ -657,6 +676,7 @@ fun StorefrontDashboardScreen(
             }
 
             if (showCorrectionMapDialog) {
+                var geocodeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                 Lyo3DDialog(onDismissRequest = { showCorrectionMapDialog = false }) {
                     Column(modifier = Modifier.fillMaxWidth().height(420.dp)) {
                         Text(
@@ -674,7 +694,9 @@ fun StorefrontDashboardScreen(
                                 onLocationPicked = { pickedLat, pickedLng ->
                                     correctionLat = pickedLat
                                     correctionLng = pickedLng
-                                    coroutineScope.launch {
+                                    geocodeJob?.cancel()
+                                    geocodeJob = coroutineScope.launch {
+                                        kotlinx.coroutines.delay(600)
                                         try {
                                             val geoCoder = android.location.Geocoder(context, java.util.Locale.getDefault())
                                             val addresses = geoCoder.getFromLocation(pickedLat, pickedLng, 1)
@@ -921,7 +943,12 @@ fun StorefrontDashboardScreen(
                                 .weight(1f),
                             contentPadding = PaddingValues(bottom = 80.dp)
                         ) {
-                            // 1. SEARCH BOX SECTION (Placed directly below Address header)
+                            // 1. HIGH-FIDELITY HERO BANNERS (Compact offer carousel) - First visual highlight of the home screen below location
+                            item {
+                                LiquidHeroBanners(promoBanners = promoBanners)
+                            }
+
+                            // 2. SEARCH BOX SECTION - Placed directly below the Hero Banner
                             item {
                                 Box(
                                     modifier = Modifier
@@ -958,7 +985,7 @@ fun StorefrontDashboardScreen(
                                 }
                             }
 
-                            // 2. CATEGORIES CHIPS SECTION (Placed directly below Search Bar)
+                            // 3. CATEGORIES CHIPS SECTION - Placed below the Search Bar
                             stickyHeader {
                                 Column(
                                     modifier = Modifier
@@ -972,7 +999,7 @@ fun StorefrontDashboardScreen(
                                         fontWeight = FontWeight.Black,
                                         color = LyoColors.TextSecondary,
                                         letterSpacing = 1.5.sp,
-                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
                                     )
 
                                     val activeCategories = remember(globalCategories) {
@@ -980,42 +1007,51 @@ fun StorefrontDashboardScreen(
                                     }
                                     LazyRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         // "All" item first
                                         item {
                                             val isSelected = activeFilter == "All"
+                                            val scale by animateFloatAsState(if (isSelected) 1.06f else 1.0f, label = "scaleAll")
+                                            val cardColor = if (isSelected) LyoColors.AccentOrange else LyoColors.CardSlate
+                                            val tintColor = if (isSelected) Color.White else LyoColors.AmberYellow
+                                            val borderCol = if (isSelected) Color.White.copy(alpha = 0.8f) else LyoColors.GlassBorder.copy(alpha = 0.5f)
+                                            val elevation = if (isSelected) 4.dp else 1.dp
+                                            
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
+                                                    .graphicsLayer(scaleX = scale, scaleY = scale)
+                                                    .clip(RoundedCornerShape(12.dp))
                                                     .clickable { viewModel.selectedCategoryFilter.value = "All" }
-                                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(56.dp)
-                                                        .clip(CircleShape)
-                                                        .background(if (isSelected) LyoColors.AccentOrange else LyoColors.CardSlate)
+                                                        .size(46.dp)
+                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(14.dp), clip = false)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(cardColor)
                                                         .border(
-                                                            width = 1.5.dp,
-                                                            color = if (isSelected) Color.White else LyoColors.GlassBorder,
-                                                            shape = CircleShape
+                                                            width = 1.dp,
+                                                            color = borderCol,
+                                                            shape = RoundedCornerShape(14.dp)
                                                         ),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Filled.Storefront,
                                                         contentDescription = "All",
-                                                        tint = if (isSelected) Color.White else LyoColors.AmberYellow,
-                                                        modifier = Modifier.size(24.dp)
+                                                        tint = tintColor,
+                                                        modifier = Modifier.size(20.dp)
                                                     )
                                                 }
-                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Spacer(modifier = Modifier.height(5.dp))
                                                 Text(
                                                     text = "All",
                                                     color = if (isSelected) LyoColors.AccentOrange else LyoColors.TextPrimary,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                                                     fontSize = 11.sp,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
@@ -1034,36 +1070,45 @@ fun StorefrontDashboardScreen(
                                         items(activeCategories, key = { it.id }) { cat ->
                                             val isSelected = activeFilter == cat.nameEn
                                             val catColor = try { Color(android.graphics.Color.parseColor(cat.accentColor)) } catch(e: Exception) { LyoColors.AccentOrange }
+                                            val scale by animateFloatAsState(if (isSelected) 1.06f else 1.0f, label = "scale_${cat.id}")
+                                            val cardColor = if (isSelected) catColor else LyoColors.CardSlate
+                                            val tintColor = if (isSelected) Color.White else catColor
+                                            val borderCol = if (isSelected) Color.White.copy(alpha = 0.8f) else catColor.copy(alpha = 0.25f)
+                                            val elevation = if (isSelected) 4.dp else 1.dp
+                                            
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
+                                                    .graphicsLayer(scaleX = scale, scaleY = scale)
+                                                    .clip(RoundedCornerShape(12.dp))
                                                     .clickable { viewModel.selectedCategoryFilter.value = cat.nameEn }
-                                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(56.dp)
-                                                        .clip(CircleShape)
-                                                        .background(if (isSelected) catColor else LyoColors.CardSlate)
+                                                        .size(46.dp)
+                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(14.dp), clip = false)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(cardColor)
                                                         .border(
-                                                            width = 1.5.dp,
-                                                            color = if (isSelected) Color.White else catColor.copy(alpha = 0.3f),
-                                                            shape = CircleShape
+                                                            width = 1.dp,
+                                                            color = borderCol,
+                                                            shape = RoundedCornerShape(14.dp)
                                                         ),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
                                                         imageVector = getIconForCategoryKey(cat.iconKey),
                                                         contentDescription = cat.nameEn,
-                                                        tint = if (isSelected) Color.White else catColor,
-                                                        modifier = Modifier.size(24.dp)
+                                                        tint = tintColor,
+                                                        modifier = Modifier.size(20.dp)
                                                     )
                                                 }
-                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Spacer(modifier = Modifier.height(5.dp))
                                                 Text(
                                                     text = cat.nameEn,
                                                     color = if (isSelected) catColor else LyoColors.TextPrimary,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                                                     fontSize = 11.sp,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
@@ -1081,16 +1126,11 @@ fun StorefrontDashboardScreen(
                                 }
                             }
 
-                            // 3. HIGH-FIDELITY HERO BANNERS (Compact offer carousel placed directly below Category chips)
-                            item {
-                                LiquidHeroBanners(promoBanners = promoBanners)
-                            }
-
                             // ✨ LYO AI PERSONALIZED RECOMMENDATIONS CAROUSEL
                             if (aiRecommendations.isNotEmpty() && searchQuery.isBlank() && activeFilter == "All") {
                                 item {
                                     Text(
-                                        text = "✨ LYO AI PERSONALIZED RECOMMENDATIONS",
+                                        text = "✨ Lyo AI Personalized Recommendations",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Black,
                                         color = LyoColors.AccentOrange,
@@ -1196,7 +1236,7 @@ fun StorefrontDashboardScreen(
                                     fontWeight = FontWeight.Black,
                                     color = LyoColors.TextSecondary,
                                     letterSpacing = 1.5.sp,
-                                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp)
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 12.dp)
                                 )
                             }
 
@@ -1390,22 +1430,24 @@ fun StorefrontDashboardScreen(
                                                 horizontalAlignment = Alignment.End,
                                                 verticalArrangement = Arrangement.Center
                                             ) {
-                                                // Offer badge (e.g. "30% OFF")
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(LyoColors.AccentOrange)
-                                                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "30% OFF",
-                                                        color = Color.White,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Black
-                                                    )
+                                                val promoOffer = partner.getPromoOffer()
+                                                if (promoOffer != null) {
+                                                    // Offer badge (e.g. "30% OFF")
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(LyoColors.AccentOrange)
+                                                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = promoOffer,
+                                                            color = Color.White,
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Black
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.height(6.dp))
                                                 }
-
-                                                Spacer(modifier = Modifier.height(6.dp))
 
                                                 // Delivery fee info
                                                 Text(
@@ -2542,6 +2584,7 @@ fun CustomerProfileSection(
                     }
 
                     if (showAddressMapDialog) {
+                        var geocodeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                         Lyo3DDialog(onDismissRequest = { showAddressMapDialog = false }) {
                             Column(modifier = Modifier.fillMaxWidth().height(420.dp)) {
                                 Text(
@@ -2559,7 +2602,9 @@ fun CustomerProfileSection(
                                         onLocationPicked = { pickedLat, pickedLng ->
                                             newAddressLat = pickedLat
                                             newAddressLng = pickedLng
-                                            coroutineScope.launch {
+                                            geocodeJob?.cancel()
+                                            geocodeJob = coroutineScope.launch {
+                                                kotlinx.coroutines.delay(600)
                                                 try {
                                                     val geoCoder = android.location.Geocoder(ctx, java.util.Locale.getDefault())
                                                     val addresses = geoCoder.getFromLocation(pickedLat, pickedLng, 1)
@@ -4865,7 +4910,7 @@ fun VendorProfileScreen(
 
         val visibleCategories = remember(categories, menuItems, selectedVegFilter) {
             val base = categories.filter { it.isCurrentlyVisible }
-            when (selectedVegFilter) {
+            val filteredBase = when (selectedVegFilter) {
                 "VEG" -> {
                     val vegCategoryIds = menuItems.filter { it.isTrulyVeg }.map { it.categoryId }.toSet()
                     base.filter { vegCategoryIds.contains(it.id) }
@@ -4876,15 +4921,48 @@ fun VendorProfileScreen(
                 }
                 else -> base
             }
+            val allCategory = Category(
+                id = -99L,
+                vendorId = partner.id,
+                nameEn = "ALL ITEMS",
+                nameTa = "அனைத்தும்",
+                sortOrder = -1,
+                isHidden = false,
+                isActive = true
+            )
+            listOf(allCategory) + filteredBase
         }
         val activeCategory = if (visibleCategories.isNotEmpty() && selectedCategoryIndex < visibleCategories.size) visibleCategories[selectedCategoryIndex] else null
+
+        val aiTargetSearchQuery by viewModel.aiTargetSearchQuery.collectAsState()
+        val aiTargetCategoryId by viewModel.aiTargetCategoryId.collectAsState()
+
+        LaunchedEffect(aiTargetSearchQuery, aiTargetCategoryId, visibleCategories) {
+            if (aiTargetSearchQuery != null || aiTargetCategoryId != null) {
+                if (aiTargetCategoryId != null) {
+                    val catIndex = visibleCategories.indexOfFirst { it.id == aiTargetCategoryId }
+                    if (catIndex >= 0) {
+                        selectedCategoryIndex = catIndex
+                    }
+                }
+                if (aiTargetSearchQuery != null) {
+                    menuSearchQuery = aiTargetSearchQuery ?: ""
+                }
+                viewModel.aiTargetSearchQuery.value = null
+                viewModel.aiTargetCategoryId.value = null
+            }
+        }
+
         val activeItems = remember(menuItems, activeCategory, menuSearchQuery, selectedVegFilter) {
-            val baseItems = if (menuSearchQuery.isBlank()) {
-                if (activeCategory != null) {
-                    menuItems.filter { it.categoryId == activeCategory.id }
-                } else menuItems
+            val filteredByCategory = if (activeCategory != null && activeCategory.id != -99L) {
+                menuItems.filter { it.categoryId == activeCategory.id }
             } else {
-                menuItems.filter {
+                menuItems
+            }
+            val baseItems = if (menuSearchQuery.isBlank()) {
+                filteredByCategory
+            } else {
+                filteredByCategory.filter {
                     it.nameEn.contains(menuSearchQuery, ignoreCase = true) ||
                     it.nameTa.contains(menuSearchQuery, ignoreCase = true) ||
                     it.descEn.contains(menuSearchQuery, ignoreCase = true)
@@ -5184,6 +5262,35 @@ fun VendorProfileScreen(
                                     )
                                 }
                             }
+
+                            val promoOffer = partner.getPromoOffer()
+                            if (promoOffer != null) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0x1AFF6B00))
+                                        .border(1.dp, Color(0x4DFF6B00), RoundedCornerShape(8.dp))
+                                        .padding(8.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Filled.LocalOffer,
+                                            contentDescription = "Promo Offer",
+                                            tint = LyoColors.AccentOrange,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "PROMO: $promoOffer",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -5264,32 +5371,7 @@ fun VendorProfileScreen(
                     }
                 }
 
-                // 3.5) Luxury Premium Menu Item Search Box
-                item {
-                    Lyo3DSearchBar(
-                        value = menuSearchQuery,
-                        onValueChange = { menuSearchQuery = it },
-                        placeholder = "Search dishes...",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        trailingIcon = {
-                            if (menuSearchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { menuSearchQuery = "" },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Close, 
-                                        contentDescription = "Clear", 
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
+
 
                 // Veg/Non-Veg Quick Switch Segmented Control - Single tap lightning-fast sorting
                 item {
@@ -5442,6 +5524,104 @@ fun VendorProfileScreen(
                     }
                 }
 
+                // 4) Horizontal category selection selector tabs + Search Bar (Sticky)
+                stickyHeader {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Color(0xFF090D16), // Solid dark color matching Lyo style to cleanly block items scrolling behind it
+                        shadowElevation = 4.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            if (visibleCategories.isNotEmpty()) {
+                                LazyRow(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(visibleCategories.size, key = { visibleCategories[it].id }) { idx ->
+                                        val cat = visibleCategories[idx]
+                                        val isSelected = selectedCategoryIndex == idx
+                                        
+                                        // 3D Glass / Liquid tab effect
+                                        Box(
+                                            modifier = Modifier
+                                                .height(36.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) Color(0xFFFF7A1A) else Color(0xFF14233D))
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = if (isSelected) Color(0xFFFF7A1A) else Color(0x22B9C6D8),
+                                                    shape = RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable { selectedCategoryIndex = idx }
+                                                .padding(horizontal = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = cat.nameEn,
+                                                    color = if (isSelected) Color.White else Color(0xFFB9C6D8),
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (cat.nameTa.isNotBlank() && cat.nameTa != cat.nameEn) {
+                                                    Text(
+                                                        text = cat.nameTa,
+                                                        color = if (isSelected) Color.White.copy(alpha = 0.85f) else Color(0xFF8E9BAE),
+                                                        fontSize = 9.sp,
+                                                        lineHeight = 10.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Lyo3DSearchBar(
+                                value = menuSearchQuery,
+                                onValueChange = { menuSearchQuery = it },
+                                placeholder = if (activeCategory != null && activeCategory.id != -99L) {
+                                    "Search in ${activeCategory.nameEn}..."
+                                } else {
+                                    "Search dishes..."
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                trailingIcon = {
+                                    if (menuSearchQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { menuSearchQuery = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Close, 
+                                                contentDescription = "Clear", 
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
                 if (menuSearchQuery.isNotBlank()) {
                     item {
                         Row(
@@ -5462,70 +5642,6 @@ fun VendorProfileScreen(
                                 color = LyoColors.TextSecondary,
                                 fontSize = 11.sp
                             )
-                        }
-                    }
-                }
-
-                // 4) Horizontal category selection selector tabs (Sticky)
-                if (visibleCategories.isNotEmpty() && menuSearchQuery.isBlank()) {
-                    stickyHeader {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color(0xFF090D16), // Solid dark color matching Lyo style to cleanly block items scrolling behind it
-                            shadowElevation = 2.dp
-                        ) {
-                            LazyRow(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 5.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                items(visibleCategories.size, key = { visibleCategories[it].id }) { idx ->
-                                    val cat = visibleCategories[idx]
-                                    val isSelected = selectedCategoryIndex == idx
-                                    
-                                    // 3D Glass / Liquid tab effect
-                                    Box(
-                                        modifier = Modifier
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isSelected) Color(0xFFFF7A1A) else Color(0xFF14233D))
-                                            .border(
-                                                width = 1.dp,
-                                                color = if (isSelected) Color(0xFFFF7A1A) else Color(0x22B9C6D8),
-                                                shape = RoundedCornerShape(10.dp)
-                                            )
-                                            .clickable { selectedCategoryIndex = idx }
-                                            .padding(horizontal = 12.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            Text(
-                                                text = cat.nameEn,
-                                                color = if (isSelected) Color.White else Color(0xFFB9C6D8),
-                                                fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            if (cat.nameTa.isNotBlank() && cat.nameTa != cat.nameEn) {
-                                                Text(
-                                                    text = cat.nameTa,
-                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else Color(0xFF8E9BAE),
-                                                    fontSize = 9.sp,
-                                                    lineHeight = 10.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -6307,6 +6423,7 @@ fun CheckoutCartScreen(
     var sliderTipValue by remember { mutableFloatStateOf(0f) }
     var showConfirmOrderDialog by remember { mutableStateOf(false) }
     var isAddressConfirmed by remember { mutableStateOf(false) }
+    var billExpanded by remember { mutableStateOf(false) }
 
     val isSessionRestoring = remember(currentUser) {
         com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null && currentUser == null
@@ -6324,16 +6441,27 @@ fun CheckoutCartScreen(
     val savedAddresses by viewModel.savedAddresses.collectAsState(initial = emptyList())
 
     // Auto-prepopulate state with the logged-in user's profile info on screen mount if available
-    var deliveryAddress by remember(currentUser) { mutableStateOf(currentUser?.address ?: "") }
-    var deliveryLat by remember(currentUser) { mutableStateOf(currentUser?.lat ?: 0.0) }
-    var deliveryLng by remember(currentUser) { mutableStateOf(currentUser?.lng ?: 0.0) }
+    var deliveryAddress by remember { mutableStateOf("") }
+    var deliveryLat by remember { mutableStateOf(0.0) }
+    var deliveryLng by remember { mutableStateOf(0.0) }
+    var isAddressInitialized by remember { mutableStateOf(false) }
 
-    LaunchedEffect(savedAddresses) {
-        val defaultAddress = savedAddresses.find { it.isDefault }
-        if (defaultAddress != null) {
-            deliveryAddress = defaultAddress.addressLine
-            deliveryLat = defaultAddress.latitude
-            deliveryLng = defaultAddress.longitude
+    LaunchedEffect(savedAddresses, currentUser) {
+        if (!isAddressInitialized) {
+            val defaultAddress = savedAddresses.find { it.isDefault }
+            if (defaultAddress != null) {
+                deliveryAddress = defaultAddress.addressLine
+                deliveryLat = defaultAddress.latitude
+                deliveryLng = defaultAddress.longitude
+                isAddressInitialized = true
+            } else if (currentUser != null) {
+                deliveryAddress = currentUser?.address ?: ""
+                deliveryLat = currentUser?.lat ?: 0.0
+                deliveryLng = currentUser?.lng ?: 0.0
+                if (deliveryAddress.isNotBlank()) {
+                    isAddressInitialized = true
+                }
+            }
         }
     }
 
@@ -6364,6 +6492,7 @@ fun CheckoutCartScreen(
     }
 
     if (showMapDialog) {
+        var geocodeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
         Lyo3DDialog(onDismissRequest = { showMapDialog = false }) {
             Column(modifier = Modifier.fillMaxWidth().height(420.dp)) {
                 Text(
@@ -6381,7 +6510,9 @@ fun CheckoutCartScreen(
                         onLocationPicked = { pickedLat, pickedLng ->
                             deliveryLat = pickedLat
                             deliveryLng = pickedLng
-                            coroutineScope.launch {
+                            geocodeJob?.cancel()
+                            geocodeJob = coroutineScope.launch {
+                                kotlinx.coroutines.delay(600)
                                 try {
                                     val geoCoder = android.location.Geocoder(context, java.util.Locale.getDefault())
                                     val addresses = geoCoder.getFromLocation(pickedLat, pickedLng, 1)
@@ -6837,7 +6968,7 @@ fun CheckoutCartScreen(
                 if (recommendedItems.isNotEmpty()) {
                     item {
                         Text(
-                            text = "✨ LYO AI SMART-SAVER RECOMMENDATIONS",
+                            text = "✨ Lyo AI Smart-Saver Recommendations",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
                             color = LyoColors.AccentOrange,
@@ -7088,102 +7219,285 @@ fun CheckoutCartScreen(
                     )
 
                     GlassCard(modifier = Modifier.fillMaxWidth()) {
-                        Row(
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // 1. Basket Subtotal
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Basket Subtotal", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                Text("₹${subtotal.toInt()}", color = Color.White, fontSize = 13.sp)
+                            }
+
+                            if (billExpanded) {
+                                // 2. Item Discount
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Item Discount", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Text("₹0", color = Color.White, fontSize = 13.sp)
+                                }
+
+                                // 3. Coupon Discount
+                                if (discount > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Coupon Discount ($appliedCouponCode)", color = LyoColors.VegGreen, fontSize = 13.sp)
+                                        Text("- ₹${discount.toInt()}", color = LyoColors.VegGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // 4. Offer Savings
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Offer Savings", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Text("₹0", color = Color.White, fontSize = 13.sp)
+                                }
+
+                                // 5. Packaging Charge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Packaging Charge", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("₹15", color = LyoColors.TextSecondary, fontSize = 13.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("FREE", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // 6. Platform Fee
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Platform Fee", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("₹5", color = LyoColors.TextSecondary, fontSize = 13.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("FREE", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // 7. Delivery Charge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Delivery Charge", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Text(
+                                        text = if (deliveryFee == 0.0) "FREE" else "₹${deliveryFee.toInt()}",
+                                        color = if (deliveryFee == 0.0) LyoColors.VegGreen else Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (deliveryFee == 0.0) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+
+                                // 8. Peak Charge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Peak Charge", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Text("₹0", color = Color.White, fontSize = 13.sp)
+                                }
+
+                                // 9. Rain Charge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Rain Charge", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                    Text("₹0", color = Color.White, fontSize = 13.sp)
+                                }
+
+                                // 10. GST / Tax
+                                val gst = if (viewModel.repository.gstEnabled) (subtotal * (viewModel.repository.gstRate / 100.0)) else 0.0
+                                if (viewModel.repository.gstEnabled) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("GST (${viewModel.repository.gstRate}%)", color = LyoColors.TextSecondary, fontSize = 13.sp)
+                                        Text("₹${gst.toInt()}", color = Color.White, fontSize = 13.sp)
+                                    }
+                                }
+
+                                // 11. Tip
+                                if (tipAmount > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Saviour Gratuity Donation", color = LyoColors.LiveCyan, fontSize = 13.sp)
+                                        Text("+ ₹${tipAmount.toInt()}", color = LyoColors.LiveCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // 12. Loyalty Points Discount
+                                if (loyaltyDiscount > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Loyalty Points Applied", color = LyoColors.AccentOrange, fontSize = 13.sp)
+                                        Text("- ₹${loyaltyDiscount.toInt()}", color = LyoColors.AccentOrange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            // Toggle Button for Collapsible Breakdown
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { billExpanded = !billExpanded }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (billExpanded) "Hide Detailed Breakdown (விவரங்களை மறை)" else "Show Detailed Breakdown (விவரங்களை காண்பி)",
+                                    color = LyoColors.AccentOrange,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = if (billExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                    contentDescription = null,
+                                    tint = LyoColors.AccentOrange,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            Divider(color = Color(0x1AFFFFFF), modifier = Modifier.padding(vertical = 8.dp))
+
+                            // 13. Grand Total
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Grand Total", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text("₹${finalTotalAmount.toInt()}", color = LyoColors.AccentOrange, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            }
+
+                            Divider(color = Color(0x1AFFFFFF), modifier = Modifier.padding(vertical = 8.dp))
+
+                            // 14. Estimated Delivery Time
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Estimated Delivery Time", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                Text("⚡ ${partner.deliveryTime} mins", color = LyoColors.AccentOrange, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // 15. Payment Method
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Payment Method", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                Text("Cash / UPI on Delivery", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+
+                // 7. SAVINGS SUMMARY
+                item {
+                    val couponSavings = discount
+                    val offerSavings = 0.0
+                    val freeDeliverySavings = if (deliveryFee == 0.0) partner.deliveryFee else 0.0
+                    val waivedPackagingSavings = 15.0
+                    val waivedPlatformSavings = 5.0
+                    val totalSavings = couponSavings + offerSavings + freeDeliverySavings + waivedPackagingSavings + waivedPlatformSavings
+
+                    if (totalSavings > 0.0) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x1A22C55E))
+                                .border(1.dp, LyoColors.VegGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                .padding(16.dp)
                         ) {
-                            Text("Basket Subtotal", color = LyoColors.TextSecondary, fontSize = 13.sp)
-                            Text("₹${subtotal.toInt()}", color = Color.White, fontSize = 13.sp)
-                        }
-
-                        if (viewModel.repository.gstEnabled) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("GST (${viewModel.repository.gstRate}%)", color = LyoColors.TextSecondary, fontSize = 13.sp)
-                                Text("₹${(subtotal * (viewModel.repository.gstRate / 100.0)).toInt()}", color = Color.White, fontSize = 13.sp)
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Redeem,
+                                        contentDescription = "Savings",
+                                        tint = LyoColors.VegGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "You saved today! (இன்றைய சேமிப்பு)",
+                                        color = LyoColors.VegGreen,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(10.dp))
+                                
+                                if (couponSavings > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("• Coupon Discount ($appliedCouponCode)", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                        Text("₹${couponSavings.toInt()}", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                                
+                                if (freeDeliverySavings > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("• Promotional Free Delivery", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                        Text("₹${freeDeliverySavings.toInt()}", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("• Waived Packaging Charges", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                    Text("₹${waivedPackagingSavings.toInt()}", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                }
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("• Waived Platform Fee", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                    Text("₹${waivedPlatformSavings.toInt()}", color = LyoColors.VegGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                }
+                                
+                                Divider(color = LyoColors.VegGreen.copy(alpha = 0.2f), modifier = Modifier.padding(vertical = 8.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Total Savings", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("₹${totalSavings.toInt()}", color = LyoColors.VegGreen, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                                }
                             }
                         }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Transit Delivery Charges", color = LyoColors.TextSecondary, fontSize = 13.sp)
-                            Text(
-                                text = if (deliveryFee == 0.0) "FREE" else "₹${deliveryFee.toInt()}",
-                                color = if (deliveryFee == 0.0) LyoColors.VegGreen else Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = if (deliveryFee == 0.0) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-
-                        if (discount > 0.0) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Voucher Savings ($appliedCouponCode)", color = LyoColors.VegGreen, fontSize = 13.sp)
-                                Text("- ₹${discount.toInt()}", color = LyoColors.VegGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        if (loyaltyDiscount > 0.0) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Loyalty Points Applied", color = LyoColors.AmberYellow, fontSize = 13.sp)
-                                Text("- ₹${loyaltyDiscount.toInt()}", color = LyoColors.AmberYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        if (tipAmount > 0.0) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Saviour Gratuity Donation", color = LyoColors.AmberYellow, fontSize = 13.sp)
-                                Text("+ ₹${tipAmount.toInt()}", color = LyoColors.AmberYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Divider(color = Color(0x1affffff), modifier = Modifier.padding(vertical = 8.dp))
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Total Payable Amount", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${finalTotalAmount.toInt()}", color = LyoColors.AccentOrange, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                        }
-
-                        // Local Packaging note
-                        Text(
-                            text = "Venue platform packaging charges calculated and added to total.",
-                            color = LyoColors.TextSecondary,
-                            fontSize = 10.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 10.dp)
-                        )
                     }
                 }
             }
@@ -7213,12 +7527,7 @@ fun CheckoutCartScreen(
                     }
                     
                     val isButtonEnabled = !isBelowMin && !isSessionRestoring
-                    LyoButton(
-                        text = when {
-                            isSessionRestoring -> "Restoring Session..."
-                            isBelowMin -> "NOT ELIGIBLE (NEED ₹${remainingAmount.toInt()} MORE)"
-                            else -> "CONFIRM TRANSACTION & BOOK COURIER"
-                        },
+                    Button(
                         onClick = {
                             if (!isBelowMin) {
                                 if (deliveryLat == 0.0 || deliveryLng == 0.0 || deliveryAddress.isBlank()) {
@@ -7232,12 +7541,40 @@ fun CheckoutCartScreen(
                                 }
                             }
                         },
-                        colors = if (isBelowMin || isSessionRestoring) ButtonDefaults.buttonColors(containerColor = Color(0x33EF4444), contentColor = Color.White.copy(alpha = 0.5f)) else ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                        colors = if (isBelowMin || isSessionRestoring) {
+                            ButtonDefaults.buttonColors(
+                                containerColor = Color(0x33EF4444),
+                                contentColor = Color.White.copy(alpha = 0.5f),
+                                disabledContainerColor = Color(0x1AEF4444)
+                            )
+                        } else {
+                            ButtonDefaults.buttonColors(
+                                containerColor = LyoColors.AccentOrange,
+                                contentColor = Color.White
+                            )
+                        },
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 2.dp,
+                            pressedElevation = 4.dp
+                        ),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(56.dp)
                             .testTag("buy_button"),
                         enabled = isButtonEnabled
-                    )
+                    ) {
+                        Text(
+                            text = when {
+                                isSessionRestoring -> "Restoring Session..."
+                                isBelowMin -> "NOT ELIGIBLE (NEED ₹${remainingAmount.toInt()} MORE)"
+                                else -> "Confirm Order"
+                            },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
@@ -7757,6 +8094,10 @@ fun LyoAiChatbotSection(
     var userText by remember { mutableStateOf("") }
     var showClearCartConfirm by remember { mutableStateOf(false) }
     var showPlaceOrderConfirm by remember { mutableStateOf(false) }
+    var showUpiPaymentConfirm by remember { mutableStateOf(false) }
+    var upiTransactionIdInput by remember { mutableStateOf("") }
+    val activeUpiId by viewModel.repository.activeUpiId.collectAsState()
+    val activeUpiName by viewModel.repository.activeUpiName.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.initLyoAiChat()
@@ -8076,7 +8417,7 @@ fun LyoAiChatbotSection(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "LYO AI CONCIERGE",
+                        text = "Lyo AI Concierge",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 11.sp,
                         color = Color.White,
@@ -8449,6 +8790,8 @@ fun LyoAiChatbotSection(
                                                             .clip(RoundedCornerShape(6.dp))
                                                             .background(Color(0xFF3B82F6))
                                                             .clickable {
+                                                                viewModel.aiTargetCategoryId.value = menuItem.categoryId
+                                                                viewModel.aiTargetSearchQuery.value = menuItem.nameEn
                                                                 onNavigateToVendor(vendor.id)
                                                             }
                                                             .padding(vertical = 4.dp),
@@ -8770,7 +9113,15 @@ fun LyoAiChatbotSection(
                                             .weight(1.2f)
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(Color(0xFF22C55E))
-                                            .clickable { viewModel.navigationTrigger.value = "CHECKOUT" }
+                                            .clickable {
+                                                val usr = viewModel.currentUser.value
+                                                if (usr == null || usr.phone.startsWith("99999")) {
+                                                    android.widget.Toast.makeText(context, "Please login first to place an order! 🔐 (தயவுசெய்து முதலில் லாகின் செய்யவும்!)", android.widget.Toast.LENGTH_LONG).show()
+                                                    viewModel.navigationTrigger.value = "LOGIN"
+                                                } else {
+                                                    viewModel.navigationTrigger.value = "CHECKOUT"
+                                                }
+                                            }
                                             .padding(vertical = 5.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -8875,7 +9226,7 @@ fun LyoAiChatbotSection(
                                     .background(if (isBelowMin) Color(0xFFEF4444) else Color(0xFF10B981))
                             )
                             Text(
-                                text = if (isBelowMin) "LYO AI SMART BASKET" else "LYO AI SMART BASKET ACTIVE",
+                                text = if (isBelowMin) "Lyo AI Smart Basket" else "Lyo AI Smart Basket Active",
                                 color = if (isBelowMin) Color(0xFFEF4444) else Color(0xFF10B981),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
@@ -9086,7 +9437,13 @@ fun LyoAiChatbotSection(
                                     android.util.Log.d("LyoAuthDebug", "• Local Repository User UID: ${currentUser?.uid ?: "NULL"}")
                                 }
                                 if (!isSessionRestoring) {
-                                    viewModel.navigationTrigger.value = "CHECKOUT"
+                                    val usr = currentUser
+                                    if (usr == null || usr.phone.startsWith("99999")) {
+                                        Toast.makeText(context, "Please login first to place an order! 🔐 (தயவுசெய்து முதலில் லாகின் செய்யவும்!)", Toast.LENGTH_LONG).show()
+                                        viewModel.navigationTrigger.value = "LOGIN"
+                                    } else {
+                                        viewModel.navigationTrigger.value = "CHECKOUT"
+                                    }
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
@@ -9138,15 +9495,21 @@ fun LyoAiChatbotSection(
                                     val finalLng = defaultAddr?.longitude ?: usr?.lng ?: 0.0
 
                                     val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-                                    if (usr == null && firebaseUser == null) {
-                                        Toast.makeText(context, "Please login first to place an order! 🔐", Toast.LENGTH_LONG).show()
+                                    val isGuestOrTest = usr == null || firebaseUser == null || usr.phone.startsWith("99999")
+                                    if (isGuestOrTest) {
+                                        Toast.makeText(context, "Please login first to place an order! 🔐 (தயவுசெய்து முதலில் லாகின் செய்யவும்!)", Toast.LENGTH_LONG).show()
                                         viewModel.navigationTrigger.value = "LOGIN"
                                     } else if (isBelowMin) {
                                         Toast.makeText(context, "மன்னிக்கவும்! குறைந்தபட்ச ஆர்டர் மதிப்பு ₹${activeVendorVal?.minOrderAmount?.toInt()} தேவை. கார்ட்டில் மேலும் உணவுகளை சேர்க்கவும்!", Toast.LENGTH_LONG).show()
                                     } else if (finalLat == 0.0 || finalLng == 0.0 || finalAddress.isBlank()) {
                                         Toast.makeText(context, "தயவுசெய்து உங்கள் முகவரியை Map-ல் select பண்ணவும் அல்லது GPS Auto-detect பயன்படுத்தவும் — இது இல்லாமல் டெலிவரி நபர் உங்கள் வீட்டைக் கண்டுபிடிக்க முடியாது!", Toast.LENGTH_LONG).show()
                                     } else {
-                                        showPlaceOrderConfirm = true
+                                        if (selectedPaymentMethod == "UPI") {
+                                            upiTransactionIdInput = ""
+                                            showUpiPaymentConfirm = true
+                                        } else {
+                                            showPlaceOrderConfirm = true
+                                        }
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
@@ -9454,6 +9817,185 @@ fun LyoAiChatbotSection(
                 },
                 dismissButton = {
                     TextButton(onClick = { showPlaceOrderConfirm = false }) {
+                        Text("CANCEL", color = LyoColors.TextSecondary)
+                    }
+                },
+                containerColor = Color(0xFF1E293B)
+            )
+        }
+
+        if (showUpiPaymentConfirm) {
+            val totalAmount = viewModel.getCartTotalAmount()
+            AlertDialog(
+                onDismissRequest = { showUpiPaymentConfirm = false },
+                title = {
+                    Column {
+                        Text(
+                            text = "📱 ஆன்லைன் பேமென்ட் (UPI Payment)",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "பணம் அனுப்பிவிட்டு ஆர்டரை உறுதிசெய்யவும்",
+                            color = LyoColors.AmberYellow,
+                            fontSize = 11.sp
+                        )
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "செலுத்த வேண்டிய தொகை (Total Pay):",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp
+                                )
+                                Text(
+                                    text = "₹${totalAmount.toInt()}",
+                                    color = LyoColors.AccentOrange,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("பெறுநர் பெயர் (Payee Name):", color = Color.Gray, fontSize = 9.sp)
+                            Text(activeUpiName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            Text("UPI ID:", color = Color.Gray, fontSize = 9.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = activeUpiId,
+                                    color = LyoColors.AmberYellow,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText("UPI ID", activeUpiId)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "UPI ID copied! 📋", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("COPY 📋", color = LyoColors.AccentOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                val upiUri = android.net.Uri.parse(
+                                    "upi://pay?pa=$activeUpiId" +
+                                    "&pn=${android.net.Uri.encode(activeUpiName)}" +
+                                    "&am=${totalAmount.toInt()}" +
+                                    "&cu=INR" +
+                                    "&tn=${android.net.Uri.encode("Order Payment")}"
+                                )
+                                val upiIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, upiUri)
+                                try {
+                                    context.startActivity(upiIntent)
+                                } catch (ex: Exception) {
+                                    Toast.makeText(context, "UPI ஆப் எதுவும் கிடைக்கவில்லை! UPI ஐடியை copy செய்து மேனுவலாக அனுப்பவும்.", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 10.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("👉 PAY VIA GPAY / PHONEPE / PAYTM 🚀", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = "பரிவர்த்தனை எண் (UPI Ref/UTR Number - 12 Digits):",
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            OutlinedTextField(
+                                value = upiTransactionIdInput,
+                                onValueChange = { input ->
+                                    if (input.all { it.isDigit() || it.isLetter() } && input.length <= 16) {
+                                        upiTransactionIdInput = input
+                                    }
+                                },
+                                placeholder = { Text("UTR No (எ.கா. 3123... அல்லது UPI Ref)", color = Color.Gray, fontSize = 11.sp) },
+                                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                                singleLine = true,
+                                shape = RoundedCornerShape(6.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = LyoColors.AccentOrange,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
+                                    cursorColor = LyoColors.AccentOrange
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                text = "பணம் அனுப்பியதும் வரும் 12 இலக்க எண்ணை இங்கு டைப் செய்யவும் (கட்டாயமில்லை, ஆனால் விரைவாக ஆர்டர் உறுதிசெய்ய உதவும்)",
+                                color = Color.Gray,
+                                fontSize = 8.5.sp
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    LyoButton(
+                        text = "உறுதி செய் (Confirm & Order)",
+                        onClick = {
+                            showUpiPaymentConfirm = false
+                            com.example.data.repository.LyoFirebaseHelper.transientUpiTransactionId = upiTransactionIdInput.trim()
+                            
+                            val usr = viewModel.currentUser.value
+                            val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                            val savedAddrs = viewModel.savedAddresses.value
+                            val defaultAddr = savedAddrs.find { it.isDefault }
+                            if (usr != null || firebaseUser != null) {
+                                viewModel.proceedToCheckout(
+                                    address = defaultAddr?.addressLine ?: usr?.address ?: "",
+                                    lat = defaultAddr?.latitude ?: usr?.lat ?: 11.5812,
+                                    lng = defaultAddr?.longitude ?: usr?.lng ?: 77.8465
+                                ) { generatedOrderId ->
+                                    viewModel.selectedTabState.value = "TRACKER"
+                                    Toast.makeText(context, "சாட்பாட் மூலமாக ஆர்டர் வெற்றிகரமாக சமர்ப்பிக்கப்பட்டது! 🛵", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    )
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUpiPaymentConfirm = false }) {
                         Text("CANCEL", color = LyoColors.TextSecondary)
                     }
                 },

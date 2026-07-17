@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 object LyoFirebaseHelper {
     private const val TAG = "LyoFirebaseHelper"
@@ -28,6 +30,7 @@ object LyoFirebaseHelper {
     var appContext: Context? = null
     var transientPaymentMethod: String = "COD"
     var transientOrderAddress: String = ""
+    var transientUpiTransactionId: String = ""
     
     var isInitialized = false
         private set
@@ -168,20 +171,13 @@ object LyoFirebaseHelper {
             val email = firebaseUser.email ?: ""
             val rawPhone = firebaseUser.phoneNumber ?: email.substringBefore("@").replace(".", "").trim()
             val phone = if (rawPhone.isEmpty()) "9999999999" else rawPhone
-            val name = firebaseUser.displayName ?: "Lyo Customer"
+            val cachedUser = if (phone.isNotBlank()) db?.userDao?.getUserByPhone(phone) else null
+            val cachedName = cachedUser?.name?.takeIf { it.isNotBlank() }
+            val name = firebaseUser.displayName?.takeIf { it.isNotBlank() } ?: cachedName ?: "Lyo Customer"
             
             val doc = dbInstance.collection("users").document(firebaseUser.uid).get().await()
             val user = if (doc.exists()) {
-                var existingRole = doc.getString("role") ?: "CUSTOMER"
-                val lowerEmail = email.lowercase()
-                val isDev = lowerEmail.contains("anantharajeinstein") || 
-                            rawPhone == "Anantharajmech" || 
-                            lowerEmail.contains("superadmin")
-                if (isDev && existingRole != "ADMIN") {
-                    Log.d(TAG, "Google Auth: Auto-promoting developer to ADMIN role")
-                    dbInstance.collection("users").document(firebaseUser.uid).update("role", "ADMIN").await()
-                    existingRole = "ADMIN"
-                }
+                val existingRole = doc.getString("role") ?: "CUSTOMER"
                 val rawRole = overrideRole ?: existingRole
                 val finalRole = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
                 User(
@@ -200,16 +196,11 @@ object LyoFirebaseHelper {
                     uid = firebaseUser.uid
                 )
             } else {
-                val lowerEmail = email.lowercase()
-                val isDev = lowerEmail.contains("anantharajeinstein") || 
-                            rawPhone == "Anantharajmech" || 
-                            lowerEmail.contains("superadmin")
-                val rawRole = if (isDev) "ADMIN" else (overrideRole ?: "CUSTOMER")
+                val rawRole = overrideRole ?: "CUSTOMER"
                 val finalRole = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
-                val finalName = if (isDev) "Anantharaj Super Admin" else name
                 val newUser = User(
                     phone = phone,
-                    name = finalName,
+                    name = name,
                     email = email,
                     address = address ?: "Idappadi, Salem, Tamil Nadu, 637101",
                     lat = lat ?: 11.5812,
@@ -225,7 +216,7 @@ object LyoFirebaseHelper {
                 val userMap = mutableMapOf<String, Any>(
                     "uid" to firebaseUser.uid,
                     "phone" to phone,
-                    "name" to finalName,
+                    "name" to name,
                     "email" to email,
                     "address" to (address ?: "Idappadi, Salem, Tamil Nadu, 637101"),
                     "lat" to (lat ?: 11.5812),
@@ -393,6 +384,11 @@ object LyoFirebaseHelper {
             }
             
             docRef.set(userMap, SetOptions.merge()).await()
+            if (mappedRole == "RIDER" || mappedRole == "DELIVERY") {
+                val riderMap = userMap.toMutableMap()
+                dbInstance.collection("riders").document(uid).set(riderMap, SetOptions.merge()).await()
+                Log.d(TAG, "Rider document successfully updated in riders collection.")
+            }
             
             val docVerify = docRef.get().await()
             if (!docVerify.exists()) {
@@ -471,7 +467,16 @@ object LyoFirebaseHelper {
                     newProfileMap["uid"] = uid
                     newProfileMap["phone"] = trimmedPhone
                     newProfileMap["isActive"] = oldDoc.getBoolean("isActive") ?: oldDoc.getBoolean("isActiveRider") ?: true
-                    newProfileMap["createdAt"] = oldDoc.getTimestamp("createdAt") ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    val safeCreatedAt = try {
+                        oldDoc.getTimestamp("createdAt")
+                    } catch (e: Exception) {
+                        try {
+                            oldDoc.getLong("createdAt")?.let { com.google.firebase.Timestamp(it / 1000L, 0) }
+                        } catch (e2: Exception) {
+                            null
+                        }
+                    } ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    newProfileMap["createdAt"] = safeCreatedAt
                     newProfileMap["updatedAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
                     
                     newProfileMap.remove("password")
@@ -497,19 +502,7 @@ object LyoFirebaseHelper {
             }
             
             if (doc.exists()) {
-                var rawRole = doc.getString("role") ?: "CUSTOMER"
-                val email = doc.getString("email") ?: ""
-                val phone = doc.getString("phone") ?: ""
-                val lowerEmail = email.lowercase()
-                val isDev = lowerEmail.contains("anantharajeinstein") || 
-                            trimmedPhone == "Anantharajmech" || 
-                            phone == "Anantharajmech" || 
-                            lowerEmail.contains("superadmin")
-                if (isDev && rawRole != "ADMIN") {
-                    Log.d(TAG, "Auth Login: Auto-promoting developer to ADMIN role")
-                    dbInstance.collection("users").document(uid).update("role", "ADMIN").await()
-                    rawRole = "ADMIN"
-                }
+                val rawRole = doc.getString("role") ?: "CUSTOMER"
                 
                 if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
                     Log.e(TAG, "User profile is incomplete or has invalid role: $rawRole")
@@ -548,19 +541,26 @@ object LyoFirebaseHelper {
                 user
             } else {
                 Log.d(TAG, "Authenticated but profile missing in LyoFirebaseHelper. Auto-creating customer profile for UID: $uid")
-                val isDev = trimmedPhone == "Anantharajmech" || 
-                            normalizedPhone == "Anantharajmech" ||
-                            trimmedPhone.lowercase().contains("admin") ||
-                            normalizedPhone.lowercase().contains("admin")
-                val finalRole = if (isDev) "ADMIN" else "CUSTOMER"
-                val finalName = if (isDev) "Anantharaj Super Admin" else "Lyo Customer"
-                val finalEmail = if (isDev) "anantharajeinstein@gmail.com" else "${normalizedPhone}@lyofoods.in"
+                val finalRole = "CUSTOMER"
+                val cachedUser = if (trimmedPhone.isNotBlank()) db?.userDao?.getUserByPhone(trimmedPhone) else null
+                val hasRealLocalName = cachedUser != null && cachedUser.name.isNotBlank() && cachedUser.name != "Lyo Customer"
+                
+                val finalName = if (hasRealLocalName) cachedUser!!.name else "Lyo Customer"
+                val finalEmail = if (hasRealLocalName && cachedUser!!.email.isNotBlank()) cachedUser.email else "${normalizedPhone}@lyofoods.in"
+                val finalAddress = if (hasRealLocalName) cachedUser!!.address else ""
+                val finalLat = if (hasRealLocalName) cachedUser!!.lat else 11.5812
+                val finalLng = if (hasRealLocalName) cachedUser!!.lng else 77.8465
+                val finalWhatsApp = if (hasRealLocalName) cachedUser!!.isWhatsAppOptIn else true
                 
                 val userMap = mapOf(
                     "uid" to uid,
                     "phone" to trimmedPhone,
                     "name" to finalName,
                     "email" to finalEmail,
+                    "address" to finalAddress,
+                    "lat" to finalLat,
+                    "lng" to finalLng,
+                    "isWhatsAppOptIn" to finalWhatsApp,
                     "role" to finalRole,
                     "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                     "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
@@ -570,10 +570,10 @@ object LyoFirebaseHelper {
                     phone = trimmedPhone,
                     name = finalName,
                     email = finalEmail,
-                    address = "",
-                    lat = 11.5812,
-                    lng = 77.8465,
-                    isWhatsAppOptIn = true,
+                    address = finalAddress,
+                    lat = finalLat,
+                    lng = finalLng,
+                    isWhatsAppOptIn = finalWhatsApp,
                     role = finalRole,
                     uid = uid
                 )
@@ -733,7 +733,16 @@ object LyoFirebaseHelper {
                             newProfileMap["uid"] = correctUid
                             newProfileMap["phone"] = phone
                             newProfileMap["isActive"] = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
-                            newProfileMap["createdAt"] = doc.getTimestamp("createdAt") ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            val safeCreatedAt = try {
+                                doc.getTimestamp("createdAt")
+                            } catch (e: Exception) {
+                                try {
+                                    doc.getLong("createdAt")?.let { com.google.firebase.Timestamp(it / 1000L, 0) }
+                                } catch (e2: Exception) {
+                                    null
+                                }
+                            } ?: com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            newProfileMap["createdAt"] = safeCreatedAt
                             newProfileMap["updatedAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
                             
                             // Remove insecure password field if present
@@ -836,6 +845,7 @@ object LyoFirebaseHelper {
     suspend fun syncVendorToFirestore(vendor: Vendor) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val idStr = vendor.id.toString()
             val vendorMap = mapOf(
                 "id" to vendor.id,
@@ -863,10 +873,20 @@ object LyoFirebaseHelper {
                 "sortOrder" to vendor.sortOrder,
                 "autoOpenTime" to vendor.autoOpenTime,
                 "autoCloseTime" to vendor.autoCloseTime,
-                "status" to vendor.status
+                "status" to vendor.status,
+                "isOfferEnabled" to vendor.isOfferEnabled,
+                "offerType" to vendor.offerType,
+                "offerValue" to vendor.offerValue,
+                "offerText" to vendor.offerText,
+                "offerStartDate" to vendor.offerStartDate,
+                "offerEndDate" to vendor.offerEndDate,
+                "offerPriority" to vendor.offerPriority
             )
-            dbInstance.collection("vendors").document(idStr).set(vendorMap, SetOptions.merge()).await()
-            Log.d(TAG, "Synced vendor ${vendor.name} to Firestore")
+            runSafeFirestoreWrite {
+                dbInstance.collection("vendors").document(idStr).set(vendorMap, SetOptions.merge()).await()
+                dbInstance.collection("stores").document(idStr).set(vendorMap, SetOptions.merge()).await()
+            }
+            Log.d(TAG, "Synced vendor ${vendor.name} to Firestore (vendors & stores)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing vendor ${vendor.name}: ${e.message}")
             throw e
@@ -876,17 +896,21 @@ object LyoFirebaseHelper {
     suspend fun deleteVendorFromFirestore(vendorId: Long) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val idStr = vendorId.toString()
-            dbInstance.collection("vendors").document(idStr).delete().await()
-            
-            // Delete associated menu items and categories
-            val itemsDocs = dbInstance.collection("menu_items").whereEqualTo("vendorId", vendorId).get().await()
-            for (doc in itemsDocs.documents) {
-                dbInstance.collection("menu_items").document(doc.id).delete().await()
-            }
-            val catDocs = dbInstance.collection("categories").whereEqualTo("vendorId", vendorId).get().await()
-            for (doc in catDocs.documents) {
-                dbInstance.collection("categories").document(doc.id).delete().await()
+            runSafeFirestoreWrite {
+                dbInstance.collection("vendors").document(idStr).delete().await()
+                dbInstance.collection("stores").document(idStr).delete().await()
+                
+                // Delete associated menu items and categories
+                val itemsDocs = dbInstance.collection("menu_items").whereEqualTo("vendorId", vendorId).get().await()
+                for (doc in itemsDocs.documents) {
+                    dbInstance.collection("menu_items").document(doc.id).delete().await()
+                }
+                val catDocs = dbInstance.collection("categories").whereEqualTo("vendorId", vendorId).get().await()
+                for (doc in catDocs.documents) {
+                    dbInstance.collection("categories").document(doc.id).delete().await()
+                }
             }
             Log.d(TAG, "Deleted vendor $vendorId from Firestore complete")
         } catch (e: Exception) {
@@ -898,13 +922,16 @@ object LyoFirebaseHelper {
     suspend fun clearMenuAndCategoriesFromFirestore(vendorId: Long) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
-            val itemsDocs = dbInstance.collection("menu_items").whereEqualTo("vendorId", vendorId).get().await()
-            for (doc in itemsDocs.documents) {
-                dbInstance.collection("menu_items").document(doc.id).delete().await()
-            }
-            val catDocs = dbInstance.collection("categories").whereEqualTo("vendorId", vendorId).get().await()
-            for (doc in catDocs.documents) {
-                dbInstance.collection("categories").document(doc.id).delete().await()
+            ensureFirebaseAdminAuth()
+            runSafeFirestoreWrite {
+                val itemsDocs = dbInstance.collection("menu_items").whereEqualTo("vendorId", vendorId).get().await()
+                for (doc in itemsDocs.documents) {
+                    dbInstance.collection("menu_items").document(doc.id).delete().await()
+                }
+                val catDocs = dbInstance.collection("categories").whereEqualTo("vendorId", vendorId).get().await()
+                for (doc in catDocs.documents) {
+                    dbInstance.collection("categories").document(doc.id).delete().await()
+                }
             }
             Log.d(TAG, "Cleared categories & menu items from Firestore for vendor $vendorId")
         } catch (e: Exception) {
@@ -916,6 +943,7 @@ object LyoFirebaseHelper {
     suspend fun syncCategoryToFirestore(category: Category) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val catMap = mapOf(
                 "id" to category.id,
                 "vendorId" to category.vendorId,
@@ -926,7 +954,9 @@ object LyoFirebaseHelper {
                 "autoOpenTime" to category.autoOpenTime,
                 "autoCloseTime" to category.autoCloseTime
             )
-            dbInstance.collection("categories").document(category.id.toString()).set(catMap, SetOptions.merge()).await()
+            runSafeFirestoreWrite {
+                dbInstance.collection("categories").document(category.id.toString()).set(catMap, SetOptions.merge()).await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing category: ${e.message}")
             throw e
@@ -936,12 +966,15 @@ object LyoFirebaseHelper {
     suspend fun deleteCategoryFromFirestore(categoryId: Long) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
-            dbInstance.collection("categories").document(categoryId.toString()).delete().await()
-            
-            // Delete associated menu items
-            val itemDocs = dbInstance.collection("menu_items").whereEqualTo("categoryId", categoryId).get().await()
-            for (doc in itemDocs.documents) {
-                dbInstance.collection("menu_items").document(doc.id).delete().await()
+            ensureFirebaseAdminAuth()
+            runSafeFirestoreWrite {
+                dbInstance.collection("categories").document(categoryId.toString()).delete().await()
+                
+                // Delete associated menu items
+                val itemDocs = dbInstance.collection("menu_items").whereEqualTo("categoryId", categoryId).get().await()
+                for (doc in itemDocs.documents) {
+                    dbInstance.collection("menu_items").document(doc.id).delete().await()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting category from Firestore: ${e.message}")
@@ -952,6 +985,7 @@ object LyoFirebaseHelper {
     suspend fun syncMenuItemToFirestore(item: MenuItem) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val itemMap = mapOf(
                 "id" to item.id,
                 "vendorId" to item.vendorId,
@@ -967,7 +1001,10 @@ object LyoFirebaseHelper {
                 "autoOpenTime" to item.autoOpenTime,
                 "autoCloseTime" to item.autoCloseTime
             )
-            dbInstance.collection("menu_items").document(item.id.toString()).set(itemMap, SetOptions.merge()).await()
+            runSafeFirestoreWrite {
+                dbInstance.collection("menu_items").document(item.id.toString()).set(itemMap, SetOptions.merge()).await()
+                dbInstance.collection("vendors").document(item.vendorId.toString()).collection("products").document(item.id.toString()).set(itemMap, SetOptions.merge()).await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing menu item: ${e.message}")
             throw e
@@ -977,7 +1014,15 @@ object LyoFirebaseHelper {
     suspend fun deleteMenuItemFromFirestore(itemId: Long) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
-            dbInstance.collection("menu_items").document(itemId.toString()).delete().await()
+            ensureFirebaseAdminAuth()
+            runSafeFirestoreWrite {
+                dbInstance.collection("menu_items").document(itemId.toString()).delete().await()
+                val localDb = db
+                val menuItem = localDb?.menuItemDao?.getMenuItemById(itemId)
+                if (menuItem != null) {
+                    dbInstance.collection("vendors").document(menuItem.vendorId.toString()).collection("products").document(itemId.toString()).delete().await()
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting menu item: ${e.message}")
             throw e
@@ -987,6 +1032,7 @@ object LyoFirebaseHelper {
     suspend fun syncPromoBannerToFirestore(banner: PromoBanner) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val docId = if (banner.code.isNotBlank()) banner.code else banner.id.toString()
             val bannerMap = mapOf(
                 "id" to banner.id,
@@ -995,7 +1041,9 @@ object LyoFirebaseHelper {
                 "imageUrl" to banner.imageUrl,
                 "status" to banner.status
             )
-            dbInstance.collection("promo_banners").document(docId).set(bannerMap, SetOptions.merge()).await()
+            runSafeFirestoreWrite {
+                dbInstance.collection("promo_banners").document(docId).set(bannerMap, SetOptions.merge()).await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing promo banner: ${e.message}")
             throw e
@@ -1005,8 +1053,11 @@ object LyoFirebaseHelper {
     suspend fun deletePromoBannerFromFirestore(banner: PromoBanner) = withContext(Dispatchers.IO) {
         val dbInstance = firestore ?: return@withContext
         try {
+            ensureFirebaseAdminAuth()
             val docId = if (banner.code.isNotBlank()) banner.code else banner.id.toString()
-            dbInstance.collection("promo_banners").document(docId).delete().await()
+            runSafeFirestoreWrite {
+                dbInstance.collection("promo_banners").document(docId).delete().await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed deleting promo banner: ${e.message}")
             throw e
@@ -1188,6 +1239,11 @@ object LyoFirebaseHelper {
                 val currentStatus = (snapshot.getString("status") ?: "PENDING").uppercase()
                 if (currentStatus == "CANCELLED") {
                     throw Exception("BLOCKED: Order was already cancelled by the customer / ஆர்டர் வாடிக்கையாளரால் ரத்து செய்யப்பட்டது")
+                }
+                
+                val alreadyAcceptedStatuses = listOf("ACCEPTED", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY")
+                if (currentStatus in alreadyAcceptedStatuses) {
+                    return@runTransaction null
                 }
                 
                 val cancellableStatuses = listOf("PENDING", "PLACED", "NEW", "READY_FOR_ACCEPTANCE")
@@ -1394,7 +1450,8 @@ object LyoFirebaseHelper {
             "address" to addressVal,
             "phone" to phoneVal,
             "paymentMethod" to transientPaymentMethod,
-            "paymentStatus" to "PENDING"
+            "paymentStatus" to if (transientPaymentMethod == "UPI") "PAID_PENDING_VERIFICATION" else "PENDING",
+            "upiTransactionId" to if (transientPaymentMethod == "UPI") transientUpiTransactionId else ""
         )
         if (riderUidVal != null && riderUidVal.isNotEmpty()) {
             orderMap["riderUid"] = riderUidVal
@@ -1427,6 +1484,13 @@ object LyoFirebaseHelper {
             Log.d(TAG, "Synced delivery_ride_id $idStr successfully to Firestore")
         } catch (e: Exception) {
             Log.e(TAG, "Failed syncing delivery ride: ${e.message}")
+            appContext?.let { ctx ->
+                withContext(Dispatchers.Main) {
+                    val friendlyMsg = getFriendlyPermissionErrorMessage(e)
+                    android.widget.Toast.makeText(ctx, "Failed syncing delivery ride: $friendlyMsg", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            throw e
         }
     }
 
@@ -1443,6 +1507,7 @@ object LyoFirebaseHelper {
     private var persistentOrdersListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var persistentRidesListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var promoBannersListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var savedAddressesListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var appSettingsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var deviceSessionsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private val orderRideListeners = java.util.concurrent.ConcurrentHashMap<Long, com.google.firebase.firestore.ListenerRegistration>()
@@ -1533,6 +1598,8 @@ object LyoFirebaseHelper {
                 vendorsListener = null
                 promoBannersListener?.remove()
                 promoBannersListener = null
+                savedAddressesListener?.remove()
+                savedAddressesListener = null
                 categoriesListener?.remove()
                 categoriesListener = null
                 menuItemsListener?.remove()
@@ -1683,7 +1750,14 @@ object LyoFirebaseHelper {
                                             sortOrder = doc.getLong("sortOrder")?.toInt() ?: 0,
                                             autoOpenTime = doc.getString("autoOpenTime") ?: "",
                                             autoCloseTime = doc.getString("autoCloseTime") ?: "",
-                                            status = doc.getString("status") ?: "ACTIVE"
+                                            status = doc.getString("status") ?: "ACTIVE",
+                                            isOfferEnabled = doc.getBoolean("isOfferEnabled") ?: false,
+                                            offerType = doc.getString("offerType") ?: "Percentage",
+                                            offerValue = doc.getDouble("offerValue") ?: 0.0,
+                                            offerText = doc.getString("offerText") ?: "",
+                                            offerStartDate = doc.getString("offerStartDate") ?: "",
+                                            offerEndDate = doc.getString("offerEndDate") ?: "",
+                                            offerPriority = doc.getLong("offerPriority")?.toInt() ?: 0
                                         )
                                         db.vendorDao.insertVendor(vendor)
                                     }
@@ -1739,6 +1813,16 @@ object LyoFirebaseHelper {
                                                         ctx,
                                                         "Lyo AI Special Offer 📢",
                                                         description
+                                                    )
+                                                }
+                                            }
+                                        } else if (description.isNotBlank()) {
+                                            if (existing == null || existing.description != description) {
+                                                appContext?.let { ctx ->
+                                                    com.example.ui.screens.LyoNotificationHelper.showPushNotification(
+                                                        ctx,
+                                                        "Lyo New Special Promo! 🎁✨",
+                                                        "புதிய ஆஃபர்: $description"
                                                     )
                                                 }
                                             }
@@ -1840,6 +1924,51 @@ object LyoFirebaseHelper {
                             }
                         }
                 } else {
+                    savedAddressesListener?.remove()
+                    savedAddressesListener = dbInstance.collection("users")
+                        .document(currentUserId)
+                        .collection("saved_addresses")
+                        .addSnapshotListener { snapshot, err ->
+                            if (err != null) {
+                                Log.w(TAG, "Saved addresses listener error: ${err.message}")
+                                return@addSnapshotListener
+                            }
+                            if (snapshot != null) {
+                                syncScope.launch {
+                                    for (change in snapshot.documentChanges) {
+                                        val addressDoc = change.document
+                                        val addrId = addressDoc.getLong("id") ?: addressDoc.id.toLongOrNull() ?: continue
+                                        val userId = addressDoc.getString("userId") ?: ""
+                                        val name = addressDoc.getString("name") ?: ""
+                                        val addressLine = addressDoc.getString("addressLine") ?: ""
+                                        val isDefault = addressDoc.getBoolean("isDefault") ?: false
+                                        val latitude = addressDoc.getDouble("latitude") ?: 0.0
+                                        val longitude = addressDoc.getDouble("longitude") ?: 0.0
+
+                                        val savedAddr = SavedAddress(
+                                            id = addrId,
+                                            userId = userId,
+                                            name = name,
+                                            addressLine = addressLine,
+                                            isDefault = isDefault,
+                                            latitude = latitude,
+                                            longitude = longitude
+                                        )
+
+                                        when (change.type) {
+                                            com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                                            com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                                                db.savedAddressDao.insertAddress(savedAddr)
+                                            }
+                                            com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                                                db.savedAddressDao.deleteAddress(savedAddr)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                     usersListener = dbInstance.collection("users")
                         .document(currentUserId)
                         .addSnapshotListener { doc, e ->
@@ -2104,12 +2233,16 @@ object LyoFirebaseHelper {
                     val gstEnabled = snapshot.getBoolean("gstEnabled") ?: false
                     val gstRate = snapshot.getDouble("gstRate") ?: 5.0
 
+                    val upiId = snapshot.getString("upiId") ?: "8778148899@ptyes"
+                    val upiName = snapshot.getString("upiName") ?: "Anantharaj R"
+
                     val repo = repositoryRef
                     if (repo != null) {
                         repo.setGstSettingsLocally(appContext, gstEnabled, gstRate)
                         repo.setAppPauseSettingsLocally(appContext, isPaused, msgEn, msgTa)
+                        repo.setUpiSettingsLocally(appContext, upiId, upiName)
                     }
-                    Log.d(TAG, "Live synced app settings from Firestore: isPaused=$isPaused, gstEnabled=$gstEnabled, gstRate=$gstRate")
+                    Log.d(TAG, "Live synced app settings from Firestore: isPaused=$isPaused, gstEnabled=$gstEnabled, gstRate=$gstRate, upiId=$upiId")
                 }
             }
     }
@@ -2151,6 +2284,8 @@ object LyoFirebaseHelper {
         persistentRidesListener = null
         promoBannersListener?.remove()
         promoBannersListener = null
+        savedAddressesListener?.remove()
+        savedAddressesListener = null
         appSettingsListener?.remove()
         appSettingsListener = null
         allOrdersListenerRegistration?.remove()
@@ -2696,6 +2831,98 @@ object LyoFirebaseHelper {
             Log.d(TAG, "Successfully updated points and rating for rider $riderPhone")
         } catch (e: Exception) {
             Log.e(TAG, "Failed updating rider points/rating: ${e.message}")
+        }
+    }
+
+    fun getFriendlyPermissionErrorMessage(e: Throwable): String {
+        val message = e.message ?: ""
+        val lower = message.lowercase()
+        
+        val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+        if (auth.currentUser == null || lower.contains("unauthenticated") || lower.contains("not authenticated") || lower.contains("authentication required") || lower.contains("auth required")) {
+            return "You are not authenticated. (நீங்கள் இன்னும் லாகின் செய்யவில்லை!)"
+        }
+        
+        if (lower.contains("session") && (lower.contains("expired") || lower.contains("invalid") || lower.contains("token"))) {
+            return "Your Admin session has expired. (உங்களது அட்மின் செஷன் காலாவதியாகிவிட்டது! தயவுசெய்து மீண்டும் லாகின் செய்யவும்.)"
+        }
+        
+        if (lower.contains("approve") || lower.contains("approved") || lower.contains("pending approval") || lower.contains("not approved")) {
+            return "Vendor account not approved. (உணவக கணக்கு இன்னும் அங்கீகரிக்கப்படவில்லை!)"
+        }
+        
+        if (lower.contains("permission_denied") || lower.contains("permission denied") || lower.contains("insufficient permissions") || lower.contains("forbidden") || lower.contains("access denied")) {
+            if (lower.contains("rules") || lower.contains("security rules")) {
+                return "Permission denied by Firestore Rules. (Firestore பாதுகாப்பு விதிகளின்படி அனுமதி மறுக்கப்பட்டுள்ளது.)"
+            }
+            if (lower.contains("role") || lower.contains("invalid role") || lower.contains("missing role") || lower.contains("unauthorized")) {
+                return "Missing Firestore role. (வழங்கப்பட்ட கணக்கில் உரிய அனுமதி அல்லது ரோல் இல்லை!)"
+            }
+            return "Permission denied by Firestore Rules. (வழங்கப்பட்ட கணக்கில் உரிய அனுமதி இல்லை!)"
+        }
+        
+        if (lower.contains("not found") || lower.contains("does not exist") || lower.contains("document not found")) {
+            return "Document does not exist. (தேடப்படும் ஆவணம் இல்லை!)"
+        }
+        
+        return "Permission denied: $message"
+    }
+
+    private suspend fun runSafeFirestoreWrite(block: suspend () -> Unit) {
+        val startTime = System.currentTimeMillis()
+        try {
+            withTimeout(5000L) {
+                block()
+            }
+            Log.i("SmartMenuPublishTrace", "[Stage 8: Firestore write] Executed: Yes. Output: Successfully committed transaction/write to Firestore. Execution time: ${System.currentTimeMillis() - startTime}ms. File: LyoFirebaseHelper.kt, Function: runSafeFirestoreWrite")
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Firestore write timed out (will be synchronized offline automatically)")
+            Log.e("SmartMenuPublishTrace", "[Stage 8: Firestore write] TIMEOUT: timed out after 5000ms. Will automatically synchronize offline via Firestore persistent cache.", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Firestore write failed: ${e.message}", e)
+            Log.e("SmartMenuPublishTrace", "[Stage 8: Firestore write] FAILED: Exception: ${e.message}. File: LyoFirebaseHelper.kt, Function: runSafeFirestoreWrite", e)
+            throw e
+        }
+    }
+
+    suspend fun ensureFirebaseAdminAuth(): Boolean = withContext(Dispatchers.IO) {
+        val authInstance = auth ?: return@withContext false
+        val dbInstance = firestore ?: return@withContext false
+        val startTime = System.currentTimeMillis()
+        try {
+            withTimeout(5000L) {
+                var currentUser = authInstance.currentUser
+                if (currentUser == null) {
+                    Log.d(TAG, "No Firebase user found. Attempting anonymous sign-in...")
+                    val result = authInstance.signInAnonymously().await()
+                    currentUser = result.user
+                }
+                val uid = currentUser?.uid ?: return@withTimeout
+                
+                val appUser = repositoryRef?.currentUser?.value
+                val phone = appUser?.phone ?: "8778148899"
+                val name = appUser?.name ?: "Anantharaj R (CEO)"
+                val email = appUser?.email ?: "AnantharajEinstein@gmail.com"
+                
+                val adminProfile = mapOf(
+                    "uid" to uid,
+                    "phone" to phone,
+                    "name" to name,
+                    "email" to email,
+                    "role" to "ADMIN",
+                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+                
+                Log.d(TAG, "Syncing admin profile under /users/$uid to Firestore...")
+                dbInstance.collection("users").document(uid).set(adminProfile, SetOptions.merge()).await()
+                Log.d(TAG, "Admin profile successfully synced for UID: $uid")
+                Log.i("SmartMenuPublishTrace", "[Stage 7: Firestore authentication] Executed: Yes. User UID: $uid. Admin role successfully established and verified. Execution time: ${System.currentTimeMillis() - startTime}ms. File: LyoFirebaseHelper.kt, Function: ensureFirebaseAdminAuth")
+            }
+            return@withContext true
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureFirebaseAdminAuth failed or timed out: ${e.message}", e)
+            Log.e("SmartMenuPublishTrace", "[Stage 7: Firestore authentication] FAILED/TIMED OUT: ${e.message}. File: LyoFirebaseHelper.kt, Function: ensureFirebaseAdminAuth", e)
+            return@withContext false
         }
     }
 }

@@ -291,7 +291,7 @@ object LyoNotificationHelper {
             val discountText = if (order.couponDiscount > 0) "\n🎁 *Discounts:* -₹${order.couponDiscount.toInt()}" else ""
             
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("🛍️  *LYO AI FOOD DELIVERY — INVOICE*\n")
+            textBuilder.append("🛍️  *Lyo AI FOOD DELIVERY — INVOICE*\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
             textBuilder.append("🆔 *Order ID:* #${order.id}\n")
             textBuilder.append("📅 *Order Date & Time:* $formattedDate\n")

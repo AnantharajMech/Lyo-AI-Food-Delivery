@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -349,6 +350,7 @@ fun AdminDashboardScreen(
     val activeRides by viewModel.activeDeliveryRides.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val admins by viewModel.allAdmins.collectAsState()
+    val allCustomers by viewModel.allCustomers.collectAsState()
 
     val scope = rememberCoroutineScope()
 
@@ -618,10 +620,12 @@ fun AdminDashboardScreen(
                     "LIVE_TEST" to "Live Test 🧪",
                     "SMART_MENU" to "Smart Menu 🤖",
                     "VENDORS" to "Stores",
+                    "BULK_IMPORT" to "Bulk Import 📤",
                     "BANNERS" to "Banners",
                     "LOGISTICS" to "Orders",
                     "RIDERS" to "Riders",
                     "CUSTOMERS" to "Customers",
+                    "UPI" to "UPI Settings 💳",
                     "FIREBASE" to "Firebase"
                 )
                 if (currentUser?.phone == "Anantharajmech") {
@@ -685,8 +689,16 @@ fun AdminDashboardScreen(
                     CustomersManagementTab(viewModel = viewModel)
                 }
 
+                "UPI" -> {
+                    UpiSettingsTab(viewModel = viewModel)
+                }
+
                 "FIREBASE" -> {
                     FirebaseSettingsTab(viewModel = viewModel)
+                }
+
+                "BULK_IMPORT" -> {
+                    BulkImportTab(viewModel = viewModel)
                 }
 
                 "RIDERS" -> {
@@ -1527,6 +1539,7 @@ fun AdminDashboardScreen(
 
                         items(filteredOrders, key = { it.id }) { ord ->
                             val matchedRide = activeRides.firstOrNull { it.orderId == ord.id }
+                            var isExpanded by remember(ord.id) { mutableStateOf(false) }
                             Box(modifier = Modifier.padding(vertical = 8.dp)) {
                                 GlassCard(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1534,11 +1547,14 @@ fun AdminDashboardScreen(
                                 ) {
                                     Column {
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { isExpanded = !isExpanded }
+                                                .padding(vertical = 8.dp, horizontal = 12.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Column {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                                     Text("Order ID: #LYO-${ord.id}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                                     if (com.example.data.repository.LyoLiveTestTracker.isTestOrder(ord)) {
@@ -1553,36 +1569,51 @@ fun AdminDashboardScreen(
                                                         }
                                                     }
                                                 }
-                                                Text("From customer phone: ${ord.userId}", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                                val displayPhone = allCustomers.firstOrNull { it.uid == ord.userId }?.phone?.ifBlank { null } ?: ord.userId.take(10)
+                                                val displayCustomer = allCustomers.firstOrNull { it.uid == ord.userId }?.name?.ifBlank { null } ?: "Lyo Customer"
+                                                Text("Customer: $displayCustomer ($displayPhone)", color = LyoColors.TextSecondary, fontSize = 12.sp)
                                                 Text("Store: ${ord.vendorName}", color = LyoColors.TextSecondary, fontSize = 12.sp)
+                                                Text("Amount: ₹${ord.totalAmount.toInt()}", color = LyoColors.AmberYellow, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                val riderNameText = if (matchedRide != null) "Rider: ${matchedRide.riderName}" else "Rider: UNASSIGNED 🔴"
+                                                Text(riderNameText, color = if (matchedRide != null) LyoColors.VegGreen else Color(0xFFFCA5A5), fontSize = 12.sp)
                                             }
 
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(
-                                                        when (ord.status) {
-                                                            "DELIVERED" -> Color(0x3322C55E)
-                                                            "PENDING" -> Color(0x33F97316)
-                                                            else -> Color(0x3338BDF8)
-                                                        }
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(
+                                                            when (ord.status) {
+                                                                "DELIVERED" -> Color(0x3322C55E)
+                                                                "PENDING" -> Color(0x33F97316)
+                                                                else -> Color(0x3338BDF8)
+                                                            }
+                                                        )
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = ord.status,
+                                                        fontSize = 11.sp,
+                                                        color = when (ord.status) {
+                                                            "DELIVERED" -> LyoColors.VegGreen
+                                                            "PENDING" -> LyoColors.AccentOrange
+                                                            else -> Color(0xFF38BDF8)
+                                                        },
+                                                        fontWeight = FontWeight.Bold
                                                     )
-                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                            ) {
-                                                Text(
-                                                    text = ord.status,
-                                                    fontSize = 11.sp,
-                                                    color = when (ord.status) {
-                                                        "DELIVERED" -> LyoColors.VegGreen
-                                                        "PENDING" -> LyoColors.AccentOrange
-                                                        else -> Color(0xFF38BDF8)
-                                                    },
-                                                    fontWeight = FontWeight.Bold
+                                                }
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Icon(
+                                                    imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(24.dp)
                                                 )
                                             }
                                         }
 
-                                        Divider(color = Color(0x1affffff), modifier = Modifier.padding(vertical = 10.dp))
+                                        if (isExpanded) {
+                                            Divider(color = Color(0x1affffff), modifier = Modifier.padding(vertical = 10.dp))
 
                                         Text(
                                             text = "Total amount: ₹${ord.totalAmount.toInt()} (Tip included: ₹${ord.tipAmount.toInt()})",
@@ -2035,6 +2066,7 @@ fun AdminDashboardScreen(
                                                 fontWeight = FontWeight.Black
                                             )
                                          }
+                                       }
                                      }
                                  }
                              }
@@ -2538,6 +2570,14 @@ fun AdminDashboardScreen(
                         var couponMinOrder by remember(partner.id) { mutableStateOf(partner.couponMinOrder.toInt().toString()) }
                         var selectedBannerPreset by remember(partner.id) { mutableStateOf(partner.bannerUrl) }
 
+                        var editIsOfferEnabled by remember(partner.id) { mutableStateOf(partner.isOfferEnabled) }
+                        var editOfferType by remember(partner.id) { mutableStateOf(partner.offerType) }
+                        var editOfferValue by remember(partner.id) { mutableStateOf(partner.offerValue.toString()) }
+                        var editOfferText by remember(partner.id) { mutableStateOf(partner.offerText) }
+                        var editOfferStartDate by remember(partner.id) { mutableStateOf(partner.offerStartDate) }
+                        var editOfferEndDate by remember(partner.id) { mutableStateOf(partner.offerEndDate) }
+                        var editOfferPriority by remember(partner.id) { mutableStateOf(partner.offerPriority.toString()) }
+
                         var editName by remember(partner.id) { mutableStateOf(partner.name) }
                         var editType by remember(partner.id) { mutableStateOf(partner.type) }
                         var editAddress by remember(partner.id) { mutableStateOf(partner.address) }
@@ -2561,6 +2601,13 @@ fun AdminDashboardScreen(
                             couponDiscount = partner.couponDiscount.toInt().toString()
                             couponMinOrder = partner.couponMinOrder.toInt().toString()
                             selectedBannerPreset = partner.bannerUrl
+                            editIsOfferEnabled = partner.isOfferEnabled
+                            editOfferType = partner.offerType
+                            editOfferValue = partner.offerValue.toString()
+                            editOfferText = partner.offerText
+                            editOfferStartDate = partner.offerStartDate
+                            editOfferEndDate = partner.offerEndDate
+                            editOfferPriority = partner.offerPriority.toString()
                             editName = partner.name
                             editType = partner.type
                             editAddress = partner.address
@@ -2932,6 +2979,107 @@ fun AdminDashboardScreen(
                                                 inactiveTrackColor = Color(0x33FFFFFF)
                                             )
                                         )
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Divider(color = Color(0x22FFFFFF))
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        Text("PROMOTIONS & SPECIAL OFFERS (பிரத்தியேக சலுகைகள்):", color = LyoColors.AmberYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("சலுகை செயல்படுத்து (Enable Promo Offer)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text("Toggle to display active offer on cards", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                                            }
+                                            Switch(
+                                                checked = editIsOfferEnabled,
+                                                onCheckedChange = { editIsOfferEnabled = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = LyoColors.AccentOrange)
+                                            )
+                                        }
+
+                                        if (editIsOfferEnabled) {
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            
+                                            Text("Offer Type (சலுகை வகை):", color = Color.White, fontSize = 11.sp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                listOf("Percentage", "Flat").forEach { type ->
+                                                    val isSelected = editOfferType == type
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(if (isSelected) LyoColors.AccentOrange.copy(alpha = 0.3f) else Color(0x15FFFFFF))
+                                                            .border(1.dp, if (isSelected) LyoColors.AccentOrange else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                                                            .clickable { editOfferType = type }
+                                                            .padding(vertical = 8.dp),
+                                                        contentAlignment = Alignment.Center
+                                                     ) {
+                                                        Text(if (type == "Percentage") "% Percentage" else "₹ Flat Amount", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(modifier = Modifier.fillMaxWidth()) {
+                                                OutlinedTextField(
+                                                    value = editOfferValue,
+                                                    onValueChange = { editOfferValue = it },
+                                                    label = { Text(if (editOfferType == "Percentage") "Offer Value (%)" else "Offer Value (₹)") },
+                                                    placeholder = { Text("e.g. 30") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                                    modifier = Modifier.weight(1.5f).padding(end = 8.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = editOfferPriority,
+                                                    onValueChange = { editOfferPriority = it },
+                                                    label = { Text("Priority (முன்னுரிமை)") },
+                                                    placeholder = { Text("e.g. 0") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            OutlinedTextField(
+                                                value = editOfferText,
+                                                onValueChange = { editOfferText = it },
+                                                label = { Text("Custom Offer Label (விருப்ப சலுகை உரை - optional)") },
+                                                placeholder = { Text("e.g. 30% OFF / FLAT ₹50 OFF") },
+                                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(modifier = Modifier.fillMaxWidth()) {
+                                                OutlinedTextField(
+                                                    value = editOfferStartDate,
+                                                    onValueChange = { editOfferStartDate = it },
+                                                    label = { Text("Start Date (YYYY-MM-DD)") },
+                                                    placeholder = { Text("e.g. 2026-07-01") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = editOfferEndDate,
+                                                    onValueChange = { editOfferEndDate = it },
+                                                    label = { Text("End Date (YYYY-MM-DD)") },
+                                                    placeholder = { Text("e.g. 2026-12-31") },
+                                                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text("Leave dates blank for always-active promo status.", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                        }
 
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text("Custom Image Cover Setup:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -3466,7 +3614,14 @@ fun AdminDashboardScreen(
                                                         lng = editLng,
                                                         sortOrder = editSortOrder.toIntOrNull() ?: partner.sortOrder,
                                                         isDynamicDelivery = editIsDynamicDelivery,
-                                                        status = editStatus
+                                                        status = editStatus,
+                                                        isOfferEnabled = editIsOfferEnabled,
+                                                        offerType = editOfferType,
+                                                        offerValue = editOfferValue.toDoubleOrNull() ?: 0.0,
+                                                        offerText = editOfferText.trim(),
+                                                        offerStartDate = editOfferStartDate.trim(),
+                                                        offerEndDate = editOfferEndDate.trim(),
+                                                        offerPriority = editOfferPriority.toIntOrNull() ?: 0
                                                     )
                                                     val localContext = context
                                                     viewModel.updateVendor(updated) {
@@ -4693,8 +4848,8 @@ fun AdminDashboardScreen(
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
 
-                        // 1. Registered active riders in the platform
-                        val activePlatformRiders = riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && it.isActiveRider && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
+                        // 1. Registered riders in the platform
+                        val activePlatformRiders = riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
                         if (activePlatformRiders.isNotEmpty()) {
                             Divider(
                                 color = Color.White.copy(alpha = 0.2f),
@@ -4702,29 +4857,49 @@ fun AdminDashboardScreen(
                                 modifier = Modifier.padding(vertical = 10.dp)
                             )
                             Text(
-                                text = "கிடைக்கும் விநியோகஸ்தர்கள் • REGISTERED ON-DUTY AGENTS:",
+                                text = "விநியோகஸ்தர்கள் பட்டியல் • LOGISTICS FLEET COURIERS:",
                                 color = LyoColors.AccentOrange,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
                             activePlatformRiders.forEach { rdr ->
+                                val isOnDuty = rdr.isActiveRider
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color(0x1F22C55E), RoundedCornerShape(8.dp))
-                                        .border(1.dp, Color(0x3322C55E), RoundedCornerShape(8.dp))
+                                        .background(if (isOnDuty) Color(0x1F22C55E) else Color(0x11FFFFFF), RoundedCornerShape(8.dp))
+                                        .border(1.dp, if (isOnDuty) Color(0x3322C55E) else Color(0x22FFFFFF), RoundedCornerShape(8.dp))
                                         .clickable {
                                             confirmRiderToAssign = rdr
                                         }
                                         .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Filled.DirectionsBike, contentDescription = null, tint = LyoColors.VegGreen, modifier = Modifier.size(18.dp))
+                                    Icon(
+                                        imageVector = Icons.Filled.DirectionsBike,
+                                        contentDescription = null,
+                                        tint = if (isOnDuty) LyoColors.VegGreen else Color.Gray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(rdr.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                         Text("📞 ${rdr.phone} | Bike: ${rdr.vehicleNo}", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (isOnDuty) Color(0x3322C55E) else Color(0x33EF4444))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isOnDuty) "ON-DUTY" else "OFFLINE",
+                                            color = if (isOnDuty) LyoColors.VegGreen else Color(0xFFEF4444),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -4950,34 +5125,39 @@ fun AdminDashboardScreen(
                              viewModel.assignRiderToOrder(
                                  orderId = currentOrderId,
                                  riderName = rdr.name,
-                                 riderPhone = rdr.phone
-                             ) { order, vendor, items, customer ->
-                                 dispatchOrderState = order
-                                 dispatchVendorState = vendor
-                                 dispatchOrderItemsState = items
-                                 dispatchRiderNameState = rdr.name
-                                 dispatchRiderPhoneState = rdr.phone
-                                 dispatchCustomerNameState = customer?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
-                                 dispatchCustomerPhoneState = customer?.phone?.ifBlank { null } ?: order.userId
-                                 dispatchCustomerAddressState = customer?.address?.ifBlank { null } ?: "Coordinates (${order.customerLat}, ${order.customerLng})"
-                                 showDispatchConfirmDialog = true
-                                 // AUTOMATIC TRIGGER 1: WhatsApp messages to Customer and Restaurant Owner KOT
-                                 val settings = com.example.WhatsAppHelper.getSettings(context)
-                                 val cName = customer?.name ?: "Lyo Customer"
-                                 val cPhone = customer?.phone ?: order.userId
-                                 val cAddr = customer?.address ?: "Lyo Delivery Address"
-                                 com.example.WhatsAppHelper.sendOrderAssignedMessages(
-                                     context = context,
-                                     order = order,
-                                     items = items,
-                                     settings = settings,
-                                     customerName = cName,
-                                     customerPhone = cPhone,
-                                     deliveryAddress = cAddr,
-                                     riderName = rdr.name
-                                 )
-                                 showAssignRiderOrderId = null
-                             }
+                                 riderPhone = rdr.phone,
+                                 onSuccess = { order, vendor, items, customer ->
+                                     dispatchOrderState = order
+                                     dispatchVendorState = vendor
+                                     dispatchOrderItemsState = items
+                                     dispatchRiderNameState = rdr.name
+                                     dispatchRiderPhoneState = rdr.phone
+                                     dispatchCustomerNameState = customer?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                     dispatchCustomerPhoneState = customer?.phone?.ifBlank { null } ?: order.userId
+                                     dispatchCustomerAddressState = customer?.address?.ifBlank { null } ?: "Coordinates (${order.customerLat}, ${order.customerLng})"
+                                     showDispatchConfirmDialog = true
+                                     // AUTOMATIC TRIGGER 1: WhatsApp messages to Customer and Restaurant Owner KOT
+                                     val settings = com.example.WhatsAppHelper.getSettings(context)
+                                     val cName = customer?.name ?: "Lyo Customer"
+                                     val cPhone = customer?.phone ?: order.userId
+                                     val cAddr = customer?.address ?: "Lyo Delivery Address"
+                                     com.example.WhatsAppHelper.sendOrderAssignedMessages(
+                                         context = context,
+                                         order = order,
+                                         items = items,
+                                         settings = settings,
+                                         customerName = cName,
+                                         customerPhone = cPhone,
+                                         deliveryAddress = cAddr,
+                                         riderName = rdr.name
+                                     )
+                                     showAssignRiderOrderId = null
+                                 },
+                                 onFailure = { errorMsg ->
+                                     android.widget.Toast.makeText(context, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+                                     showAssignRiderOrderId = null
+                                 }
+                             )
                          }
                      }
                  ) {
@@ -5020,12 +5200,16 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(),
-        contentPadding = PaddingValues(20.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp),
+            contentPadding = PaddingValues(20.dp)
+        ) {
         // Section: Onboard New Rider Form Card
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -5899,6 +6083,7 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
             shape = RoundedCornerShape(20.dp)
         )
     }
+    }
 }
 
 @Composable
@@ -5906,11 +6091,16 @@ fun CustomersManagementTab(viewModel: AdminViewModel) {
     val customers by viewModel.allCustomers.collectAsState()
     var customerToDelete by remember { mutableStateOf<User?>(null) }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
             Column(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -6093,6 +6283,7 @@ fun CustomersManagementTab(viewModel: AdminViewModel) {
             shape = RoundedCornerShape(20.dp)
         )
     }
+    }
 }
 
 @Composable
@@ -6105,12 +6296,17 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
     var opError by remember { mutableStateOf<String?>(null) }
     var opSuccessMessage by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         item {
             Column(modifier = Modifier.padding(bottom = 8.dp)) {
                 Text(
@@ -6425,6 +6621,227 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
             }
         }
     }
+    }
+}
+
+@Composable
+fun UpiSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repository = viewModel.repository
+    
+    val activeUpiId by repository.activeUpiId.collectAsState()
+    val activeUpiName by repository.activeUpiName.collectAsState()
+    
+    var upiIdInput by remember { mutableStateOf(activeUpiId) }
+    var upiNameInput by remember { mutableStateOf(activeUpiName) }
+    
+    LaunchedEffect(activeUpiId, activeUpiName) {
+        upiIdInput = activeUpiId
+        upiNameInput = activeUpiName
+    }
+    
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+        item {
+            Column {
+                Text(
+                    text = "💳 UPI PAYMENT CONTROLLER",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    color = LyoColors.AccentOrange,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "வாடிக்கையாளர்களுக்கு காட்டப்படும் UPI அமைப்புகளை நிர்வகிக்கவும்",
+                    fontSize = 11.sp,
+                    color = Color.LightGray
+                )
+            }
+        }
+        
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.04f)),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "🟢 ACTIVE UPI CONFIGURATION (தற்போதைய UPI விபரம்):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF10B981)
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("பெயர் (Name):", color = Color.Gray, fontSize = 9.sp)
+                            Text(activeUpiName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("UPI ID:", color = Color.Gray, fontSize = 9.sp)
+                            Text(activeUpiId, color = LyoColors.AmberYellow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+        
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "✍️ UPDATE UPI DETAILS (UPI விபரங்களை மாற்றவும்):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Payee Display Name (பெறுபவர் பெயர்):", color = Color.LightGray, fontSize = 10.sp)
+                        OutlinedTextField(
+                            value = upiNameInput,
+                            onValueChange = { upiNameInput = it },
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(6.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("UPI ID (எ.கா. name@bank):", color = Color.LightGray, fontSize = 10.sp)
+                        OutlinedTextField(
+                            value = upiIdInput,
+                            onValueChange = { upiIdInput = it },
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(6.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(2.dp))
+                    
+                    LyoButton(
+                        text = "சேமி & அப்டேட் செய் (SAVE & SYNC TO CLOUD)",
+                        onClick = {
+                            val cleanId = upiIdInput.trim()
+                            val cleanName = upiNameInput.trim()
+                            if (cleanId.isBlank() || cleanName.isBlank() || !cleanId.contains("@")) {
+                                android.widget.Toast.makeText(context, "முறையான UPI ID மற்றும் பெயர் உள்ளிடவும்!", android.widget.Toast.LENGTH_LONG).show()
+                            } else {
+                                repository.updateUpiSettings(context, cleanId, cleanName)
+                                android.widget.Toast.makeText(context, "UPI விபரங்கள் வெற்றிகரமாக சேமிக்கப்பட்டு, கஸ்டமர்களுக்கு உடனே அப்டேட் செய்யப்பட்டது! 🚀", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.02f)),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "⚡ PRESET UPI SHORTCUTS (வழங்கப்பட்ட UPIPreset-கள்):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.LightGray
+                    )
+                    
+                    val presets = listOf(
+                        Triple("8778148899@ptyes", "Anantharaj R", "🏆 Primary Business Bank Account"),
+                        Triple("einsteinananth24-4@okicici", "Anantharaj R", "🥈 Secondary Backup Bank Account")
+                    )
+                    
+                    presets.forEach { (pId, pName, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (activeUpiId == pId) LyoColors.AccentOrange.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.03f))
+                                .clickable {
+                                    upiIdInput = pId
+                                    upiNameInput = pName
+                                    repository.updateUpiSettings(context, pId, pName)
+                                    android.widget.Toast.makeText(context, "Preset $label selected and applied! 🚀", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(pId, color = LyoColors.AmberYellow, fontSize = 10.sp)
+                                Text("Payee: $pName", color = Color.LightGray, fontSize = 9.sp)
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(if (activeUpiId == pId) LyoColors.AccentOrange else Color.Gray.copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (activeUpiId == pId) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    }
 }
 
 @Composable
@@ -6448,12 +6865,17 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         item {
             Column(modifier = Modifier.padding(bottom = 8.dp)) {
                 Text(
@@ -7126,54 +7548,54 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
                         // Auto-Running Engine Status Badge (Non-clickable, fully automatic status)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x1F10B981))
-                                .border(1.dp, Color(0xFF10B981).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .background(Color(0x1510B981), RoundedCornerShape(100.dp))
+                                .border(1.dp, Color(0xFF10B981).copy(alpha = 0.35f), RoundedCornerShape(100.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .background(Color(0xFF10B981), CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "AUTOMATIC ENGINE ACTIVE ⚙️",
-                                fontSize = 10.sp,
+                                text = "AUTOMATIC ENGINE ACTIVE",
                                 color = Color(0xFF10B981),
-                                fontWeight = FontWeight.Bold
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
-                            .border(1.dp, Color(0x1FFFFFFF), RoundedCornerShape(10.dp))
-                            .padding(10.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.03f))
+                            .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = "info",
-                                tint = Color(0xFF22C55E),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isSyncing) "Auto-sync engine synchronizing all databases..." else syncMessage,
-                                color = Color.White,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "info",
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isSyncing) "Auto-sync engine synchronizing all databases..." else syncMessage,
+                            color = Color.White,
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }
         }
+    }
     }
 }
 
@@ -7283,12 +7705,17 @@ fun AnalyticsDashboardTab(viewModel: AdminViewModel) {
         (it.role == "DELIVERY" || it.role == "RIDER") && !it.isActiveRider 
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         item {
             Column(modifier = Modifier.padding(bottom = 4.dp)) {
                 Text(
@@ -7601,7 +8028,7 @@ fun AnalyticsDashboardTab(viewModel: AdminViewModel) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "LYO AI ADMIN BROADCASTER 📢",
+                                text = "Lyo AI Admin Broadcaster 📢",
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 12.sp,
@@ -7725,6 +8152,7 @@ fun AnalyticsDashboardTab(viewModel: AdminViewModel) {
             }
         }
     }
+    }
 }
 
 @Composable
@@ -7757,6 +8185,39 @@ fun AnalyticsProportionLegendItem(color: Color, label: String) {
 
 data class PromoPreset(val name: String, val code: String, val desc: String, val url: String)
 
+fun compressAndEncodeToBase64(filePath: String): String? {
+    return try {
+        val file = java.io.File(filePath)
+        if (!file.exists()) return null
+        val bitmap = android.graphics.BitmapFactory.decodeFile(filePath) ?: return null
+        
+        // Scale down to a reasonable max dimension (e.g. 960px) to balance HD quality and document size limit
+        val maxDim = 960
+        val srcWidth = bitmap.width
+        val srcHeight = bitmap.height
+        val scaledBitmap = if (srcWidth > maxDim || srcHeight > maxDim) {
+            val ratio = srcWidth.toFloat() / srcHeight.toFloat()
+            val (w, h) = if (ratio > 1f) {
+                maxDim to (maxDim / ratio).toInt()
+            } else {
+                (maxDim * ratio).toInt() to maxDim
+            }
+            android.graphics.Bitmap.createScaledBitmap(bitmap, w, h, true)
+        } else {
+            bitmap
+        }
+        
+        val outputStream = java.io.ByteArrayOutputStream()
+        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, outputStream)
+        val byteArray = outputStream.toByteArray()
+        val base64 = android.util.Base64.encodeToString(byteArray, android.util.Base64.DEFAULT)
+        "data:image/jpeg;base64,$base64"
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
 @Composable
 fun BannersManagementTab(
     viewModel: AdminViewModel,
@@ -7777,12 +8238,16 @@ fun BannersManagementTab(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(),
-        contentPadding = PaddingValues(20.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp),
+            contentPadding = PaddingValues(20.dp)
+        ) {
         // Form Checklist: preset options
         item {
             GlassCard(
@@ -7989,11 +8454,16 @@ fun BannersManagementTab(
                         text = "ADD PROMO SLIDER TO HOMEPAGE",
                         onClick = {
                             if (promoCode.isNotBlank() && description.isNotBlank()) {
+                                val finalUrl = if (imageUrl.startsWith("/")) {
+                                    compressAndEncodeToBase64(imageUrl) ?: imageUrl
+                                } else {
+                                    imageUrl.trim()
+                                }
                                 viewModel.insertPromoBanner(
                                     PromoBanner(
                                         code = promoCode.trim().uppercase(),
                                         description = description.trim(),
-                                        imageUrl = imageUrl.trim()
+                                        imageUrl = finalUrl
                                     )
                                 )
                                 // Reset inputs
@@ -8125,6 +8595,7 @@ fun BannersManagementTab(
                 }
             }
         }
+    }
     }
 }
 
@@ -11528,6 +11999,7 @@ fun LiveTestMonitorTab(viewModel: AdminViewModel) {
         for (i in reportsState.indices) {
             val report = reportsState[i]
             var isExpanded by remember { mutableStateOf(true) }
+            var showDebugDetails by remember { mutableStateOf(false) }
 
             GlassCard(
                 modifier = Modifier
@@ -11640,62 +12112,513 @@ fun LiveTestMonitorTab(viewModel: AdminViewModel) {
                         androidx.compose.material3.HorizontalDivider(color = Color(0x11FFFFFF), thickness = 1.dp)
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Order info
-                        Text("Order details:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Linked Order:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(if (report.orderId > 0L) "#LYO-${report.orderId}" else "Not created yet", color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Selected Store:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.shopName, color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Order Items & Subtotal:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text("${report.itemsText} (₹${report.price.toInt()})", color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Selected Delivery Partner:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text("${report.riderName} (${report.riderPhone})", color = Color.White, fontSize = 10.sp)
+                        // Production summary metrics block displaying high-level metrics
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Column 1: Overall Result
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.03f))
+                                    .padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Overall Result", color = Color.Gray, fontSize = 9.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = when (report.finalStatus) {
+                                        "PASS" -> "PASS 🎉"
+                                        "IN PROGRESS" -> "RUNNING 🧪"
+                                        else -> "READY 💤"
+                                    },
+                                    color = when (report.finalStatus) {
+                                        "PASS" -> Color(0xFF22C55E)
+                                        "IN PROGRESS" -> Color(0xFFF97316)
+                                        else -> Color(0xFF94A3B8)
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            // Column 2: Pass / Fail
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.03f))
+                                    .padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Pass / Fail", color = Color.Gray, fontSize = 9.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (report.finalStatus == "PASS") "SUCCESS ✔" else if (report.finalStatus == "IN PROGRESS") "EVALUATING ⏳" else "PENDING ❌",
+                                    color = if (report.finalStatus == "PASS") Color(0xFF22C55E) else if (report.finalStatus == "IN PROGRESS") Color(0xFFF97316) else Color(0xFFEF4444),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            // Column 3: Execution Time
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.03f))
+                                    .padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Execution Time", color = Color.Gray, fontSize = 9.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${report.durationMinutes} mins",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Flow Milestones Timestamps:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("A • Order Creation Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.placementTimeStr, color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("B • Admin Acceptance Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.adminAcceptanceTimeStr, color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("C • Partner Dispatch Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.riderAssignmentTimeStr, color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("D • Rider Out For Delivery Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.departureTimeStr, color = Color.White, fontSize = 10.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("F • Successful Handover Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            Text(report.completionTimeStr, color = Color.White, fontSize = 10.sp)
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Expandable card panel for Debug/Developer Logs
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable { showDebugDetails = !showDebugDetails }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (showDebugDetails) "▼ Hide Debug Details" else "▶ View Debug Details",
+                                    color = LyoColors.AmberYellow,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "DEVELOPER LOGS",
+                                color = Color.Gray,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Live GPS Logs (Salem Road, Idappadi):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(report.gpsCoordinatesLog, color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        if (showDebugDetails) {
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Device Notification Receipts Logs:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(report.notificationLogsStr, color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                            // Order info
+                            Text("Order details:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Linked Order:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                  Text(if (report.orderId > 0L) "#LYO-${report.orderId}" else "Not created yet", color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Selected Store:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.shopName, color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Order Items & Subtotal:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text("${report.itemsText} (₹${report.price.toInt()})", color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Selected Delivery Partner:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text("${report.riderName} (${report.riderPhone})", color = Color.White, fontSize = 10.sp)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Flow Milestones Timestamps:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("A • Order Creation Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.placementTimeStr, color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("B • Admin Acceptance Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.adminAcceptanceTimeStr, color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("C • Partner Dispatch Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.riderAssignmentTimeStr, color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("D • Rider Out For Delivery Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.departureTimeStr, color = Color.White, fontSize = 10.sp)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("F • Successful Handover Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                                Text(report.completionTimeStr, color = Color.White, fontSize = 10.sp)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Live GPS Logs (Salem Road, Idappadi):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(report.gpsCoordinatesLog, color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Device Notification Receipts Logs:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(report.notificationLogsStr, color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun BulkImportTab(viewModel: AdminViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    val rawText by viewModel.bulkImportRawText.collectAsState()
+    val parsedRows by viewModel.bulkImportParsedRows.collectAsState()
+    val isLoading by viewModel.isBulkImportLoading.collectAsState()
+
+    var showSuccessDialog by remember { mutableStateOf(false) }
+    var showErrorDialog by remember { mutableStateOf(false) }
+    var successMsg by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf("") }
+
+    val totalRows = parsedRows.size
+    val readyRowsCount = parsedRows.count { it.status == "READY" }
+    val warningRowsCount = parsedRows.count { it.status == "WARNING" }
+    val errorRowsCount = parsedRows.count { it.status == "ERROR" }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(LyoColors.DarkCyanBg),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 600.dp)
+                .padding(16.dp)
+        ) {
+        // Title block
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ArrowUpward,
+                contentDescription = "Bulk Import",
+                tint = LyoColors.AccentOrange,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "மொத்த கடைகள் பதிவேற்றம் • BULK STORE IMPORT",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Guidelines block
+        Card(
+            colors = CardDefaults.cardColors(containerColor = LyoColors.CardSlate),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "Instruction Guide / வழிகாட்டி:",
+                    color = LyoColors.AccentOrange,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "1. CSV அல்லது Excel வரிகளை நகலெடுத்து (Copy) கீழே உள்ள பெட்டியில் ஒட்டவும் (Paste).\n" +
+                           "2. நெடுவரிசை வரிசை (Column Format):\n" +
+                           "   Store Name, Category, Address, Phone, Open Time, Close Time\n" +
+                           "3. எ.கா (Example):\n" +
+                           "   Aroma Biryani, Biryani Center, 12 Main Road Salem, 9876543210, 09:00 AM, 10:00 PM",
+                    color = LyoColors.TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Text Area for Input
+        OutlinedTextField(
+            value = rawText,
+            onValueChange = { viewModel.bulkImportRawText.value = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+                .testTag("bulk_import_textarea"),
+            placeholder = { Text("கடை விவரங்களை இங்கே ஒட்டவும் (Paste store records here)...", color = Color.Gray, fontSize = 12.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                focusedBorderColor = LyoColors.AccentOrange, unfocusedBorderColor = Color(0x33F8FAFC)
+            ),
+            textStyle = TextStyle(fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Action Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Button(
+                onClick = {
+                    val sample = "Lyo Sree Saravana Bhavan, Restaurant, Main Road Salem, 9876543211, 07:00 AM, 11:00 PM\n" +
+                                 "Lyo Sweet Corner, Sweet Stall, Bypass Salem, 9876543212, 09:00 AM, 10:00 PM\n" +
+                                 "Lyo Fruit Juice, Juice Shop, Town Bus Stand Salem, 9876543213, 08:00 AM, 09:00 PM"
+                    viewModel.bulkImportRawText.value = sample
+                    viewModel.parseBulkImport(sample)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.testTag("bulk_import_sample_btn")
+            ) {
+                Text(" மாதிரி விவரங்கள் • LOAD SAMPLE", fontSize = 11.sp, color = Color.White)
+            }
+
+            Button(
+                onClick = { viewModel.parseBulkImport(rawText) },
+                colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.testTag("bulk_import_parse_btn")
+            ) {
+                Text("வரிகளைச் சரிபார் • VALIDATE ROWS 🔍", fontSize = 11.sp, color = Color.White)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Stats Summary
+        if (totalRows > 0) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF111E2E)),
+                border = BorderStroke(1.dp, LyoColors.GlassBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("மொத்தம் (Total)", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                        Text("$totalRows", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("தயார் (Ready)", color = LyoColors.VegGreen, fontSize = 10.sp)
+                        Text("$readyRowsCount", color = LyoColors.VegGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("எச்சரிக்கை (Warning)", color = Color(0xFFFBBF24), fontSize = 10.sp)
+                        Text("$warningRowsCount", color = Color(0xFFFBBF24), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("பிழை (Error)", color = LyoColors.NonVegRed, fontSize = 10.sp)
+                        Text("$errorRowsCount", color = LyoColors.NonVegRed, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Scrollable Preview List
+            Text(
+                text = "விவரங்களின் முன்னோட்டம் • PREVIEW & REVIEW:",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                items(parsedRows.size) { idx ->
+                    val row = parsedRows[idx]
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = LyoColors.CardSlate),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            when (row.status) {
+                                "READY" -> LyoColors.VegGreen.copy(alpha = 0.3f)
+                                "WARNING" -> Color(0xFFFBBF24).copy(alpha = 0.3f)
+                                else -> LyoColors.NonVegRed.copy(alpha = 0.3f)
+                            }
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "#${row.rowIndex} • ${row.name}",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                // Badge
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(
+                                            when (row.status) {
+                                                "READY" -> LyoColors.VegGreen.copy(alpha = 0.15f)
+                                                "WARNING" -> Color(0xFFFBBF24).copy(alpha = 0.15f)
+                                                else -> LyoColors.NonVegRed.copy(alpha = 0.15f)
+                                            }
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = row.status,
+                                        color = when (row.status) {
+                                            "READY" -> LyoColors.VegGreen
+                                            "WARNING" -> Color(0xFFFBBF24)
+                                            else -> LyoColors.NonVegRed
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Category: ${row.category} | Phone: ${row.phone}", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                            Text("Address: ${row.address}", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                            Text("Hours: ${row.openTime} - ${row.closeTime}", color = LyoColors.TextSecondary, fontSize = 11.sp)
+                            
+                            if (row.message.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Status Message: ${row.message}",
+                                    color = when (row.status) {
+                                        "READY" -> LyoColors.VegGreen
+                                        "WARNING" -> Color(0xFFFBBF24)
+                                        else -> LyoColors.NonVegRed
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Publish Button
+            Button(
+                onClick = {
+                    viewModel.executeBulkPublish(
+                        onSuccess = { success, failure ->
+                            successMsg = "வெற்றிகரமாக $success கடைகள் பதிவேற்றப்பட்டன! (Successfully imported $success stores, failures: $failure)"
+                            showSuccessDialog = true
+                        },
+                        onError = { error ->
+                            errorMsg = error
+                            showErrorDialog = true
+                        }
+                    )
+                },
+                enabled = !isLoading && (readyRowsCount > 0 || warningRowsCount > 0),
+                colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen, disabledContainerColor = Color.Gray),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("bulk_import_publish_btn")
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("பதிவேற்றப்படுகிறது... PUBLISHING...", color = Color.White, fontWeight = FontWeight.Bold)
+                } else {
+                    Text("இறக்குமதி செய் • PUBLISH TO DB 🚀", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            // Empty view illustration / hint
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowUpward,
+                        contentDescription = "Upload stores",
+                        tint = LyoColors.TextSecondary.copy(alpha = 0.3f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "இன்னும் கடைகள் எதுவும் சரிபார்க்கப்படவில்லை\nNo stores validated yet.",
+                        color = LyoColors.TextSecondary,
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+
+    // Dialogs
+    if (showSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = { showSuccessDialog = false },
+            title = { Text("வெற்றி • SUCCESS 🎉", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text(successMsg, color = LyoColors.TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = { showSuccessDialog = false }) {
+                    Text("சரி • OK", color = LyoColors.VegGreen, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1E293B)
+        )
+    }
+
+    if (showErrorDialog) {
+        AlertDialog(
+            onDismissRequest = { showErrorDialog = false },
+            title = { Text("பிழை • ERROR ❌", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text(errorMsg, color = LyoColors.TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = { showErrorDialog = false }) {
+                    Text("சரி • OK", color = LyoColors.NonVegRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1E293B)
+        )
+    }
     }
 }

@@ -346,7 +346,17 @@ fun DeliveryPartnerDashboardScreen(
     val averageDeliveryTimeMinutes by viewModel.averageDeliveryTimeMinutes.collectAsState()
 
     var activeHudTheme by remember { mutableStateOf("ORANGE") }
+    var hasAutoSelected by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("MY_JOB") }
+    LaunchedEffect(activeRides) {
+        if (!hasAutoSelected && activeRides.isNotEmpty()) {
+            val hasReady = activeRides.any { it.status == "PENDING_RIDER_ACCEPT" }
+            if (hasReady) {
+                selectedTab = "READY"
+            }
+            hasAutoSelected = true
+        }
+    }
     var activeVehicleClass by remember { mutableStateOf("SCOOTER") }
     val hudColor = when (activeHudTheme) {
         "EMERALD" -> Color(0xFF00E676)
@@ -502,12 +512,10 @@ fun DeliveryPartnerDashboardScreen(
     LyoBackground {
         val filteredRides = when (selectedTab) {
             "MY_JOB" -> activeRides.filter { ride ->
-                val step = viewModel.getStepForRide(ride.id, ride.status)
-                ! (ride.status == "ACCEPTED" && step == "ASSIGNED")
+                ride.status != "PENDING_RIDER_ACCEPT"
             }
             "READY" -> activeRides.filter { ride ->
-                val step = viewModel.getStepForRide(ride.id, ride.status)
-                ride.status == "ACCEPTED" && step == "ASSIGNED"
+                ride.status == "PENDING_RIDER_ACCEPT"
             }
             else -> emptyList()
         }
@@ -683,12 +691,10 @@ fun DeliveryPartnerDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val myJobCount = activeRides.count { ride -> 
-                        val step = viewModel.getStepForRide(ride.id, ride.status)
-                        ! (ride.status == "ACCEPTED" && step == "ASSIGNED")
+                        ride.status != "PENDING_RIDER_ACCEPT"
                     }
                     val readyCount = activeRides.count { ride -> 
-                        val step = viewModel.getStepForRide(ride.id, ride.status)
-                        ride.status == "ACCEPTED" && step == "ASSIGNED"
+                        ride.status == "PENDING_RIDER_ACCEPT"
                     }
                     val historyCount = completedRidesList.size
 
@@ -709,12 +715,33 @@ fun DeliveryPartnerDashboardScreen(
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CompositionLocalProvider(LocalTextColor provides (if (isSelected) Color.White else LyoColors.TextSecondary)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
                                 Text(
                                     text = "$label ($count)",
                                     fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (isSelected) Color.White else LyoColors.TextSecondary
                                 )
+                                if (tabId == "READY" && count > 0) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Red),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = count.toString(),
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1667,7 +1694,8 @@ fun DeliveryJobCard(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentStep = viewModel.getStepForRide(ride.id, ride.status)
-    val isPendingAccept = ride.status == "ACCEPTED" && currentStep == "ASSIGNED"
+    val isPendingAccept = ride.status == "PENDING_RIDER_ACCEPT"
+    var isExpanded by remember(ride.id) { mutableStateOf(false) }
 
     val orderPairState = produceState<Pair<com.example.data.database.Order?, List<com.example.data.database.OrderItem>>>(initialValue = Pair(null, emptyList()), key1 = ride.orderId) {
         value = viewModel.repository.getOrderWithItems(ride.orderId)
@@ -1708,17 +1736,22 @@ fun DeliveryJobCard(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text(
                             text = "டெலிவரி ஆர்டர் #${ride.id}",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         if (order != null && com.example.data.repository.LyoLiveTestTracker.isTestOrder(order)) {
                             Spacer(modifier = Modifier.width(6.dp))
@@ -1737,25 +1770,58 @@ fun DeliveryJobCard(
                         color = LyoColors.TextSecondary,
                         fontSize = 9.sp
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "உணவகம்/Hub: ${vendor?.name ?: "..."} ➔ வாடிக்கையாளர்: ${customer?.name ?: "..."}",
+                        color = LyoColors.TextSecondary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "நிலை / Status: " + when (currentStep) {
+                            "ARRIVING_AT_STORE" -> "கடைக்குச் செல்கிறார் 🛵"
+                            "STORE_ARRIVED" -> "கடையை அடைந்தார் 🏪"
+                            "COLLECTED" -> "விநியோகத்தில் உள்ளார் 🏍️"
+                            "ARRIVED_AT_CUSTOMER" -> "வாடிக்கையாளரிடம் உள்ளார் 🏡"
+                            else -> "தயாராகிறது..."
+                        },
+                        color = LyoColors.AmberYellow,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(LyoColors.VegGreen.copy(alpha = 0.2f))
-                        .border(1.dp, LyoColors.VegGreen, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "Payout: ₹${ride.earnings.toInt()}",
-                        color = LyoColors.VegGreen,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(LyoColors.VegGreen.copy(alpha = 0.2f))
+                            .border(1.dp, LyoColors.VegGreen, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Payout: ₹${ride.earnings.toInt()}",
+                            color = LyoColors.VegGreen,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            Divider(color = Color(0x1AFFFFFF), modifier = Modifier.padding(vertical = 6.dp))
+            if (isExpanded) {
+                Divider(color = Color(0x1AFFFFFF), modifier = Modifier.padding(vertical = 6.dp))
 
             vendor?.let { v ->
                 val transition = rememberInfiniteTransition(label = "store_pulse")
@@ -2005,12 +2071,12 @@ fun DeliveryJobCard(
                     Text("Distance: ${ride.totalDistance} km coordinates radius threshold meta logic applied.", color = Color.White, fontSize = 11.sp)
                     Spacer(modifier = Modifier.height(10.dp))
                     Button(
-                        onClick = { viewModel.acceptDelivery(ride) },
+                        onClick = { viewModel.riderAcceptAssignment(ride.id) },
                         colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("ACCEPT & LOCK ROUTING", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("ACCEPT ASSIGNMENT", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
@@ -2398,7 +2464,7 @@ fun DeliveryJobCard(
                                     text = bullet,
                                     color = Color.White.copy(alpha = 0.85f),
                                     fontSize = 10.sp,
-                                    lineHeight = 14.sp,
+                                    lineHeight = 16.sp,
                                     modifier = Modifier.padding(vertical = 2.dp)
                                 )
                             }
@@ -2479,15 +2545,16 @@ fun DeliveryJobCard(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = "Current Status: " + when (currentStep) {
-                                "ARRIVING_AT_STORE" -> "Heading to kitchen depot..."
-                                "STORE_ARRIVED" -> "Arrived! Pick up order from vendor counters."
-                                "COLLECTED" -> "Out for handoff delivery! Cycling/riding to customer..."
-                                "ARRIVED_AT_CUSTOMER" -> "Reached destination! Initiate Secure Handoff."
-                                else -> "Dispatch loading..."
+                            text = "தற்போதைய நிலை / Status: " + when (currentStep) {
+                                "ARRIVING_AT_STORE" -> "கடைக்குச் செல்கிறார் 🛵 (Heading to kitchen depot)"
+                                "STORE_ARRIVED" -> "கடையை அடைந்தார்! உணவைச் சேகரிக்கவும் 🏪 (Arrived at store - pick up order)"
+                                "COLLECTED" -> "விநியோகத்தில் உள்ளார் 🏍️ (Out for delivery to customer)"
+                                "ARRIVED_AT_CUSTOMER" -> "வாடிக்கையாளரிடம் உள்ளார் 🏡 (Reached doorstep - handoff)"
+                                else -> "தயாராகிறது... (Dispatch loading)"
                             },
                             color = Color.White,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -2512,10 +2579,10 @@ fun DeliveryJobCard(
                             ) {
                                 Text(
                                     text = when (currentStep) {
-                                        "ARRIVING_AT_STORE" -> "ARRIVED AT STORE"
-                                        "STORE_ARRIVED" -> "ITEMS COLLECTED"
-                                        "COLLECTED" -> "ARRIVED AT CUSTOMER"
-                                        else -> "PROGRESS ROUTE"
+                                        "ARRIVING_AT_STORE" -> "கடைக்கு வந்தாச்சு • ARRIVED AT STORE"
+                                        "STORE_ARRIVED" -> "உணவு சேகரிக்கப்பட்டது • ITEMS COLLECTED"
+                                        "COLLECTED" -> "வாடிக்கையாளரிடம் வந்தாச்சு • ARRIVED AT CUSTOMER"
+                                        else -> "நிலை தொடரவும் • PROGRESS ROUTE"
                                     },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
@@ -2530,11 +2597,12 @@ fun DeliveryJobCard(
                             ) {
                                 Icon(Icons.Filled.VpnKey, contentDescription = "otp", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("SECURE OTP VERIFY", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("பாதுகாப்பான OTP சரிபார்ப்பு • SECURE OTP VERIFY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
+            }
             }
         }
     }

@@ -110,7 +110,7 @@ object WhatsAppHelper {
         val itemsStr = items.joinToString("\n") { "   • ${it.nameEn} × ${it.quantity} — ₹${(it.price * it.quantity).toInt()}" }
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🛍️  *LYO AI FOOD DELIVERY — ORDER CONFIRMED*
+🛍️  *Lyo AI FOOD DELIVERY — ORDER CONFIRMED*
 ━━━━━━━━━━━━━━━━━━━━━━━
 வணக்கம் $customerName! 🙏
 
@@ -182,7 +182,7 @@ $itemsStr
         val discount = if (order.couponDiscount > 0) "\n🎁 தள்ளுபடி (Discount): -₹${order.couponDiscount.toInt()}" else ""
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🧾 *LYO AI FOOD DELIVERY — INVOICE / பில்*
+🧾 *Lyo AI FOOD DELIVERY — INVOICE / பில்*
 ━━━━━━━━━━━━━━━━━━━━━━━
 Bill No: *#${order.id}*
 Date: $date

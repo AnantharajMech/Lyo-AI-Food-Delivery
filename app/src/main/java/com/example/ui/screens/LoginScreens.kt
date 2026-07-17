@@ -593,11 +593,15 @@ fun LoginScreen(
                         admins.filter { it.role == "ADMIN" }.distinctBy { it.phone }
                     }
                     val finalAdmins = remember(activeAdmins) {
-                        if (activeAdmins.isEmpty()) {
-                            listOf(User("Anantharajmech", "Anantharaj Super Admin", "superadmin@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
-                        } else {
-                            activeAdmins
+                        val baseList = mutableListOf<User>()
+                        baseList.add(User("Anantharajmech", "Anantharaj Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+                        baseList.add(User("8778148899", "Anantharaj R (CEO)", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+                        for (admin in activeAdmins) {
+                            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899") {
+                                baseList.add(admin)
+                            }
                         }
+                        baseList.distinctBy { it.phone }
                     }
                     var selectedAdmin by remember { mutableStateOf<User?>(null) }
                     var isAdminExpanded by remember { mutableStateOf(false) }
@@ -1624,11 +1628,15 @@ fun AdminLoginScreen(
         admins.filter { it.role == "ADMIN" }.distinctBy { it.phone }
     }
     val finalAdmins = remember(activeAdmins) {
-        if (activeAdmins.isEmpty()) {
-            listOf(User("Anantharajmech", "Anantharaj Super Admin", "superadmin@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
-        } else {
-            activeAdmins
+        val baseList = mutableListOf<User>()
+        baseList.add(User("Anantharajmech", "Anantharaj Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+        baseList.add(User("8778148899", "Anantharaj R (CEO)", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+        for (admin in activeAdmins) {
+            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899") {
+                baseList.add(admin)
+            }
         }
+        baseList.distinctBy { it.phone }
     }
     var selectedAdmin by remember { mutableStateOf<User?>(null) }
     var isAdminExpanded by remember { mutableStateOf(false) }

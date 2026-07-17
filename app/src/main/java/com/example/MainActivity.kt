@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
     val lyoRepository = LyoRepository(db).apply {
         initGstSettings(applicationContext)
         initAppPauseSettings(applicationContext)
+        initUpiSettings(applicationContext)
     }
 
     // Perform all heavy operations (Firebase init, local backup restore, real-time sync) off the main thread to prevent main thread freeze/deadlock
@@ -120,6 +121,19 @@ class MainActivity : ComponentActivity() {
           applicationContext.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
         }
         val startPhone = remember { sharedPrefs.getString("logged_user_phone", null) }
+        
+        LaunchedEffect(startPhone) {
+          if (startPhone == null) {
+              try {
+                  com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+                  lyoRepository.currentUser.value = null
+                  android.util.Log.d("MainActivity", "First launch or no saved session. Cleared old Firebase auth session.")
+              } catch (e: Exception) {
+                  android.util.Log.e("MainActivity", "Error clearing old Firebase session: ${e.message}")
+              }
+          }
+        }
+
         val scope = rememberCoroutineScope()
         var isRetryingOfflineAuth by remember { mutableStateOf(false) }
 
@@ -128,109 +142,152 @@ class MainActivity : ComponentActivity() {
         ) { _ -> }
 
         suspend fun performVerification() {
-          val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-          var firebaseUser = auth.currentUser
-          if (firebaseUser == null) {
-              var elapsedWait = 0L
-              while (auth.currentUser == null && elapsedWait < 2000L) {
-                  delay(100L)
-                  elapsedWait += 100L
-              }
-              firebaseUser = auth.currentUser
-          }
-
           var recoverySuccessful = false
           var errorMessage: String? = null
+          var waitCount = 0
+          while (!com.example.data.repository.LyoFirebaseHelper.isInitialized && waitCount < 30) {
+              delay(100)
+              waitCount++
+          }
 
-          if (firebaseUser != null) {
-              val uid = firebaseUser.uid
-              try {
-                  val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                  val doc = dbInstance.collection("users").document(uid).get().await()
-                  
-                  if (doc.exists()) {
-                      val rawRole = doc.getString("role")
-                      if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
-                          errorMessage = "Account profile is incomplete. Please contact support."
-                      } else {
-                          val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
-                          if (isActive) {
-                              val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
-                              val phone = doc.getString("phone") ?: ""
-                              
-                              val user = User(
-                                  phone = phone,
-                                  name = doc.getString("name") ?: "",
-                                  email = doc.getString("email") ?: "",
-                                  address = doc.getString("address") ?: "",
-                                  lat = doc.getDouble("lat") ?: 11.5812,
-                                  lng = doc.getDouble("lng") ?: 77.8465,
-                                  isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
-                                  role = role,
-                                  vehicleNo = doc.getString("vehicleNo") ?: "",
-                                  isActiveRider = doc.getBoolean("isActiveRider") ?: true,
-                                  salaryType = doc.getString("salaryType") ?: "MONTHLY",
-                                  salaryRate = doc.getDouble("salaryRate") ?: 0.0,
-                                  uid = doc.getString("uid") ?: uid
-                              )
-                              
-                              lyoRepository.userDao.insertUser(user)
-                              lyoRepository.currentUser.value = user
-                              recoverySuccessful = true
-                              
-                              currentRoute = when (role) {
-                                  "ADMIN" -> "ADMIN_DASHBOARD"
-                                  "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
-                                  "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
-                                  else -> "CUSTOMER_DASHBOARD"
-                              }
-                              android.util.Log.d("MainActivity", "Successfully recovered user session for UID: $uid, Role: $role")
-                              
-                              CoroutineScope(Dispatchers.IO).launch {
-                                  try {
-                                      lyoRepository.retryPendingSyncs()
-                                  } catch (syncEx: Exception) {
-                                      android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
-                                  }
-                              }
-                          } else {
-                              errorMessage = "Your account is inactive. Please contact the administrator. (உங்கள் கணக்கு முடக்கப்பட்டுள்ளது!)"
-                          }
-                      }
-                  } else {
-                      errorMessage = "Account profile is incomplete. Please contact support."
+          try {
+              val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+              var firebaseUser = auth.currentUser
+              if (firebaseUser == null) {
+                  var elapsedWait = 0L
+                  while (auth.currentUser == null && elapsedWait < 2000L) {
+                      delay(100L)
+                      elapsedWait += 100L
                   }
-              } catch (e: Exception) {
-                  android.util.Log.e("MainActivity", "Temporary Firestore error during session recovery: ${e.message}. Falling back to local cache.")
-                  
+                  firebaseUser = auth.currentUser
+              }
+
+              if (firebaseUser != null) {
+                  val uid = firebaseUser.uid
+                  try {
+                      val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                      val doc = dbInstance.collection("users").document(uid).get().await()
+                      
+                      if (doc.exists()) {
+                          val rawRole = doc.getString("role")
+                          if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                              errorMessage = "Account profile is incomplete. Please contact support."
+                          } else {
+                              val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("isActiveRider") ?: true
+                              if (isActive) {
+                                  val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
+                                  val phone = doc.getString("phone") ?: ""
+                                  
+                                  // 1. Fetch locally cached user
+                                  val cachedUser = if (phone.isNotBlank()) lyoRepository.findUserLocallyOnly(phone) else null
+                                  val localTs = cachedUser?.updatedAt ?: 0L
+                                  
+                                  // 2. Convert doc updatedAt to time safely
+                                  val firestoreTs = try {
+                                      doc.getTimestamp("updatedAt")?.toDate()?.time
+                                  } catch (e: Exception) {
+                                      try {
+                                          doc.getLong("updatedAt")
+                                      } catch (e2: Exception) {
+                                          null
+                                      }
+                                  } ?: 0L
+                                  
+                                  val firestoreUser = User(
+                                      phone = phone,
+                                      name = doc.getString("name") ?: "",
+                                      email = doc.getString("email") ?: "",
+                                      address = doc.getString("address") ?: "",
+                                      lat = doc.getDouble("lat") ?: 11.5812,
+                                      lng = doc.getDouble("lng") ?: 77.8465,
+                                      isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                                      role = role,
+                                      vehicleNo = doc.getString("vehicleNo") ?: "",
+                                      isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                                      salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                                      salaryRate = doc.getDouble("salaryRate") ?: 0.0,
+                                      uid = doc.getString("uid") ?: uid,
+                                      updatedAt = firestoreTs
+                                    )
+                                  
+                                  // 4. Compare updatedAt to choose local or firestore values
+                                  val isLocalNewer = cachedUser != null && localTs > firestoreTs
+                                  val finalUser = if (isLocalNewer && cachedUser != null) {
+                                      firestoreUser.copy(
+                                          name = cachedUser.name,
+                                          email = cachedUser.email,
+                                          address = cachedUser.address,
+                                          lat = cachedUser.lat,
+                                          lng = cachedUser.lng,
+                                          isWhatsAppOptIn = cachedUser.isWhatsAppOptIn
+                                      )
+                                  } else {
+                                      firestoreUser
+                                  }
+                                  
+                                  // 5. Log the resolution decision
+                                  android.util.Log.d("MainActivity", "Profile load: using ${if (isLocalNewer) "LOCAL" else "FIRESTORE"} address data, local updatedAt=$localTs vs firestore updatedAt=$firestoreTs")
+                                  
+                                  lyoRepository.userDao.insertUser(finalUser)
+                                  lyoRepository.currentUser.value = finalUser
+                                  recoverySuccessful = true
+                                  
+                                  currentRoute = when (role) {
+                                      "ADMIN" -> "ADMIN_DASHBOARD"
+                                      "CUSTOMER_CARE" -> "CUSTOMER_CARE_DASHBOARD"
+                                      "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                                      else -> "CUSTOMER_DASHBOARD"
+                                  }
+                                  android.util.Log.d("MainActivity", "Successfully recovered user session for UID: $uid, Role: $role")
+                                  
+                                  CoroutineScope(Dispatchers.IO).launch {
+                                      try {
+                                          lyoRepository.retryPendingSyncs()
+                                      } catch (syncEx: Exception) {
+                                          android.util.Log.e("MainActivity", "Pending syncs retry failed: ${syncEx.message}")
+                                      }
+                                  }
+                              } else {
+                                  errorMessage = "Your account is inactive. Please contact the administrator. (உங்கள் கணக்கு முடக்கப்பட்டுள்ளது!)"
+                              }
+                          }
+                      } else {
+                          errorMessage = "Account profile is incomplete. Please contact support."
+                      }
+                  } catch (e: Exception) {
+                      android.util.Log.e("MainActivity", "Temporary Firestore error during session recovery: ${e.message}. Falling back to local cache.")
+                      
+                      val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
+                      if (cachedUser != null) {
+                          lyoRepository.currentUser.value = cachedUser
+                          recoverySuccessful = true
+                          currentRoute = when (cachedUser.role) {
+                              "ADMIN" -> "ADMIN_DASHBOARD"
+                              "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
+                              else -> "CUSTOMER_DASHBOARD"
+                          }
+                      } else {
+                          errorMessage = "Network or cache error: Could not verify user profile. (${e.localizedMessage})"
+                      }
+                  }
+              } else {
                   val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
                   if (cachedUser != null) {
                       lyoRepository.currentUser.value = cachedUser
-                      recoverySuccessful = true
                       currentRoute = when (cachedUser.role) {
                           "ADMIN" -> "ADMIN_DASHBOARD"
                           "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
                           else -> "CUSTOMER_DASHBOARD"
                       }
+                      android.util.Log.d("MainActivity", "Firebase auth is null, restored cached user: ${cachedUser.phone}")
                   } else {
-                      errorMessage = "Network or cache error: Could not verify user profile. (${e.localizedMessage})"
+                      lyoRepository.currentUser.value = null
+                      currentRoute = "CUSTOMER_DASHBOARD"
+                      android.util.Log.d("MainActivity", "Firebase auth is null on startup. Routing to CUSTOMER_DASHBOARD.")
                   }
               }
-              
-              if (!recoverySuccessful) {
-                  if (errorMessage != null) {
-                      android.widget.Toast.makeText(applicationContext, errorMessage, android.widget.Toast.LENGTH_LONG).show()
-                  }
-                  auth.signOut()
-                  sharedPrefs.edit()
-                      .remove("logged_user_phone")
-                      .remove("logged_user_password_hash")
-                      .apply()
-                  lyoRepository.currentUser.value = null
-                  currentRoute = "CUSTOMER_DASHBOARD"
-              }
-          } else {
-              // FirebaseAuth.currentUser is genuinely null on startup!
+          } catch (t: Throwable) {
+              android.util.Log.e("MainActivity", "Firebase/Auth is not available or not initialized: ${t.message}. Falling back to local/offline check.")
               val cachedUser = startPhone?.let { lyoRepository.findUserLocallyOnly(it) }
               if (cachedUser != null) {
                   lyoRepository.currentUser.value = cachedUser
@@ -239,12 +296,23 @@ class MainActivity : ComponentActivity() {
                       "RIDER", "DELIVERY" -> "DELIVERY_DASHBOARD"
                       else -> "CUSTOMER_DASHBOARD"
                   }
-                  android.util.Log.d("MainActivity", "Firebase auth is null, restored cached user: ${cachedUser.phone}")
               } else {
                   lyoRepository.currentUser.value = null
                   currentRoute = "CUSTOMER_DASHBOARD"
-                  android.util.Log.d("MainActivity", "Firebase auth is null on startup. Routing to CUSTOMER_DASHBOARD.")
               }
+          }
+
+          if (recoverySuccessful == false && errorMessage != null) {
+              android.widget.Toast.makeText(applicationContext, errorMessage, android.widget.Toast.LENGTH_LONG).show()
+              try {
+                  com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+              } catch (ex: Exception) {}
+              sharedPrefs.edit()
+                  .remove("logged_user_phone")
+                  .remove("logged_user_password_hash")
+                  .apply()
+              lyoRepository.currentUser.value = null
+              currentRoute = "CUSTOMER_DASHBOARD"
           }
         }
 
@@ -291,8 +359,16 @@ class MainActivity : ComponentActivity() {
         val navTrigger by storefrontViewModel.navigationTrigger.collectAsState()
         LaunchedEffect(navTrigger) {
           navTrigger?.let { destination ->
-            if (destination == "CHECKOUT" && lyoRepository.currentUser.value == null) {
-              android.widget.Toast.makeText(applicationContext, "Please login first to place an order! 🔐", android.widget.Toast.LENGTH_LONG).show()
+            val currentUsr = lyoRepository.currentUser.value
+            val isGuestOrTest = currentUsr == null || currentUsr.phone.startsWith("99999")
+            if (destination == "CHECKOUT" && isGuestOrTest) {
+              if (currentUsr != null && currentUsr.phone.startsWith("99999")) {
+                  lyoRepository.currentUser.value = null
+                  try {
+                      com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+                  } catch (e: Exception) {}
+              }
+              android.widget.Toast.makeText(applicationContext, "Please login first to place an order! 🔐 (தயவுசெய்து முதலில் லாகின் செய்யவும்!)", android.widget.Toast.LENGTH_LONG).show()
               if (currentRoute != "LOGIN" && currentRoute != "SPLASH" && currentRoute != "REGISTER") {
                 previousRoute = currentRoute
               }
@@ -304,6 +380,18 @@ class MainActivity : ComponentActivity() {
               currentRoute = destination
             }
             storefrontViewModel.navigationTrigger.value = null
+          }
+        }
+
+        val aiTargetVendorId by storefrontViewModel.aiTargetVendorId.collectAsState()
+        LaunchedEffect(aiTargetVendorId) {
+          aiTargetVendorId?.let { targetId ->
+            selectedVendorId = targetId
+            if (currentRoute != "LOGIN" && currentRoute != "SPLASH" && currentRoute != "REGISTER") {
+              previousRoute = currentRoute
+            }
+            currentRoute = "VENDOR_PROFILE"
+            storefrontViewModel.aiTargetVendorId.value = null
           }
         }
 

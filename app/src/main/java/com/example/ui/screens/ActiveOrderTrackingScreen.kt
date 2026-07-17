@@ -596,236 +596,17 @@ fun ActiveOrderTrackingScreen(
                         .clip(RoundedCornerShape(16.dp))
                 )
 
-                // Unified Customer-to-Rider Chat and Updates Card
-                val activeOrder = activeOrderVal
-                if (activeOrder != null) {
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    var customerCustomMessage by remember { mutableStateOf("") }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        borderColor = Color(0x3338BDF8),
-                        backgroundColor = Color(0xFF0F172A)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Filled.Chat,
-                                    contentDescription = "Quick Chat",
-                                    tint = Color(0xFF38BDF8),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "விநியோகஸ்தர் உரையாடல் • RIDER QUICK CHAT",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // List of last 4 messages from either Rider or Customer
-                            val chatMessages = orderMessages.takeLast(4)
-                            if (chatMessages.isEmpty()) {
-                                Text(
-                                    text = "இன்னும் செய்திகள் எதுவும் இல்லை / No messages yet.",
-                                    color = LyoColors.TextSecondary,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-                            } else {
-                                chatMessages.forEach { msg ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        val isRider = msg.senderRole == "RIDER"
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(if (isRider) Color(0x3338BDF8) else Color(0x3322C55E))
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isRider) "RIDER" else "YOU",
-                                                color = if (isRider) Color(0xFF38BDF8) else Color(0xFF22C55E),
-                                                fontSize = 8.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = msg.text,
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Quick suggestions for customer with horizontal scroll and maxLines=1 to prevent wrapping
-                            val customerSuggestions = listOf("சீக்கிரம் வரவும் 🛵", "லொகேஷன் வந்துட்டேன் 📍", "போன் செய்யவும் 📞", "நன்றி 👍")
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                customerSuggestions.forEach { suggestion ->
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .background(Color(0x1F38BDF8))
-                                            .clickable {
-                                                scope.launch {
-                                                    LyoFirebaseHelper.sendOrderMessage(
-                                                        orderId = activeOrder.id,
-                                                        senderId = activeOrder.userId,
-                                                        senderRole = "CUSTOMER",
-                                                        text = suggestion
-                                                    )
-                                                    android.widget.Toast.makeText(context, "செய்தி அனுப்பப்பட்டது", android.widget.Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = suggestion, 
-                                            fontSize = 11.sp, 
-                                            color = Color(0xFF38BDF8), 
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Custom message textfield + send button
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                TextField(
-                                    value = customerCustomMessage,
-                                    onValueChange = { customerCustomMessage = it },
-                                    placeholder = { Text("செய்தி தட்டச்சு செய்யவும்...", fontSize = 11.sp, color = Color.Gray) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
-                                    colors = TextFieldDefaults.colors(
-                                        focusedContainerColor = Color(0x1AFFFFFF),
-                                        unfocusedContainerColor = Color(0x0CFFFFFF),
-                                        focusedIndicatorColor = Color.Transparent,
-                                        unfocusedIndicatorColor = Color.Transparent
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-
-                                Button(
-                                    onClick = {
-                                        if (customerCustomMessage.isNotBlank()) {
-                                            val text = customerCustomMessage.trim()
-                                            customerCustomMessage = ""
-                                            scope.launch {
-                                                LyoFirebaseHelper.sendOrderMessage(
-                                                    orderId = activeOrder.id,
-                                                    senderId = activeOrder.userId,
-                                                    senderRole = "CUSTOMER",
-                                                    text = text
-                                                )
-                                                android.widget.Toast.makeText(context, "செய்தி அனுப்பப்பட்டது", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
-                                    modifier = Modifier.height(48.dp)
-                                ) {
-                                    Icon(Icons.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Intuitive Quick Actions Card for Non-Technical Users (Call Driver & Copy Tracking ID)
+                // Call Rider Quick-Action Button in a clean premium card
+                val dialPhone = if (riderPhone.isNotEmpty()) riderPhone else "919000000000"
+                val contextForCall = androidx.compose.ui.platform.LocalContext.current
+                
+                Spacer(modifier = Modifier.height(14.dp))
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth().testTag("quick_actions_card"),
-                    borderColor = Color(0x33FF6B00),
+                    modifier = Modifier.fillMaxWidth().testTag("call_driver_card"),
+                    borderColor = if (riderPhone.isNotEmpty()) Color(0x3310B981) else Color(0x33FBBF24),
                     backgroundColor = Color(0xFF1E293B)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "ஆர்டர் அடையாளக்குறி • TRACKING ID",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF94A3B8)
-                                )
-                                Text(
-                                    text = activeOrderVal?.id?.toString() ?: "LYO-TRACK",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White
-                                )
-                            }
-                            
-                            val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
-                            val contextForToast = androidx.compose.ui.platform.LocalContext.current
-                            val orderIdToCopy = activeOrderVal?.id?.toString() ?: ""
-                            
-                            Button(
-                                onClick = {
-                                    if (orderIdToCopy.isNotEmpty()) {
-                                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(orderIdToCopy))
-                                        android.widget.Toast.makeText(
-                                            contextForToast, 
-                                            "ஆர்டர் ஐடி நகலெடுக்கப்பட்டது • ID Copied!", 
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.height(36.dp).testTag("copy_tracking_id_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ContentCopy,
-                                    contentDescription = "Copy ID",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("நகல் / COPY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Divider(color = Color(0x1BFFFFFF), thickness = 1.dp)
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Large Call Driver Quick-Action Button
-                        val dialPhone = if (riderPhone.isNotEmpty()) riderPhone else "919000000000"
-                        val contextForCall = androidx.compose.ui.platform.LocalContext.current
-                        
+                    Box(modifier = Modifier.padding(12.dp)) {
                         Button(
                             onClick = {
                                 val intent = android.content.Intent(
@@ -835,7 +616,7 @@ fun ActiveOrderTrackingScreen(
                                 contextForCall.startActivity(intent)
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (riderPhone.isNotEmpty()) Color(0xFF10B981) else Color(0x33FBBF24)
+                                containerColor = if (riderPhone.isNotEmpty()) Color(0xFF10B981) else Color(0xFF334155)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -1027,23 +808,69 @@ fun ActiveOrderTrackingScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // OTP receipts code for visual handoff compliance
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth().testTag("otp_code_card"),
-                    borderColor = LyoColors.VegGreen,
-                    backgroundColor = Color(0x1A10B981)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(14.dp)
-                    ) {
-                        Text(
-                            text = "OTP: $otp",
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White,
-                            letterSpacing = 2.sp
+                // Premium, compact gradient OTP card (68dp height, 20dp rounded corners)
+                val contextForOtpToast = androidx.compose.ui.platform.LocalContext.current
+                val clipboardManagerOtp = androidx.compose.ui.platform.LocalClipboardManager.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF059669), // Emerald 600
+                                    Color(0xFF10B981)  // Emerald 500
+                                )
+                            )
                         )
+                        .clickable {
+                            clipboardManagerOtp.setText(androidx.compose.ui.text.AnnotatedString(otp))
+                            android.widget.Toast.makeText(contextForOtpToast, "OTP Copied! ($otp)", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        .testTag("otp_code_card"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "OTP: $otp",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White,
+                                letterSpacing = 2.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Share OTP with Rider • விநியோகஸ்தரிடம் பகிரவும்",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.85f)
+                            )
+                        }
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentCopy,
+                                contentDescription = "Copy OTP",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
 

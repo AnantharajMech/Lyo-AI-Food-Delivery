@@ -19,9 +19,10 @@ import androidx.room.RoomDatabase
         SavedPaymentMethod::class,
         Review::class,
         MissingDictionaryWord::class,
-        LyoNotification::class
+        LyoNotification::class,
+        SmartMenuCorrection::class
     ],
-    version = 26,
+    version = 29,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -37,6 +38,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract val savedPaymentMethodDao: SavedPaymentMethodDao
     abstract val reviewDao: ReviewDao
     abstract val missingDictionaryWordDao: MissingDictionaryWordDao
+    abstract val smartMenuCorrectionDao: SmartMenuCorrectionDao
 
     companion object {
         @Volatile

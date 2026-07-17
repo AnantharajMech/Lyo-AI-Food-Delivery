@@ -18,7 +18,8 @@ data class User(
     val isActiveRider: Boolean = true,
     val salaryType: String = "MONTHLY", // "MONTHLY" or "PER_KM"
     val salaryRate: Double = 0.0,
-    val uid: String = ""
+    val uid: String = "",
+    val updatedAt: Long = 0L
 )
 
 @Entity(tableName = "vendors")
@@ -48,8 +49,54 @@ data class Vendor(
     val isDynamicDelivery: Boolean = false,
     val autoOpenTime: String = "",
     val autoCloseTime: String = "",
-    val status: String = "ACTIVE"
+    val status: String = "ACTIVE",
+    val isOfferEnabled: Boolean = false,
+    val offerType: String = "Percentage",
+    val offerValue: Double = 0.0,
+    val offerText: String = "",
+    val offerStartDate: String = "",
+    val offerEndDate: String = "",
+    val offerPriority: Int = 0
 )
+
+fun Vendor.getPromoOffer(): String? {
+    if (!isOfferEnabled) return null
+    
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    sdf.isLenient = false
+    val today = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.time
+
+    if (offerStartDate.isNotBlank()) {
+        try {
+            val start = sdf.parse(offerStartDate.trim())
+            if (today.before(start)) return null
+        } catch (e: Exception) {
+        }
+    }
+
+    if (offerEndDate.isNotBlank()) {
+        try {
+            val end = sdf.parse(offerEndDate.trim())
+            if (today.after(end)) return null
+        } catch (e: Exception) {
+        }
+    }
+
+    if (offerText.isNotBlank()) {
+        return offerText
+    }
+
+    return when (offerType) {
+        "Percentage" -> "${offerValue.toInt()}% OFF"
+        "Flat" -> "₹${offerValue.toInt()} OFF"
+        else -> null
+    }
+}
 
 @Entity(tableName = "categories", indices = [Index(value = ["vendorId"])])
 data class Category(
@@ -432,6 +479,18 @@ data class MissingDictionaryWord(
     @androidx.room.PrimaryKey val word: String,
     val firstSeenAt: Long = System.currentTimeMillis()
 )
+
+@androidx.room.Entity(tableName = "smart_menu_corrections")
+data class SmartMenuCorrection(
+    @androidx.room.PrimaryKey val originalName: String, // standardized lowercase/trimmed name
+    val correctedNameEn: String,
+    val correctedNameTa: String,
+    val correctedCategoryEn: String,
+    val correctedCategoryTa: String = "",
+    val correctedMeatType: String,
+    val correctedPrice: Double
+)
+
 
 
 

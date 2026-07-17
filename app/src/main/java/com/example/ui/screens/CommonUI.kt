@@ -313,7 +313,7 @@ fun LyoBackground(
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 14.dp,
+    cornerRadius: Dp = 16.dp,
     borderWidth: Dp = 1.0.dp,
     borderColor: Color = LyoColors.GlassBorder,
     backgroundColor: Color = LyoGlassDesignTokens.GlassCardBg,
@@ -500,7 +500,7 @@ fun LyoButton(
         label = "btn_shine_progress"
     )
 
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(16.dp)
     
     Box(
         modifier = modifier
@@ -2368,10 +2368,15 @@ function setupOfflineMap() {
 
     LaunchedEffect(isPageLoaded, initialLat, initialLng) {
         if (isPageLoaded) {
-            webView.evaluateJavascript(
-                "if (window.setCoords) { window.setCoords($initialLat, $initialLng); }",
-                null
-            )
+            val threshold = 0.00005
+            val diffLat = Math.abs(initialLat - lastSentLat)
+            val diffLng = Math.abs(initialLng - lastSentLng)
+            if (diffLat > threshold || diffLng > threshold) {
+                webView.evaluateJavascript(
+                    "if (window.setCoords) { window.setCoords($initialLat, $initialLng); }",
+                    null
+                )
+            }
         }
     }
 

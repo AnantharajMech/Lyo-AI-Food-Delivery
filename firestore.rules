@@ -19,7 +19,7 @@ service cloud.firestore {
 
     // --- Users ---
     match /users/{userId} {
-      allow get: if isAuthenticated() && (request.auth.uid == userId || hasAnyRole(['ADMIN', 'RIDER']));
+      allow get: if isAuthenticated() && (request.auth.uid == userId || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
       allow list: if isAdmin();
       allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow delete: if isAdmin();
@@ -30,6 +30,9 @@ service cloud.firestore {
       match /deviceTokens/{tokenId} {
         allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       }
+      match /saved_addresses/{addressId} {
+        allow read, write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
     }
 
     // --- Admins ---
@@ -37,10 +40,32 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // --- Riders ---
+    match /riders/{riderId} {
+      allow read: if isAuthenticated();
+      allow write, delete: if isAdmin();
+    }
+
     // --- Vendors ---
     match /vendors/{vendorId} {
       allow read: if true; // Guest catalog view allowed
       allow write, delete: if isAdmin();
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write, delete: if isAdmin();
+      }
+    }
+
+    // --- Stores ---
+    match /stores/{storeId} {
+      allow read: if true; // Guest catalog view allowed
+      allow write, delete: if isAdmin();
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write, delete: if isAdmin();
+      }
     }
 
     // --- Categories ---
@@ -69,20 +94,20 @@ service cloud.firestore {
 
     // --- Orders ---
     match /ek_orders/{orderId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER']));
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
       allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER']));
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
       allow delete: if isAdmin();
     }
 
     // --- Delivery Rides ---
     match /delivery_rides/{rideId} {
       allow read: if isAuthenticated() && (
-        hasAnyRole(['ADMIN', 'RIDER']) ||
+        hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']) ||
         (exists(/databases/$(database)/documents/ek_orders/$(string(resource.data.orderId))) &&
          get(/databases/$(database)/documents/ek_orders/$(string(resource.data.orderId))).data.userId == request.auth.uid)
       );
-      allow write: if isAuthenticated() && hasAnyRole(['ADMIN', 'RIDER']);
+      allow write: if isAuthenticated() && hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']);
     }
 
     // --- Order Messages (Chat) ---
@@ -93,7 +118,7 @@ service cloud.firestore {
           (exists(/databases/$(database)/documents/ek_orders/$(orderId)) && (
             get(/databases/$(database)/documents/ek_orders/$(orderId)).data.userId == request.auth.uid ||
             get(/databases/$(database)/documents/ek_orders/$(orderId)).data.riderUid == request.auth.uid ||
-            hasAnyRole(['RIDER'])
+            hasAnyRole(['RIDER', 'DELIVERY'])
           ))
         );
       }
@@ -104,9 +129,75 @@ service cloud.firestore {
       }
     }
 
+    // --- Support Tickets ---
+    match /support_tickets/{ticketId} {
+      allow read, write: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // --- Menu Backups ---
+    match /menu_backups/{backupId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- Bulk Import Logs ---
+    match /bulk_import_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
     // --- Idempotency Keys ---
     match /idempotency_keys/{keyId} {
       allow read, write: if isAuthenticated();
+    }
+
+    // --- Coupons ---
+    match /coupons/{couponId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // --- Offers ---
+    match /offers/{offerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Notifications ---
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // --- Location Updates ---
+    match /location_updates/{updateId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']) || request.auth.uid == updateId);
+    }
+
+    // --- Tracking Logs ---
+    match /tracking_logs/{logId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
+      allow write: if isAuthenticated() && (hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']) || request.resource.data.userId == request.auth.uid);
+    }
+
+    // --- Loyalty ---
+    match /loyalty/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // --- AI Recommendations ---
+    match /ai_recommendations/{recId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+    match /recommendations/{recId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // --- Saved Addresses (Top-level fallback) ---
+    match /saved_addresses/{addressId} {
+      allow read, write: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid || isAdmin());
     }
   }
 }

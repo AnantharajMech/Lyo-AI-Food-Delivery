@@ -17,6 +17,10 @@ class LyoRepository(val db: AppDatabase) {
     var peakHourSurchargeEnabled: Boolean = false
     var deliveryZoneMultiplier: Double = 1.0
 
+    // Global UPI Config
+    val activeUpiId = MutableStateFlow("8778148899@ptyes")
+    val activeUpiName = MutableStateFlow("Anantharaj R")
+
     fun initGstSettings(context: android.content.Context) {
         val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
         gstEnabled = prefs.getBoolean("gst_enabled", false)
@@ -24,6 +28,44 @@ class LyoRepository(val db: AppDatabase) {
         rainSurchargeEnabled = prefs.getBoolean("rain_surcharge_enabled", false)
         peakHourSurchargeEnabled = prefs.getBoolean("peak_hour_surcharge_enabled", false)
         deliveryZoneMultiplier = prefs.getFloat("delivery_zone_multiplier", 1.0f).toDouble()
+    }
+
+    fun initUpiSettings(context: android.content.Context) {
+        val prefs = context.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+        val id = prefs.getString("upi_id", "8778148899@ptyes") ?: "8778148899@ptyes"
+        val name = prefs.getString("upi_name", "Anantharaj R") ?: "Anantharaj R"
+        activeUpiId.value = id
+        activeUpiName.value = name
+    }
+
+    fun setUpiSettingsLocally(context: android.content.Context?, id: String, name: String) {
+        activeUpiId.value = id
+        activeUpiName.value = name
+        context?.let { ctx ->
+            val prefs = ctx.getSharedPreferences("lyo_session_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("upi_id", id)
+                .putString("upi_name", name)
+                .apply()
+        }
+    }
+
+    fun updateUpiSettings(context: android.content.Context, id: String, name: String) {
+        setUpiSettingsLocally(context, id, name)
+        // Sync to Firestore live config!
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val upiMap = mapOf(
+                    "upiId" to id,
+                    "upiName" to name
+                )
+                dbInstance.collection("app_settings").document("global").set(upiMap, com.google.firebase.firestore.SetOptions.merge())
+                Log.d("LyoRepository", "Synced UPI settings to Firestore: upiId=$id, upiName=$name")
+            } catch (e: java.lang.Exception) {
+                Log.w("LyoRepository", "Error syncing UPI settings to Firestore: ${e.message}")
+            }
+        }
     }
 
     fun setGstSettingsLocally(context: android.content.Context?, enabled: Boolean, rate: Double) {
@@ -149,74 +191,87 @@ class LyoRepository(val db: AppDatabase) {
     }
 
     init {
-        com.google.firebase.auth.FirebaseAuth.getInstance().addAuthStateListener { auth ->
-            val firebaseUser = auth.currentUser
-            if (firebaseUser != null) {
-                val uid = firebaseUser.uid
-                val current = currentUser.value
-                if (current == null || (current.uid != uid && current.role != "ADMIN" && current.uid != "anantharaj_superadmin_uid")) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        Log.d("LyoRepository", "AuthStateListener: Firebase user connected (UID: $uid). Restoring session...")
-                        var recoveredUser = db.userDao.getUserByPhone(uid)
-                        if (recoveredUser == null) {
-                            val phone = firebaseUser.phoneNumber ?: firebaseUser.email ?: ""
-                            if (phone.isNotEmpty()) {
-                                recoveredUser = db.userDao.getUserByPhone(phone)
-                            }
-                        }
-                        if (recoveredUser == null) {
-                            try {
-                                val doc = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                                    .collection("users").document(uid).get().await()
-                                if (doc.exists()) {
-                                    val rawRole = doc.getString("role")
-                                    if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
-                                        Log.e("LyoRepository", "AuthStateListener: Missing, empty, or invalid role.")
-                                    } else {
-                                        val phone = doc.getString("phone") ?: ""
-                                        val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
-                                        recoveredUser = User(
-                                            phone = phone,
-                                            name = doc.getString("name") ?: "",
-                                            email = doc.getString("email") ?: "",
-                                            address = doc.getString("address") ?: "",
-                                            lat = doc.getDouble("lat") ?: 11.5812,
-                                            lng = doc.getDouble("lng") ?: 77.8465,
-                                            isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
-                                            role = role,
-                                            vehicleNo = doc.getString("vehicleNo") ?: "",
-                                            isActiveRider = doc.getBoolean("isActiveRider") ?: true,
-                                            salaryType = doc.getString("salaryType") ?: "MONTHLY",
-                                            salaryRate = doc.getDouble("salaryRate") ?: 0.0,
-                                            uid = uid
-                                        )
-                                        db.userDao.insertUser(recoveredUser)
+        CoroutineScope(Dispatchers.Main).launch {
+            var waitCount = 0
+            while (!com.example.data.repository.LyoFirebaseHelper.isInitialized && waitCount < 30) {
+                delay(100)
+                waitCount++
+            }
+            if (com.example.data.repository.LyoFirebaseHelper.isInitialized) {
+                try {
+                    com.google.firebase.auth.FirebaseAuth.getInstance().addAuthStateListener { auth ->
+                    val firebaseUser = auth.currentUser
+                    if (firebaseUser != null) {
+                        val uid = firebaseUser.uid
+                        val current = currentUser.value
+                        if (current == null || (current.uid != uid && current.role != "ADMIN" && current.uid != "anantharaj_superadmin_uid")) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                Log.d("LyoRepository", "AuthStateListener: Firebase user connected (UID: $uid). Restoring session...")
+                                var recoveredUser = db.userDao.getUserByPhone(uid)
+                                if (recoveredUser == null) {
+                                    val phone = firebaseUser.phoneNumber ?: firebaseUser.email ?: ""
+                                    if (phone.isNotEmpty()) {
+                                        recoveredUser = db.userDao.getUserByPhone(phone)
+                                    }
+                                }
+                                if (recoveredUser == null) {
+                                    try {
+                                        val doc = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                            .collection("users").document(uid).get().await()
+                                        if (doc.exists()) {
+                                            val rawRole = doc.getString("role")
+                                            if (rawRole.isNullOrBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                                                Log.e("LyoRepository", "AuthStateListener: Missing, empty, or invalid role.")
+                                            } else {
+                                                val phone = doc.getString("phone") ?: ""
+                                                val role = if (rawRole == "DELIVERY" || rawRole == "RIDER") "RIDER" else rawRole
+                                                recoveredUser = User(
+                                                    phone = phone,
+                                                    name = doc.getString("name") ?: "",
+                                                    email = doc.getString("email") ?: "",
+                                                    address = doc.getString("address") ?: "",
+                                                    lat = doc.getDouble("lat") ?: 11.5812,
+                                                    lng = doc.getDouble("lng") ?: 77.8465,
+                                                    isWhatsAppOptIn = doc.getBoolean("isWhatsAppOptIn") ?: true,
+                                                    role = role,
+                                                    vehicleNo = doc.getString("vehicleNo") ?: "",
+                                                    isActiveRider = doc.getBoolean("isActiveRider") ?: true,
+                                                    salaryType = doc.getString("salaryType") ?: "MONTHLY",
+                                                    salaryRate = doc.getDouble("salaryRate") ?: 0.0,
+                                                    uid = uid
+                                                )
+                                                db.userDao.insertUser(recoveredUser)
+                                            }
+                                        } else {
+                                            Log.e("LyoRepository", "AuthStateListener: Profile document missing in Firestore.")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("LyoRepository", "AuthStateListener: Error fetching profile from Firestore: ${e.message}")
                                     }
                                 } else {
-                                    Log.e("LyoRepository", "AuthStateListener: Profile document missing in Firestore.")
+                                    val cachedRole = recoveredUser.role
+                                    if (cachedRole.isEmpty() || cachedRole !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
+                                        Log.e("LyoRepository", "AuthStateListener: Cached user role invalid or missing.")
+                                        recoveredUser = null
+                                    }
                                 }
-                            } catch (e: Exception) {
-                                Log.e("LyoRepository", "AuthStateListener: Error fetching profile from Firestore: ${e.message}")
-                            }
-                        } else {
-                            val cachedRole = recoveredUser.role
-                            if (cachedRole.isEmpty() || cachedRole !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
-                                Log.e("LyoRepository", "AuthStateListener: Cached user role invalid or missing.")
-                                recoveredUser = null
+                                if (recoveredUser != null) {
+                                    currentUser.value = recoveredUser
+                                    Log.d("LyoRepository", "AuthStateListener: Session restored successfully for: ${recoveredUser.phone}")
+                                } else {
+                                    Log.e("LyoRepository", "AuthStateListener: Session recovery skipped/deferred (could be active login/registration in progress).")
+                                }
                             }
                         }
-                        if (recoveredUser != null) {
-                            currentUser.value = recoveredUser
-                            Log.d("LyoRepository", "AuthStateListener: Session restored successfully for: ${recoveredUser.phone}")
-                        } else {
-                            Log.e("LyoRepository", "AuthStateListener: Session recovery skipped/deferred (could be active login/registration in progress).")
-                        }
+                    } else {
+                        Log.d("LyoRepository", "AuthStateListener: Firebase user is null. Keeping local/cached session intact.")
                     }
                 }
-            } else {
-                Log.d("LyoRepository", "AuthStateListener: Firebase user is null. Keeping local/cached session intact.")
+            } catch (e: Exception) {
+                Log.e("LyoRepository", "AuthStateListener: Failed to setup AuthStateListener: ${e.message}")
             }
         }
+    }
 
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             currentUser.map { it?.phone }.distinctUntilChanged().collectLatest { phone ->
@@ -278,6 +333,7 @@ class LyoRepository(val db: AppDatabase) {
     val promoBannerDao = db.promoBannerDao
     val savedAddressDao = db.savedAddressDao
     val savedPaymentMethodDao = db.savedPaymentMethodDao
+    val smartMenuCorrectionDao = db.smartMenuCorrectionDao
 
     // Saved Addresses & Payment Methods Operations
     fun getSavedAddressesForUser(userId: String): Flow<List<SavedAddress>> =
@@ -395,10 +451,16 @@ class LyoRepository(val db: AppDatabase) {
     }
 
     suspend fun findUser(phone: String): User? = withContext(Dispatchers.IO) {
-        var user = db.userDao.getUserByPhone(phone)
-        if ((user == null || user.uid.isBlank()) && LyoFirebaseHelper.isInitialized) {
+        val normalized = LyoFirebaseHelper.normalizePhone(phone)
+        val variants = listOf(phone.trim(), normalized, "+91$normalized", "91$normalized").distinct()
+        var user: User? = null
+        for (v in variants) {
+            user = db.userDao.getUserByPhone(v)
+            if (user != null) break
+        }
+        if ((user == null || user.uid.isBlank() || user.uid.startsWith("uid_")) && LyoFirebaseHelper.isInitialized) {
             val firestoreUser = LyoFirebaseHelper.getUserByPhoneFromFirestore(phone)
-            if (firestoreUser != null) {
+            if (firestoreUser != null && !firestoreUser.uid.startsWith("uid_") && firestoreUser.uid.isNotBlank()) {
                 user = firestoreUser
                 db.userDao.insertUser(firestoreUser)
             }
@@ -430,9 +492,14 @@ class LyoRepository(val db: AppDatabase) {
                 firebaseRegistered = true
                 
                 val finalUid = LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: finalUser.uid
-                if (finalUid.isNotBlank() && finalUid != finalUser.uid) {
-                    finalUser = finalUser.copy(uid = finalUid)
+                var resolvedUid = finalUid
+                if (resolvedUid.isBlank()) {
+                    resolvedUid = db.userDao.getUserByPhone(user.phone)?.uid ?: ""
                 }
+                if (resolvedUid.isBlank()) {
+                    resolvedUid = "uid_${LyoFirebaseHelper.normalizePhone(user.phone)}"
+                }
+                finalUser = finalUser.copy(uid = resolvedUid)
             } catch (e: Exception) {
                 Log.e("LyoRepository", "Firebase registration/sync failed, rejecting registration: ${e.message}")
                 throw e
@@ -442,6 +509,7 @@ class LyoRepository(val db: AppDatabase) {
         }
         
         if (firebaseRegistered) {
+            finalUser = finalUser.copy(updatedAt = System.currentTimeMillis())
             db.userDao.insertUser(finalUser)
             
             LyoFirebaseHelper.appContext?.let { context ->
@@ -524,6 +592,7 @@ class LyoRepository(val db: AppDatabase) {
                 // Delete Firestore documents
                 firestoreInstance.collection("users").document(riderUid).delete().await()
                 firestoreInstance.collection("admins").document(riderUid).delete().await()
+                firestoreInstance.collection("riders").document(riderUid).delete().await()
                 Log.d("LyoRepository", "Deleted rider documents from Firestore.")
             }
         } catch (e: Exception) {
@@ -709,7 +778,9 @@ class LyoRepository(val db: AppDatabase) {
         val finalOrder = if (!syncSuccess && lastException != null) {
             val failureReason = when {
                 lastException.message?.contains("permission", ignoreCase = true) == true ||
-                lastException.message?.contains("denied", ignoreCase = true) == true -> "PERMISSION_DENIED"
+                lastException.message?.contains("denied", ignoreCase = true) == true -> {
+                    LyoFirebaseHelper.getFriendlyPermissionErrorMessage(lastException)
+                }
                 lastException.message?.contains("network", ignoreCase = true) == true ||
                 lastException.message?.contains("unavailable", ignoreCase = true) == true ||
                 lastException.message?.contains("timeout", ignoreCase = true) == true -> "NETWORK_ERROR"
@@ -827,7 +898,9 @@ class LyoRepository(val db: AppDatabase) {
             }
             Result.success(Unit)
         } else {
-            Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
+            val ex = result.exceptionOrNull() ?: Exception("Unknown error")
+            val friendlyMsg = LyoFirebaseHelper.getFriendlyPermissionErrorMessage(ex)
+            Result.failure(Exception(friendlyMsg))
         }
     }
 
@@ -844,7 +917,8 @@ class LyoRepository(val db: AppDatabase) {
         if (status == "ACCEPTED") {
             val txResult = LyoFirebaseHelper.adminAcceptOrderTransaction(orderId)
             if (txResult.isFailure) {
-                val errorMsg = txResult.exceptionOrNull()?.message ?: "Unknown error"
+                val ex = txResult.exceptionOrNull() ?: Exception("Unknown error")
+                val errorMsg = LyoFirebaseHelper.getFriendlyPermissionErrorMessage(ex)
                 Log.e("LyoRepository", "Admin acceptance failed: $errorMsg")
                 withContext(Dispatchers.Main) {
                     LyoFirebaseHelper.appContext?.let { ctx ->
@@ -1017,8 +1091,9 @@ class LyoRepository(val db: AppDatabase) {
 
     // Seeding Default High-Fidelity Data
     suspend fun seedDatabaseIfNeeded() = withContext(Dispatchers.IO) {
-        // Hard-delete dummy customer and rider immediately to keep the database fresh and authentic
         try {
+            // Hard-delete dummy customer and rider immediately to keep the database fresh and authentic
+            try {
             userDao.deleteUserByPhone("9000000002")
             userDao.deleteUserByPhone("9000000003")
             val dummyRiderPhones = listOf("9999910001", "9999910002", "9999910003", "9999910004", "9999910005")
@@ -1422,6 +1497,9 @@ class LyoRepository(val db: AppDatabase) {
                     Log.e("LyoRepository", "Failed to upload seeded database to Firestore: ${e.message}")
                 }
             }
+        }
+        } catch (e: Exception) {
+            Log.w("LyoRepository", "Database access exception during seeding (possibly closed during test teardown): ${e.message}")
         }
     }
 

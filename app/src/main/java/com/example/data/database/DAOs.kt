@@ -152,10 +152,10 @@ interface MenuItemDao {
 
 @Dao
 interface OrderDao {
-    @Query("SELECT * FROM orders WHERE userId = :userId ORDER BY timestamp DESC")
+    @Query("SELECT * FROM orders WHERE userId = :userId OR userId IN (SELECT uid FROM users WHERE phone = :userId) OR userId IN (SELECT phone FROM users WHERE uid = :userId) ORDER BY timestamp DESC")
     fun getOrdersForUser(userId: String): Flow<List<Order>>
 
-    @Query("SELECT * FROM orders WHERE userId = :userId ORDER BY timestamp DESC")
+    @Query("SELECT * FROM orders WHERE userId = :userId OR userId IN (SELECT uid FROM users WHERE phone = :userId) OR userId IN (SELECT phone FROM users WHERE uid = :userId) ORDER BY timestamp DESC")
     suspend fun getOrdersForUserList(userId: String): List<Order>
 
     @Query("SELECT * FROM orders ORDER BY timestamp DESC")
@@ -303,5 +303,21 @@ interface MissingDictionaryWordDao {
     @Query("DELETE FROM missing_dictionary_words")
     suspend fun clearAllMissingWords()
 }
+
+@Dao
+interface SmartMenuCorrectionDao {
+    @Query("SELECT * FROM smart_menu_corrections")
+    suspend fun getAllCorrections(): List<SmartMenuCorrection>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCorrection(correction: SmartMenuCorrection)
+
+    @Query("DELETE FROM smart_menu_corrections WHERE originalName = :originalName")
+    suspend fun deleteCorrection(originalName: String)
+
+    @Query("DELETE FROM smart_menu_corrections")
+    suspend fun clearAllCorrections()
+}
+
 
 
