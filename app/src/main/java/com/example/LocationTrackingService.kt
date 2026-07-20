@@ -69,10 +69,10 @@ class LocationTrackingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Lyo GPS Location Tracking",
+                "Lyo AI GPS Location Tracking",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Lyo system active GPS runner for live delivery updates"
+                description = "Lyo AI system active GPS runner for live delivery updates"
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -81,7 +81,7 @@ class LocationTrackingService : Service() {
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Lyo Delivery Live")
+            .setContentTitle("Lyo AI Delivery Live")
             .setContentText("அருகிலுள்ள வாடிக்கையாளருக்கு உங்களது நேரடி இருப்பிடம் பகிர்கிறது... (Active dynamic GPS updates)")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)

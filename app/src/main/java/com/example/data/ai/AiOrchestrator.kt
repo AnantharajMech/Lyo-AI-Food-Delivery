@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -78,16 +79,14 @@ object AiOrchestrator {
         providers.clear()
         
         // 1. Gemini (Default and primary)
-        val geminiKey = BuildConfig.GEMINI_API_KEY
-        val hasGemini = geminiKey.isNotBlank() && geminiKey != "MY_GEMINI_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.GEMINI,
                 name = "Google Gemini",
-                apiKey = geminiKey,
+                apiKey = "",
                 baseUrl = "https://generativelanguage.googleapis.com",
                 model = "gemini-3.5-flash",
-                isEnabled = hasGemini,
+                isEnabled = true,
                 priority = 1,
                 costMultiplier = 0.1,
                 capabilityScore = 9
@@ -95,16 +94,14 @@ object AiOrchestrator {
         )
 
         // 2. Groq
-        val groqKey = try { BuildConfig.GROQ_API_KEY } catch (e: Exception) { "" }
-        val hasGroq = groqKey.isNotBlank() && groqKey != "MY_GROQ_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.GROQ,
                 name = "Groq Cloud",
-                apiKey = groqKey,
+                apiKey = "",
                 baseUrl = "https://api.groq.com/openai/v1",
                 model = "llama-3.3-70b-versatile",
-                isEnabled = hasGroq,
+                isEnabled = true,
                 priority = 2,
                 costMultiplier = 0.2,
                 capabilityScore = 8
@@ -112,16 +109,14 @@ object AiOrchestrator {
         )
 
         // 3. Z.ai
-        val zaiKey = try { BuildConfig.ZAI_API_KEY } catch (e: Exception) { "" }
-        val hasZai = zaiKey.isNotBlank() && zaiKey != "MY_ZAI_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.ZAI,
                 name = "Z.ai API",
-                apiKey = zaiKey,
+                apiKey = "",
                 baseUrl = "https://api.z.ai/api/paas/v4",
                 model = "glm-4.7",
-                isEnabled = hasZai,
+                isEnabled = true,
                 priority = 3,
                 costMultiplier = 0.3,
                 capabilityScore = 8
@@ -129,16 +124,14 @@ object AiOrchestrator {
         )
 
         // 4. OpenRouter
-        val openRouterKey = try { BuildConfig.OPENROUTER_API_KEY } catch (e: Exception) { "" }
-        val hasOpenRouter = openRouterKey.isNotBlank() && openRouterKey != "MY_OPENROUTER_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.OPENROUTER,
                 name = "OpenRouter",
-                apiKey = openRouterKey,
+                apiKey = "",
                 baseUrl = "https://openrouter.ai/api/v1",
                 model = "meta-llama/llama-3-8b-instruct:free",
-                isEnabled = hasOpenRouter,
+                isEnabled = true,
                 priority = 4,
                 costMultiplier = 0.1,
                 capabilityScore = 7
@@ -146,16 +139,14 @@ object AiOrchestrator {
         )
 
         // 5. OpenAI
-        val openaiKey = try { BuildConfig.OPENAI_API_KEY } catch (e: Exception) { "" }
-        val hasOpenai = openaiKey.isNotBlank() && openaiKey != "MY_OPENAI_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.OPENAI,
                 name = "OpenAI",
-                apiKey = openaiKey,
+                apiKey = "",
                 baseUrl = "https://api.openai.com/v1",
                 model = "gpt-4o-mini",
-                isEnabled = hasOpenai,
+                isEnabled = true,
                 priority = 5,
                 costMultiplier = 0.5,
                 capabilityScore = 9
@@ -163,16 +154,14 @@ object AiOrchestrator {
         )
 
         // 6. Hugging Face
-        val hfKey = try { BuildConfig.HUGGINGFACE_API_KEY } catch (e: Exception) { "" }
-        val hasHf = hfKey.isNotBlank() && hfKey != "MY_HUGGINGFACE_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.HUGGINGFACE,
                 name = "Hugging Face Hub",
-                apiKey = hfKey,
+                apiKey = "",
                 baseUrl = "https://router.huggingface.co/v1",
                 model = "meta-llama/Llama-3.3-70B-Instruct",
-                isEnabled = hasHf,
+                isEnabled = true,
                 priority = 6,
                 costMultiplier = 0.0,
                 capabilityScore = 8
@@ -180,16 +169,14 @@ object AiOrchestrator {
         )
 
         // 7. DeepSeek
-        val deepseekKey = try { BuildConfig.DEEPSEEK_API_KEY } catch (e: Exception) { "" }
-        val hasDeepseek = deepseekKey.isNotBlank() && deepseekKey != "MY_DEEPSEEK_API_KEY"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.DEEPSEEK,
                 name = "DeepSeek AI",
-                apiKey = deepseekKey,
+                apiKey = "",
                 baseUrl = "https://api.deepseek.com",
                 model = "deepseek-chat",
-                isEnabled = hasDeepseek,
+                isEnabled = true,
                 priority = 7,
                 costMultiplier = 0.15,
                 capabilityScore = 8
@@ -197,16 +184,14 @@ object AiOrchestrator {
         )
 
         // 8. Ollama (Local)
-        val ollamaUrl = try { BuildConfig.OLLAMA_API_URL } catch (e: Exception) { "" }
-        val hasOllama = ollamaUrl.isNotBlank() && ollamaUrl != "http://localhost:11434"
         providers.add(
             AiProviderConfig(
                 id = AiProviderId.OLLAMA,
                 name = "Ollama Local",
                 apiKey = "",
-                baseUrl = if (hasOllama) ollamaUrl else "http://localhost:11434",
+                baseUrl = "http://localhost:11434",
                 model = "llama3",
-                isEnabled = hasOllama,
+                isEnabled = false,
                 priority = 8,
                 costMultiplier = 0.0,
                 capabilityScore = 6
@@ -285,7 +270,7 @@ object AiOrchestrator {
                 AiProviderConfig(
                     id = AiProviderId.GEMINI,
                     name = "Google Gemini",
-                    apiKey = BuildConfig.GEMINI_API_KEY,
+                    apiKey = "",
                     baseUrl = "https://generativelanguage.googleapis.com",
                     model = "gemini-3.5-flash",
                     isEnabled = true,
@@ -371,60 +356,43 @@ object AiOrchestrator {
         "எடப்பாடி மக்களே! 🌾 சிறிய நெட்வொர்க் சுணக்கம் ஏற்பட்டுள்ளதால், நீங்கள் கேட்ட வசதிகளுக்கு உடனடியாக எங்களை Coscoom Creative Tech Solutions (8778148899) என்ற எண்ணில் கால் அல்லது வாட்ஸ்அப் மூலம் தொடர்பு கொள்ள அன்புடன் கேட்டுக்கொள்கிறோம்!"
     }
 
-    suspend fun makeApiCall(config: AiProviderConfig, prompt: String, temperature: Double): String {
-        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
-        val requestBuilder = Request.Builder()
-
-        val url: String
-        val requestBodyJson: String
-
-        when (config.id) {
-            AiProviderId.GEMINI -> {
-                url = "${config.baseUrl}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
-                requestBodyJson = JSONObject()
-                    .put("contents", org.json.JSONArray().put(
-                        JSONObject().put("parts", org.json.JSONArray().put(
-                            JSONObject().put("text", prompt)
-                        ))
-                    ))
-                    .put("generationConfig", JSONObject().put("temperature", temperature))
-                    .toString()
+    suspend fun makeApiCall(config: AiProviderConfig, prompt: String, temperature: Double): String = withContext(Dispatchers.IO) {
+        if (config.id == AiProviderId.OLLAMA) {
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBodyJson = JSONObject()
+                .put("model", config.model)
+                .put("prompt", prompt)
+                .put("stream", false)
+                .toString()
+            val requestBody = requestBodyJson.toRequestBody(mediaType)
+            val request = Request.Builder()
+                .url("${config.baseUrl}/api/generate")
+                .post(requestBody)
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw Exception("HTTP ${response.code}: ${response.body?.string() ?: ""}")
+                }
+                val responseString = response.body?.string() ?: throw Exception("Null response body")
+                return@withContext parseResponseText(config.id, responseString)
             }
-
-            AiProviderId.OLLAMA -> {
-                url = "${config.baseUrl}/api/generate"
-                requestBodyJson = JSONObject()
-                    .put("model", config.model)
-                    .put("prompt", prompt)
-                    .put("stream", false)
-                    .toString()
+        } else {
+            val functions = com.google.firebase.functions.FirebaseFunctions.getInstance()
+            val data = mapOf(
+                "provider" to config.id.name,
+                "prompt" to prompt,
+                "model" to config.model
+            )
+            val result = functions.getHttpsCallable("callAiProvider")
+                .call(data)
+                .await()
+            val resMap = result.data as? Map<*, *>
+            val responseText = resMap?.get("response") as? String
+            if (responseText != null) {
+                return@withContext responseText
+            } else {
+                throw Exception("Cloud function returned empty or invalid response")
             }
-
-            else -> {
-                url = "${config.baseUrl}/chat/completions"
-                requestBuilder.header("Authorization", "Bearer ${config.apiKey}")
-                requestBodyJson = JSONObject()
-                    .put("model", config.model)
-                    .put("messages", org.json.JSONArray().put(
-                        JSONObject().put("role", "user").put("content", prompt)
-                    ))
-                    .put("temperature", temperature)
-                    .toString()
-            }
-        }
-
-        val requestBody = requestBodyJson.toRequestBody(mediaType)
-        val request = requestBuilder
-            .url(url)
-            .post(requestBody)
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("HTTP ${response.code}: ${response.body?.string() ?: ""}")
-            }
-            val responseString = response.body?.string() ?: throw Exception("Null response body")
-            return parseResponseText(config.id, responseString)
         }
     }
 

@@ -93,12 +93,12 @@ class MainActivity : ComponentActivity() {
         if (remoteLogout) {
           androidx.compose.material3.AlertDialog(
               onDismissRequest = { /* Prevent dismissing */ },
-              containerColor = Color(0xFF1E293B),
-              title = { Text("Session Terminated 🚨", color = Color.White, fontWeight = FontWeight.Bold) },
+              containerColor = LyoColors.CardSlate,
+              title = { Text("Session Terminated 🚨", color = LyoColors.TextPrimary, fontWeight = FontWeight.Bold) },
               text = {
                   Text(
                       "உங்கள் கணக்கு மற்றொரு சாதனத்திலிருந்து வெளியேற்றப்பட்டுள்ளது!\n\nThis device has been logged out of this account remotely because the session was terminated or revoked on another device.",
-                      color = Color.LightGray,
+                      color = LyoColors.TextSecondary,
                       fontSize = 13.sp
                   )
               },
@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
                           currentRoute = "LOGIN"
                       }
                   ) {
-                      Text("சரி (OK)", color = Color.White)
+                      Text("சரி (OK)", color = LyoColors.DarkCyanBg)
                   }
               }
           )
@@ -162,7 +162,7 @@ class MainActivity : ComponentActivity() {
                   firebaseUser = auth.currentUser
               }
 
-              if (firebaseUser != null) {
+              if (firebaseUser != null && !firebaseUser.isAnonymous) {
                   val uid = firebaseUser.uid
                   try {
                       val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
@@ -696,7 +696,7 @@ class MainActivity : ComponentActivity() {
                       activity?.finish()
                     } else {
                       lastBackPressTime = currentTime
-                      android.widget.Toast.makeText(context, "Press BACK again to exit Lyo Securities", android.widget.Toast.LENGTH_SHORT).show()
+                      android.widget.Toast.makeText(context, "Press BACK again to exit Lyo AI Securities", android.widget.Toast.LENGTH_SHORT).show()
                     }
                   }
                 }

@@ -319,7 +319,7 @@ fun StorefrontDashboardScreen(
                     Spacer(modifier = Modifier.height(28.dp))
 
                     Text(
-                        text = "Lyo AI Food Delivery",
+                        text = "Lyo AI",
                         color = Color.White,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Black,
@@ -3146,7 +3146,7 @@ fun CustomerProfileSection(
 
         // Metadata build label
         Text(
-            text = "Lyo Premium App v1.0.0\nSecurely customized for Lyo AI Food Delivery services",
+            text = "Lyo Premium App v1.0.0\nSecurely customized for Lyo AI services",
             fontSize = 9.sp,
             color = Color(0xFF475569),
             textAlign = TextAlign.Center,
@@ -4333,7 +4333,7 @@ fun PastOrdersHistoryList(
                                                             paint.color = android.graphics.Color.BLACK
                                                             paint.textSize = 12f
                                                             paint.isFakeBoldText = true
-                                                            canvas.drawText("Lyo AI Food Delivery", 10f, 25f, paint)
+                                                            canvas.drawText("Lyo AI Invoice", 10f, 25f, paint)
                                                             
                                                             paint.isFakeBoldText = false
                                                             paint.textSize = 8f
@@ -6563,7 +6563,7 @@ fun CheckoutCartScreen(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "Lyo AI Food Delivery Cart",
+                        text = "Lyo AI Cart",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -8239,7 +8239,7 @@ fun LyoAiChatbotSection(
                                     com.example.WhatsAppHelper.sendMessage(
                                         context,
                                         "8778148899",
-                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
+                                        "வணக்கம் அனந்தராஜ் சார், லியோ ஏ ஐ செயலி (Lyo AI App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
                                     )
                                 } catch (e: Exception) {
                                     e.printStackTrace()

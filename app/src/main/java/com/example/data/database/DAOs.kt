@@ -176,6 +176,9 @@ interface OrderDao {
     @Query("UPDATE orders SET status = :status WHERE id = :orderId")
     suspend fun updateOrderStatus(orderId: Long, status: String)
 
+    @Query("UPDATE orders SET status = :status, paymentStatus = :paymentStatus, rejectionReason = :rejectionReason WHERE id = :orderId")
+    suspend fun verifyPayment(orderId: Long, status: String, paymentStatus: String, rejectionReason: String)
+
     @Query("DELETE FROM orders WHERE id = :id")
     suspend fun deleteOrderById(id: Long)
 }

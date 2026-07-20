@@ -148,7 +148,11 @@ data class Order(
     val customerLat: Double,
     val customerLng: Double,
     val redeemedPoints: Int = 0,
-    val isPendingSync: Boolean = false
+    val isPendingSync: Boolean = false,
+    val paymentMethod: String = "COD",
+    val paymentStatus: String = "PENDING",
+    val upiTransactionId: String = "",
+    val rejectionReason: String = ""
 )
 
 @Entity(tableName = "order_items", indices = [Index(value = ["orderId"])])

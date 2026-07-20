@@ -167,6 +167,8 @@ fun ActiveOrderTrackingScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             imageVector = when (status) {
+                                "PAID_PENDING_VERIFICATION" -> Icons.Filled.Schedule
+                                "PAYMENT_REJECTED" -> Icons.Filled.Error
                                 "PENDING" -> Icons.Filled.PendingActions
                                 "ACCEPTED" -> Icons.Filled.ThumbUp
                                 "PREPARING" -> Icons.Filled.Dining
@@ -176,7 +178,7 @@ fun ActiveOrderTrackingScreen(
                                 else -> Icons.Filled.DeliveryDining
                             },
                             contentDescription = "status icon",
-                            tint = LyoColors.AccentOrange,
+                            tint = if (status == "PAYMENT_REJECTED") LyoColors.NonVegRed else LyoColors.AccentOrange,
                             modifier = Modifier.size(56.dp)
                         )
 
@@ -184,6 +186,8 @@ fun ActiveOrderTrackingScreen(
 
                         Text(
                             text = when (status) {
+                                "PAID_PENDING_VERIFICATION" -> "Payment Verification Pending"
+                                "PAYMENT_REJECTED" -> "Payment Rejected ❌"
                                 "PENDING" -> "Awaiting Merchant Approval"
                                 "ACCEPTED" -> "Approved & Scheduling Chef"
                                 "PREPARING" -> "Delicacy in Preparation"
@@ -232,6 +236,8 @@ fun ActiveOrderTrackingScreen(
                         }
                         
                         val dynamicEtaText = when (status) {
+                            "PAID_PENDING_VERIFICATION" -> "Payment Verification Pending — usually confirmed within a few minutes\n(கட்டண சரிபார்ப்பு நிலுவையில் உள்ளது - வழக்கமாக சில நிமிடங்களில் உறுதி செய்யப்படும்)"
+                            "PAYMENT_REJECTED" -> "Payment Rejected: ${activeOrderVal?.rejectionReason ?: "Invalid details"}\n(கட்டணம் நிராகரிக்கப்பட்டது: ${activeOrderVal?.rejectionReason ?: "விவரம் தவறானது"})"
                             "PENDING" -> "ஆர்டர் உறுதி செய்யப்படுகிறது... (ETA: $calculatedMinutes mins)"
                             "ACCEPTED" -> "ஆர்டர் ஏற்றுக்கொள்ளப்பட்டது! சமையல் தொடங்குகிறது (ETA: $calculatedMinutes mins)"
                             "PREPARING" -> "சுவையான உணவு தயாராகிறது... (ETA: $calculatedMinutes mins)"

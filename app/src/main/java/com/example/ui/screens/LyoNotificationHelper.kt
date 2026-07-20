@@ -184,7 +184,7 @@ object LyoNotificationHelper {
             var y = 35f
 
             // 1. Header
-            canvas.drawText("Lyo AI Food Delivery", 20f, y, titlePaint)
+            canvas.drawText("Lyo AI", 20f, y, titlePaint)
             y += 14f
             canvas.drawText("PREMIUM INVOICE RECEIPT", 20f, y, Paint().apply { color = Color.rgb(100, 116, 139); textSize = 8f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
             y += 12f
@@ -269,7 +269,7 @@ object LyoNotificationHelper {
 
             canvas.drawText("Payment Method: Cash on Delivery", 20f, y, Paint().apply { color = Color.rgb(15, 23, 42); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
             y += 22f
-            canvas.drawText("Thank you for ordering with Lyo AI Food Delivery! 🙏", 20f, y, Paint().apply { color = Color.rgb(71, 85, 105); textSize = 8.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC) })
+            canvas.drawText("Thank you for ordering with Lyo AI! 🙏", 20f, y, Paint().apply { color = Color.rgb(71, 85, 105); textSize = 8.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC) })
 
             pdfDocument.finishPage(page)
 
@@ -291,7 +291,7 @@ object LyoNotificationHelper {
             val discountText = if (order.couponDiscount > 0) "\n🎁 *Discounts:* -₹${order.couponDiscount.toInt()}" else ""
             
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-            textBuilder.append("🛍️  *Lyo AI FOOD DELIVERY — INVOICE*\n")
+            textBuilder.append("🛍️  *Lyo AI — INVOICE*\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
             textBuilder.append("🆔 *Order ID:* #${order.id}\n")
             textBuilder.append("📅 *Order Date & Time:* $formattedDate\n")
@@ -310,7 +310,7 @@ object LyoNotificationHelper {
             textBuilder.append("💳 *Payment Method:* Cash on Delivery\n")
             textBuilder.append("🔑 *Delivery OTP:* *${order.otpCode}*\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-            textBuilder.append("Thank you for choosing Lyo AI Food Delivery! 🙏\n")
+            textBuilder.append("Thank you for choosing Lyo AI! 🙏\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━")
             val messageText = textBuilder.toString()
 
@@ -321,7 +321,7 @@ object LyoNotificationHelper {
                 type = "application/pdf"
                 putExtra(Intent.EXTRA_STREAM, fileUri)
                 putExtra(Intent.EXTRA_TEXT, messageText)
-                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Food Delivery Invoice #${order.id}")
+                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Invoice #${order.id}")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 `package` = "com.whatsapp"
             }
@@ -382,7 +382,7 @@ object LyoNotificationHelper {
             var y = 35f
 
             // 1. Header
-            canvas.drawText("Lyo AI Food Delivery", 20f, y, titlePaint)
+            canvas.drawText("Lyo AI", 20f, y, titlePaint)
             y += 14f
             canvas.drawText("KITCHEN ORDER TICKET (KOT)", 20f, y, boldTextPaint)
             y += 10f
@@ -503,7 +503,7 @@ object LyoNotificationHelper {
             var y = 40f
 
             canvas.drawRect(0f, 0f, 595f, 80f, Paint().apply { color = Color.rgb(241, 245, 249) })
-            canvas.drawText("Lyo AI Food Delivery - System Test Report", 40f, 45f, titlePaint)
+            canvas.drawText("Lyo AI - System Test Report", 40f, 45f, titlePaint)
             canvas.drawText("5-Customer Concurrent Multi-Device Live Order Flow", 40f, 65f, Paint().apply { color = Color.GRAY; textSize = 11f })
             y = 110f
 
@@ -588,7 +588,7 @@ object LyoNotificationHelper {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/pdf"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Food Delivery Live Test Report")
+                putExtra(Intent.EXTRA_SUBJECT, "Lyo AI Live Test Report")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(Intent.createChooser(intent, "Share Lyo Test Report PDF"))

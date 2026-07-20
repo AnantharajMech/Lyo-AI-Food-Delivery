@@ -94,132 +94,144 @@ fun SplashScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Elegant Food Core Logo Icon Glowing & Custom styled cloche
-            Box(
-                modifier = Modifier
-                    .size(150.dp)
-                    .scale(animateScale)
-                    .background(
-                        color = Color(0x13FFFFFF),
-                        shape = RoundedCornerShape(28.dp)
-                    )
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(Color(0x55FFFFFF), Color(0x08FFFFFF))
-                        ),
-                        shape = RoundedCornerShape(28.dp)
-                    )
-                    .shadow(
-                        elevation = 20.dp,
-                        ambientColor = Color(0xFFFF6B35).copy(alpha = 0.3f),
-                        spotColor = Color(0xFF00E5FF).copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(28.dp)
-                    )
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
+            Spacer(modifier = Modifier.height(40.dp))
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
             ) {
-                LyoLogo(
-                    modifier = Modifier.fillMaxSize()
+                // Central Planet/Orb glowing sphere matching the mockup
+                Box(
+                    modifier = Modifier
+                        .size(220.dp)
+                        .scale(animateScale)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF0F1B35),
+                                    Color(0xFF060B16)
+                                )
+                            ),
+                            shape = CircleShape
+                        )
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF).copy(alpha = 0.4f))
+                            ),
+                            shape = CircleShape
+                        )
+                        .shadow(
+                            elevation = 30.dp,
+                            ambientColor = Color(0xFF00E5FF).copy(alpha = 0.4f),
+                            spotColor = Color(0xFF7C4DFF).copy(alpha = 0.4f),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Planet texture glow aura
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(4.dp)
+                            .background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFF00E5FF).copy(alpha = 0.15f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Lyo AI",
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            letterSpacing = 4.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(40.dp))
+
+                // FOOD DELIVERY Subtitle
+                Text(
+                    text = "FOOD DELIVERY",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    letterSpacing = 4.sp,
+                    textAlign = TextAlign.Center
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Brand Tamil Tagline Locale
+                Text(
+                    text = "உணவு விநியோகம் • எடப்பாடி",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF00E5FF),
+                    letterSpacing = 1.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(48.dp))
+
+                // Brand secondary slogan string
+                Text(
+                    text = "Connecting fine local\nculinary kitchens with you",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Horizontal loading progress bar matching the image (cyan line)
+                Box(
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(animateProgress)
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
+                                )
+                            )
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(30.dp))
-
-            // Serif Style LYO Bold Brand Name
+            // Version info at the bottom
             Text(
-                text = "Lyo",
-                fontSize = 52.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Serif,
-                style = androidx.compose.ui.text.TextStyle(
-                    brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFFF4500), Color(0xFFFF6B35), Color(0xFFFFD166))
-                    )
-                ),
-                letterSpacing = 3.sp,
-                textAlign = TextAlign.Center
-            )
-
-            // Brand Divider gold underline bar
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 6.dp)
-                    .width(110.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(Color(0xFFFFD166), Color(0xFFFF9A3C))
-                        )
-                    )
-            )
-
-            // Brand secondary slogan string
-            Text(
-                text = "FOOD DELIVERY",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF94A3B8),
-                letterSpacing = 4.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-
-            // Brand Tamil Tagline Locale
-            Text(
-                text = "உணவு விநியோகம் • எடப்பாடி",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
+                text = "Version 2.5.0",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
                 color = Color(0xFF64748B),
                 letterSpacing = 1.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 6.dp)
+                modifier = Modifier.padding(bottom = 16.dp)
             )
-
-            Spacer(modifier = Modifier.height(60.dp))
-
-            // Indian English localized greeting description
-            Text(
-                text = "Connecting fine local culinary kitchens with you",
-                color = Color(0xFF94A3B8),
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Gorgeous pulsing custom animated dots loading visual
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .graphicsLayer { alpha = dot1Alpha; scaleX = dot1Alpha; scaleY = dot1Alpha }
-                        .clip(CircleShape)
-                        .background(Color(0xFFFF4500))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .graphicsLayer { alpha = dot2Alpha; scaleX = dot2Alpha; scaleY = dot2Alpha }
-                        .clip(CircleShape)
-                        .background(Color(0xFFFF6B35))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .graphicsLayer { alpha = dot3Alpha; scaleX = dot3Alpha; scaleY = dot3Alpha }
-                        .clip(CircleShape)
-                        .background(Color(0xFFFFD166))
-                )
-            }
         }
     }
 }
@@ -323,7 +335,7 @@ fun LoginScreen(
                     modifier = Modifier
                         .size(56.dp)
                         .background(Color(0x13FFFFFF), CircleShape)
-                        .border(1.dp, Color(0x33FFB347), CircleShape)
+                        .border(1.dp, Color(0x3300E5FF), CircleShape)
                         .padding(6.dp)
                 ) {
                     LyoLogo(modifier = Modifier.fillMaxSize())
@@ -332,13 +344,13 @@ fun LoginScreen(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Lyo",
-                            fontSize = 28.sp,
+                            text = "Lyo AI",
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Serif,
+                            fontFamily = FontFamily.SansSerif,
                             style = androidx.compose.ui.text.TextStyle(
                                 brush = Brush.linearGradient(
-                                    colors = listOf(Color(0xFFFF4500), Color(0xFFFF6B35), Color(0xFFFFD166))
+                                    colors = listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
                                 )
                             ),
                             letterSpacing = 1.sp
@@ -348,14 +360,14 @@ fun LoginScreen(
                             modifier = Modifier
                                 .width(1.5.dp)
                                 .height(16.dp)
-                                .background(Color(0xFFFFD166).copy(alpha = 0.5f))
+                                .background(Color(0xFF00E5FF).copy(alpha = 0.5f))
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "உணவு விநியோகம்",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFFD166)
+                            color = Color(0xFF00E5FF)
                         )
                     }
                     Text(
@@ -594,10 +606,10 @@ fun LoginScreen(
                     }
                     val finalAdmins = remember(activeAdmins) {
                         val baseList = mutableListOf<User>()
-                        baseList.add(User("Anantharajmech", "Anantharaj Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+                        baseList.add(User("Anantharajmech", "Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
                         baseList.add(User("8778148899", "Anantharaj R (CEO)", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
                         for (admin in activeAdmins) {
-                            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899") {
+                            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899" && admin.phone != "AnanthEinstein") {
                                 baseList.add(admin)
                             }
                         }
@@ -684,8 +696,8 @@ fun LoginScreen(
                             onDismissRequest = { isAdminExpanded = false },
                             modifier = Modifier
                                 .fillMaxWidth(0.85f)
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                                .background(LyoColors.DarkCyanBg)
+                                .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(8.dp))
                         ) {
                             finalAdmins.forEach { admin ->
                                 DropdownMenuItem(
@@ -760,7 +772,8 @@ fun LoginScreen(
                         LyoButton(
                             text = "Authenticate Admin Console",
                             onClick = {
-                                viewModel.loginWithPhoneAndPassword(selectedAdmin!!.phone, password) { detectedRole ->
+                                val loginInput = if (selectedAdmin != null && selectedAdmin!!.email.isNotBlank() && selectedAdmin!!.email.contains("@")) selectedAdmin!!.email else selectedAdmin!!.phone
+                                viewModel.loginWithPhoneAndPassword(loginInput, password) { detectedRole ->
                                     if (detectedRole == "ADMIN") {
                                         onLoginSuccess("ADMIN", password)
                                     } else {
@@ -882,8 +895,8 @@ fun LoginScreen(
                             onDismissRequest = { isExpanded = false },
                             modifier = Modifier
                                 .fillMaxWidth(0.85f)
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                                .background(LyoColors.DarkCyanBg)
+                                .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(8.dp))
                         ) {
                             if (searchFiltered.isEmpty()) {
                                 DropdownMenuItem(
@@ -1014,7 +1027,7 @@ fun LoginScreen(
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0F172A) // subtle dark-blue surface
+                        containerColor = LyoColors.CardSlate // subtle dark-blue surface
                     ),
                     border = BorderStroke(1.dp, LyoColors.AccentOrange), // thin orange border
                     modifier = Modifier
@@ -1029,7 +1042,7 @@ fun LoginScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "New to Lyo AI Food Delivery?",
+                            text = "New to Lyo AI?",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
@@ -1489,7 +1502,7 @@ fun LoginScreen(
                                     com.example.WhatsAppHelper.sendMessage(
                                         aboutContext,
                                         "8778148899",
-                                        "வணக்கம் அனந்தராஜ் சார், லியோ உணவு விநியோக செயலி (Lyo AI Food Delivery App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
+                                        "வணக்கம் அனந்தராஜ் சார், லியோ ஏ ஐ செயலி (Lyo AI App) தொடர்பாக தங்களை தொடர்பு கொள்கிறேன்."
                                     )
                                 } catch (e: Exception) {
                                     e.printStackTrace()
@@ -1629,27 +1642,52 @@ fun AdminLoginScreen(
     }
     val finalAdmins = remember(activeAdmins) {
         val baseList = mutableListOf<User>()
-        baseList.add(User("Anantharajmech", "Anantharaj Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
+        baseList.add(User("Anantharajmech", "Super Admin", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
         baseList.add(User("8778148899", "Anantharaj R (CEO)", "AnantharajEinstein@gmail.com", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "ADMIN"))
         for (admin in activeAdmins) {
-            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899") {
+            if (admin.phone != "Anantharajmech" && admin.phone != "8778148899" && admin.phone != "AnanthEinstein") {
                 baseList.add(admin)
             }
         }
+        baseList.add(User("custom_admin_manual_input", "Other Admin (Manually Enter ID) 👤", "", "", 11.5812, 77.8465, false, "ADMIN"))
         baseList.distinctBy { it.phone }
     }
     var selectedAdmin by remember { mutableStateOf<User?>(null) }
     var isAdminExpanded by remember { mutableStateOf(false) }
+    var customAdminInput by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val errorMsg by viewModel.loginError.collectAsState()
     val rememberMe by viewModel.rememberMe.collectAsState()
 
     val mappedError = remember(errorMsg) {
-        if (errorMsg != null) {
-            "Incorrect password. Please try again."
+        errorMsg
+    }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val googleSignInLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result: androidx.activity.result.ActivityResult ->
+        val intent = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && intent != null) {
+            try {
+                val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(intent)
+                val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
+                account?.idToken?.let { token ->
+                    viewModel.loginWithGoogle(token) { detectedRole ->
+                        if (detectedRole == "ADMIN") {
+                            onLoginSuccess("ADMIN", null)
+                        } else {
+                            viewModel.logout()
+                            viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                viewModel.setLoginError("Google Sign-In failed: ${e.message}")
+            }
         } else {
-            null
+            viewModel.setLoginError("Google Sign-In was cancelled or failed.")
         }
     }
 
@@ -1780,8 +1818,8 @@ fun AdminLoginScreen(
                         onDismissRequest = { isAdminExpanded = false },
                         modifier = Modifier
                             .fillMaxWidth(0.85f)
-                            .background(Color(0xFF0F172A))
-                            .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                            .background(LyoColors.DarkCyanBg)
+                            .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(8.dp))
                     ) {
                         finalAdmins.forEach { admin ->
                             DropdownMenuItem(
@@ -1803,6 +1841,25 @@ fun AdminLoginScreen(
 
                 if (selectedAdmin != null) {
                     Spacer(modifier = Modifier.height(14.dp))
+
+                    if (selectedAdmin!!.phone == "custom_admin_manual_input") {
+                        OutlinedTextField(
+                            value = customAdminInput,
+                            onValueChange = { customAdminInput = it },
+                            label = { Text("Admin Email or Phone Number") },
+                            placeholder = { Text("Enter authorized Admin Email or Phone") },
+                            leadingIcon = { Icon(Icons.Filled.AccountCircle, contentDescription = null, tint = LyoColors.TextSecondary) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = LyoColors.AccentOrange,
+                                unfocusedBorderColor = Color(0x33F8FAFC)
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("admin_custom_input")
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
 
                     // Admin Password Field
                     OutlinedTextField(
@@ -1856,17 +1913,75 @@ fun AdminLoginScreen(
                     LyoButton(
                         text = "Authenticate Admin Console",
                         onClick = {
-                            viewModel.loginWithPhoneAndPassword(selectedAdmin!!.phone, password) { detectedRole ->
-                                if (detectedRole == "ADMIN") {
-                                    onLoginSuccess("ADMIN", password)
-                                } else {
-                                    viewModel.logout()
-                                    viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                            val loginInput = if (selectedAdmin!!.phone == "custom_admin_manual_input") {
+                                customAdminInput.trim()
+                            } else if (selectedAdmin!!.email.isNotBlank() && selectedAdmin!!.email.contains("@")) {
+                                selectedAdmin!!.email
+                            } else {
+                                selectedAdmin!!.phone
+                            }
+                            
+                            if (loginInput.isBlank()) {
+                                viewModel.setLoginError("Please enter your Admin Email or Phone Number.")
+                            } else {
+                                viewModel.loginWithPhoneAndPassword(loginInput, password) { detectedRole ->
+                                    if (detectedRole == "ADMIN") {
+                                        onLoginSuccess("ADMIN", password)
+                                    } else {
+                                        viewModel.logout()
+                                        viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                                    }
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("admin_submit_button")
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "— OR —",
+                        color = LyoColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                                .requestIdToken("604469873807-example.apps.googleusercontent.com")
+                                .requestEmail()
+                                .build()
+                            val mGoogleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
+                            googleSignInLauncher.launch(mGoogleSignInClient.signInIntent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFFDADCE0)),
+                        modifier = Modifier.fillMaxWidth().height(44.dp).testTag("admin_google_login_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AccountCircle,
+                                contentDescription = "google icon",
+                                tint = Color(0xFFF97316),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Admin Sign in with Google",
+                                color = Color(0xFF1F1F1F),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -2783,8 +2898,8 @@ fun DeliveryPartnerLoginScreen(
                         onDismissRequest = { isExpanded = false },
                         modifier = Modifier
                             .fillMaxWidth(0.85f)
-                            .background(Color(0xFF0F172A))
-                            .border(1.dp, Color(0x33F8FAFC), RoundedCornerShape(8.dp))
+                            .background(LyoColors.DarkCyanBg)
+                            .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(8.dp))
                     ) {
                         if (searchFiltered.isEmpty()) {
                             DropdownMenuItem(

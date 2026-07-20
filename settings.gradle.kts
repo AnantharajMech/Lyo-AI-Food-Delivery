@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Lyo AI Food Delivery"
+rootProject.name = "Lyo AI"
 
 include(":app")

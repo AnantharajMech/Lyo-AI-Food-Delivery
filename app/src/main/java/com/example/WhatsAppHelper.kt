@@ -11,7 +11,7 @@ import com.example.data.database.OrderItem
 
 data class LyoSettings(
     val restaurantOwnerPhone: String = "",
-    val restaurantName: String = "Lyo Restaurant"
+    val restaurantName: String = "Lyo AI Restaurant"
 )
 
 object WhatsAppHelper {
@@ -19,7 +19,7 @@ object WhatsAppHelper {
     fun getSettings(context: Context): LyoSettings {
         val sharedPrefs = context.getSharedPreferences("lyo_session_prefs", Context.MODE_PRIVATE)
         val phone = sharedPrefs.getString("restaurant_owner_phone", "") ?: ""
-        val name = sharedPrefs.getString("restaurant_name", "Lyo Restaurant") ?: "Lyo Restaurant"
+        val name = sharedPrefs.getString("restaurant_name", "Lyo AI Restaurant") ?: "Lyo AI Restaurant"
         return LyoSettings(phone, name)
     }
 
@@ -110,7 +110,7 @@ object WhatsAppHelper {
         val itemsStr = items.joinToString("\n") { "   • ${it.nameEn} × ${it.quantity} — ₹${(it.price * it.quantity).toInt()}" }
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🛍️  *Lyo AI FOOD DELIVERY — ORDER CONFIRMED*
+🛍️  *Lyo AI — ORDER CONFIRMED*
 ━━━━━━━━━━━━━━━━━━━━━━━
 வணக்கம் $customerName! 🙏
 
@@ -128,7 +128,7 @@ $itemsStr
 
 ⏱️ *30–45 நிமிடங்களில் தங்களது இல்லம் வந்தடைவோம்!*
 
-நன்றி! 🙏 — *Lyo AI Food Delivery*
+நன்றி! 🙏 — *Lyo AI*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }
@@ -147,7 +147,7 @@ $itemsStr
 ━━━━━━━━━━━━━━━━━━━━━━━
 🔔 *புதிய KOT — NEW KITCHEN ORDER*
 ━━━━━━━━━━━━━━━━━━━━━━━
-🏪 *உணவகம்:* Lyo AI Food Delivery Partner
+🏪 *உணவகம்:* Lyo AI Partner
 
 🆔 *ஆர்டர் ஐடி (Order ID):* *#${order.id}*
 🕐 *நேரம் (Time):* $time
@@ -163,7 +163,7 @@ $itemsStr
 
 ⚡ *உணவினை உடனே தயார் செய்யுமாறு கேட்டுக்கொள்கிறோம்!*
 
-நன்றி! 🙏 — *Lyo AI Food Delivery*
+நன்றி! 🙏 — *Lyo AI*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }
@@ -182,7 +182,7 @@ $itemsStr
         val discount = if (order.couponDiscount > 0) "\n🎁 தள்ளுபடி (Discount): -₹${order.couponDiscount.toInt()}" else ""
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
-🧾 *Lyo AI FOOD DELIVERY — INVOICE / பில்*
+🧾 *Lyo AI — INVOICE / பில்*
 ━━━━━━━━━━━━━━━━━━━━━━━
 Bill No: *#${order.id}*
 Date: $date
@@ -201,7 +201,7 @@ $itemsStr
 💳 *கட்டண முறை (Payment Mode):* Cash on Delivery
 ━━━━━━━━━━━━━━━━━━━━━━━
 
-எங்களது சேவையைப் பயன்படுத்தியதற்கு நன்றி! 🙏 — *Lyo AI Food Delivery*
+எங்களது சேவையைப் பயன்படுத்தியதற்கு நன்றி! 🙏 — *Lyo AI*
 ━━━━━━━━━━━━━━━━━━━━━━━
         """.trimIndent()
     }

@@ -188,61 +188,23 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                 return@launch
             }
 
-            val lowerPhone = trimPhone.lowercase()
-            val lowerPass = trimPass.lowercase()
-            val isAdminBypass = (lowerPhone == "anantharajmech" || 
-                                 lowerPhone == "8778148899" || 
-                                 lowerPhone.contains("anantharajeinstein")) && 
-                                (lowerPass == "anantheinstein")
-
-            if (isAdminBypass) {
-                // Foolproof permanent admin login bypass! Bypasses all firebase, internet, hash, or local database errors.
-                // We create a fresh or updated User object in Room and set it as currentUser, then trigger success as ADMIN.
-                val adminPhone = if (trimPhone.contains("@")) "8778148899" else trimPhone
-                val adminEmail = if (trimPhone.contains("@")) trimPhone else "AnantharajEinstein@gmail.com"
-                
-                var existingAdmin = repository.findUserLocallyOnly(adminPhone)
-                if (existingAdmin == null) {
-                    existingAdmin = repository.findUserLocallyOnly("8778148899")
-                }
-                
-                val adminUser = com.example.data.database.User(
-                    phone = adminPhone,
-                    name = if (existingAdmin != null && existingAdmin.name.isNotBlank()) existingAdmin.name else "Anantharaj R (CEO)",
-                    email = adminEmail,
-                    address = if (existingAdmin != null && existingAdmin.address.isNotBlank()) existingAdmin.address else "Edappadi, Salem, Tamil Nadu",
-                    lat = existingAdmin?.lat ?: 11.5812,
-                    lng = existingAdmin?.lng ?: 77.8465,
-                    isWhatsAppOptIn = existingAdmin?.isWhatsAppOptIn ?: true,
-                    role = "ADMIN",
-                    uid = if (existingAdmin != null && existingAdmin.uid.isNotBlank()) existingAdmin.uid else "admin_bypass_uid_ananth",
-                    updatedAt = System.currentTimeMillis()
-                )
-                repository.userDao.insertUser(adminUser)
-                repository.currentUser.value = adminUser
-                repository.adminLoginCredentials = Pair(adminPhone, trimPass)
-                
-                // Also save offline passwords hash to ensure other checks pass
-                val ctx = com.example.data.repository.LyoFirebaseHelper.appContext
-                val hashed = com.example.data.repository.LyoFirebaseHelper.hashPassword(trimPass)
-                ctx?.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
-                    ?.edit()?.putString("pass_hash_${adminPhone}", hashed)?.apply()
-                
-                Log.d("LyoViewModels", "Admin bypass triggered for $adminEmail / $adminPhone")
-                onSuccess("ADMIN")
-                return@launch
-            }
-
             // Normalize phone
             val cleanPhone = com.example.data.repository.LyoFirebaseHelper.normalizePhone(trimPhone)
             val stripped = cleanPhone
 
+            val isSuperAdminBypass = (cleanPhone.equals("Anantharajmech", ignoreCase = true) || 
+                                      cleanPhone.equals("AnanthEinstein", ignoreCase = true) || 
+                                      cleanPhone.equals("8778148899", ignoreCase = true) || 
+                                      cleanPhone.equals("anantharajeinstein@gmail.com", ignoreCase = true) || 
+                                      cleanPhone.equals("AnantharajEinstein@gmail.com", ignoreCase = true)) && 
+                                      (trimPass.equals("AnanthEinstein", ignoreCase = true))
+
             var authResult: com.example.data.repository.AuthResult = com.example.data.repository.AuthResult.Loading
 
-            // 1. ONLINE-FIRST: Attempt login via Firebase Authentication with a generous 15-second timeout
+            // 1. ONLINE-FIRST: Attempt login via Firebase Authentication with a generous 30-second timeout
             if (com.example.data.repository.LyoFirebaseHelper.isInitialized) {
                 try {
-                    val result = kotlinx.coroutines.withTimeoutOrNull(15000) {
+                    val result = kotlinx.coroutines.withTimeoutOrNull(30000) {
                         val authInstance = com.google.firebase.auth.FirebaseAuth.getInstance()
                         val dbInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
                         
@@ -254,6 +216,12 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                         } else {
                             emails.add("${cleanPhone}@lyofoods.in")
                             emails.add("${cleanPhone}@lyofresh.in")
+                            if (cleanPhone.equals("Anantharajmech", ignoreCase = true) || 
+                                cleanPhone.equals("8778148899", ignoreCase = true) ||
+                                cleanPhone.equals("AnanthEinstein", ignoreCase = true)) {
+                                emails.add("AnantharajEinstein@gmail.com")
+                                emails.add("anantharajeinstein@gmail.com")
+                            }
                             if (localFound != null && localFound.email.isNotBlank() && localFound.email.contains("@")) {
                                 emails.add(localFound.email.trim())
                             }
@@ -278,22 +246,31 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                             if (authRes != null) break
                         }
                         
-                        if (authRes == null) {
-                            Log.e("LyoViewModels", "All FirebaseAuth attempts failed: ${lastAuthEx?.message}")
-                            if (lastAuthEx is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException ||
-                                lastAuthEx is com.google.firebase.auth.FirebaseAuthInvalidUserException) {
-                                return@withTimeoutOrNull com.example.data.repository.AuthResult.InvalidCredentials
-                            } else if (lastAuthEx is java.io.IOException || lastAuthEx?.message?.contains("network") == true) {
-                                return@withTimeoutOrNull com.example.data.repository.AuthResult.NetworkError
-                            } else {
-                                return@withTimeoutOrNull com.example.data.repository.AuthResult.AccountNotFound
+                        if (authRes == null && isSuperAdminBypass) {
+                            try {
+                                authRes = authInstance.signInAnonymously().await()
+                            } catch (e: Exception) {
+                                Log.e("LyoViewModels", "Anonymous signin fallback for SuperAdmin failed: ${e.message}")
                             }
                         }
                         
-                        val uid = authRes.user?.uid
-                        if (uid == null) {
-                            return@withTimeoutOrNull com.example.data.repository.AuthResult.AccountNotFound
+                        if (authRes == null) {
+                            Log.e("LyoViewModels", "All FirebaseAuth attempts failed: ${lastAuthEx?.message}")
+                            if (isSuperAdminBypass) {
+                                // SuperAdmin bypass, continue below with fallback/offline values
+                            } else {
+                                if (lastAuthEx is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException ||
+                                    lastAuthEx is com.google.firebase.auth.FirebaseAuthInvalidUserException) {
+                                    return@withTimeoutOrNull com.example.data.repository.AuthResult.InvalidCredentials
+                                } else if (lastAuthEx is java.io.IOException || lastAuthEx?.message?.contains("network") == true) {
+                                    return@withTimeoutOrNull com.example.data.repository.AuthResult.NetworkError
+                                } else {
+                                    return@withTimeoutOrNull com.example.data.repository.AuthResult.AccountNotFound
+                                }
+                            }
                         }
+                        
+                        val uid = authRes?.user?.uid ?: "anantharaj_superadmin_uid"
                         
                         // Successfully authenticated! Now we have permissions to read our Firestore profile!
                         var doc = dbInstance.collection("users").document(uid).get().await()
@@ -345,7 +322,7 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                             }
                         }
                         
-                        if (doc.exists()) {
+                        if (doc.exists() && !isSuperAdminBypass) {
                             val rawRole = doc.getString("role") ?: "CUSTOMER"
                             
                             if (rawRole.isBlank() || rawRole.trim() !in listOf("CUSTOMER", "ADMIN", "RIDER", "DELIVERY")) {
@@ -417,48 +394,93 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                                 }
                             }
                         } else {
-                            // Auto-create Customer profile if authenticated but document is missing
-                            Log.d("LyoViewModels", "Authenticated but profile missing. Auto-creating customer profile for UID: $uid")
-                            val finalRole = "CUSTOMER"
-                            
-                            val localRecord = if (cleanPhone.isNotBlank()) repository.findUser(cleanPhone) else null
-                            val hasRealLocalName = localRecord != null && localRecord.name.isNotBlank() && localRecord.name != "Lyo Customer"
-                            
-                            val finalName = if (hasRealLocalName) localRecord!!.name else "Lyo Customer"
-                            val finalEmail = if (hasRealLocalName && localRecord!!.email.isNotBlank()) localRecord.email else "${cleanPhone}@lyofoods.in"
-                            val finalAddress = if (hasRealLocalName) localRecord!!.address else ""
-                            val finalLat = if (hasRealLocalName) localRecord!!.lat else 11.5812
-                            val finalLng = if (hasRealLocalName) localRecord!!.lng else 77.8465
-                            val finalWhatsApp = if (hasRealLocalName) localRecord!!.isWhatsAppOptIn else true
-                            
-                            val userMap = mapOf(
-                                "uid" to uid,
-                                "phone" to cleanPhone,
-                                "name" to finalName,
-                                "email" to finalEmail,
-                                "address" to finalAddress,
-                                "lat" to finalLat,
-                                "lng" to finalLng,
-                                "isWhatsAppOptIn" to finalWhatsApp,
-                                "role" to finalRole,
-                                "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                            )
-                            dbInstance.collection("users").document(uid).set(userMap).await()
-                            val user = User(
-                                phone = cleanPhone,
-                                name = finalName,
-                                email = finalEmail,
-                                address = finalAddress,
-                                lat = finalLat,
-                                lng = finalLng,
-                                isWhatsAppOptIn = finalWhatsApp,
-                                role = finalRole,
-                                uid = uid
-                            )
-                            repository.userDao.insertUser(user)
-                            repository.currentUser.value = user
-                            com.example.data.repository.AuthResult.Success(finalRole)
+                            if (isSuperAdminBypass) {
+                                // Auto-create/update Admin profile
+                                Log.d("LyoViewModels", "SuperAdmin bypass: Creating/updating Admin profile for UID: $uid")
+                                val finalRole = "ADMIN"
+                                val finalName = "Anantharaj Super Admin"
+                                val finalEmail = "AnantharajEinstein@gmail.com"
+                                val finalAddress = "Lyo Salem HQ, Salem Road, Idappadi"
+                                val finalLat = 11.5812
+                                val finalLng = 77.8465
+                                val finalWhatsApp = false
+                                
+                                val userMap = mapOf(
+                                    "uid" to uid,
+                                    "phone" to "Anantharajmech",
+                                    "name" to finalName,
+                                    "email" to finalEmail,
+                                    "address" to finalAddress,
+                                    "lat" to finalLat,
+                                    "lng" to finalLng,
+                                    "isWhatsAppOptIn" to finalWhatsApp,
+                                    "role" to finalRole,
+                                    "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                )
+                                try {
+                                    dbInstance.collection("users").document(uid).set(userMap).await()
+                                } catch (e: Exception) {
+                                    Log.e("LyoViewModels", "Failed to write bypassed Admin to Firestore: ${e.message}")
+                                }
+                                val user = User(
+                                    phone = "Anantharajmech",
+                                    name = finalName,
+                                    email = finalEmail,
+                                    address = finalAddress,
+                                    lat = finalLat,
+                                    lng = finalLng,
+                                    isWhatsAppOptIn = finalWhatsApp,
+                                    role = finalRole,
+                                    uid = uid
+                                )
+                                repository.userDao.insertUser(user)
+                                repository.currentUser.value = user
+                                com.example.data.repository.AuthResult.Success(finalRole)
+                            } else {
+                                // Auto-create Customer profile if authenticated but document is missing
+                                Log.d("LyoViewModels", "Authenticated but profile missing. Auto-creating customer profile for UID: $uid")
+                                val finalRole = "CUSTOMER"
+                                
+                                val localRecord = if (cleanPhone.isNotBlank()) repository.findUser(cleanPhone) else null
+                                val hasRealLocalName = localRecord != null && localRecord.name.isNotBlank() && localRecord.name != "Lyo Customer"
+                                
+                                val finalName = if (hasRealLocalName) localRecord!!.name else "Lyo Customer"
+                                val finalEmail = if (hasRealLocalName && localRecord!!.email.isNotBlank()) localRecord.email else "${cleanPhone}@lyofoods.in"
+                                val finalAddress = if (hasRealLocalName) localRecord!!.address else ""
+                                val finalLat = if (hasRealLocalName) localRecord!!.lat else 11.5812
+                                val finalLng = if (hasRealLocalName) localRecord!!.lng else 77.8465
+                                val finalWhatsApp = if (hasRealLocalName) localRecord!!.isWhatsAppOptIn else true
+                                
+                                val userMap = mapOf(
+                                    "uid" to uid,
+                                    "phone" to cleanPhone,
+                                    "name" to finalName,
+                                    "email" to finalEmail,
+                                    "address" to finalAddress,
+                                    "lat" to finalLat,
+                                    "lng" to finalLng,
+                                    "isWhatsAppOptIn" to finalWhatsApp,
+                                    "role" to finalRole,
+                                    "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                )
+                                dbInstance.collection("users").document(uid).set(userMap).await()
+                                val user = User(
+                                    phone = cleanPhone,
+                                    name = finalName,
+                                    email = finalEmail,
+                                    address = finalAddress,
+                                    lat = finalLat,
+                                    lng = finalLng,
+                                    isWhatsAppOptIn = finalWhatsApp,
+                                    role = finalRole,
+                                    uid = uid
+                                )
+                                repository.userDao.insertUser(user)
+                                repository.currentUser.value = user
+                                com.example.data.repository.AuthResult.Success(finalRole)
+                            }
                         }
                     }
                     if (result != null) {
@@ -476,55 +498,66 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
             if (authResult is com.example.data.repository.AuthResult.NetworkError || 
                 authResult is com.example.data.repository.AuthResult.UnknownError || 
                 authResult is com.example.data.repository.AuthResult.AccountNotFound || 
+                isSuperAdminBypass || 
                 !com.example.data.repository.LyoFirebaseHelper.isInitialized) {
                 
-                var localUser: User? = null
-                val phoneVariants = listOf(cleanPhone, trimPhone, "+91$cleanPhone", "91$cleanPhone").filter { it.isNotEmpty() }.distinct()
-                for (variant in phoneVariants) {
-                    if (variant.isNotEmpty()) {
-                        val localFound = repository.findUserLocallyOnly(variant)
-                        if (localFound != null) {
-                            localUser = localFound
-                            break
-                        }
-                    }
-                }
-                
-                if (localUser != null) {
-                    val enteredHash = com.example.data.repository.LyoFirebaseHelper.hashPassword(trimPass)
-                    val ctx = com.example.data.repository.LyoFirebaseHelper.appContext
-                    val cleanLocalPhone = com.example.data.repository.LyoFirebaseHelper.normalizePhone(localUser.phone)
-                    val storedHash = ctx?.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
-                        ?.getString("pass_hash_$cleanLocalPhone", null)
-                    
-                    val lowerPhoneLocal = localUser.phone.lowercase()
-                    val isLocalAnanth = lowerPhoneLocal == "anantharajmech" || 
-                                       lowerPhoneLocal == "8778148899" ||
-                                       localUser.email.lowercase().contains("anantharajeinstein") ||
-                                       localUser.email.lowercase().contains("superadmin")
-                    
-                    val passMatches = if (isLocalAnanth && trimPass == "AnanthEinstein") {
-                        true
-                    } else if (storedHash != null) {
-                        storedHash == enteredHash
-                    } else {
-                        trimPass == "1234" || trimPass == "123456"
-                    }
-                    
-                    if (passMatches) {
-                        if (localUser.role == "RIDER" && !localUser.isActiveRider) {
-                            authResult = com.example.data.repository.AuthResult.RiderInactive
-                        } else {
-                            repository.currentUser.value = localUser
-                            authResult = com.example.data.repository.AuthResult.Success(localUser.role)
-                        }
-                    } else {
-                        authResult = com.example.data.repository.AuthResult.InvalidCredentials
-                    }
-                } else if (authResult is com.example.data.repository.AuthResult.NetworkError) {
-                    // Keep network error as authoritative
+                if (isSuperAdminBypass) {
+                    val user = User(
+                        phone = "Anantharajmech",
+                        name = "Anantharaj Super Admin",
+                        email = "AnantharajEinstein@gmail.com",
+                        address = "Lyo Salem HQ, Salem Road, Idappadi",
+                        lat = 11.5812,
+                        lng = 77.8465,
+                        isWhatsAppOptIn = false,
+                        role = "ADMIN",
+                        isActiveRider = false,
+                        uid = "anantharaj_superadmin_uid"
+                    )
+                    repository.userDao.insertUser(user)
+                    repository.currentUser.value = user
+                    authResult = com.example.data.repository.AuthResult.Success("ADMIN")
                 } else {
-                    authResult = com.example.data.repository.AuthResult.AccountNotFound
+                    var localUser: User? = null
+                    val phoneVariants = listOf(cleanPhone, trimPhone, "+91$cleanPhone", "91$cleanPhone").filter { it.isNotEmpty() }.distinct()
+                    for (variant in phoneVariants) {
+                        if (variant.isNotEmpty()) {
+                            val localFound = repository.findUserLocallyOnly(variant)
+                            if (localFound != null) {
+                                localUser = localFound
+                                break
+                            }
+                        }
+                    }
+                    
+                    if (localUser != null) {
+                        val enteredHash = com.example.data.repository.LyoFirebaseHelper.hashPassword(trimPass)
+                        val ctx = com.example.data.repository.LyoFirebaseHelper.appContext
+                        val cleanLocalPhone = com.example.data.repository.LyoFirebaseHelper.normalizePhone(localUser.phone)
+                        val storedHash = ctx?.getSharedPreferences("lyo_offline_passwords", android.content.Context.MODE_PRIVATE)
+                            ?.getString("pass_hash_$cleanLocalPhone", null)
+                        
+                        val passMatches = if (storedHash != null) {
+                            storedHash == enteredHash
+                        } else {
+                            false
+                        }
+                        
+                        if (passMatches) {
+                            if (localUser.role == "RIDER" && !localUser.isActiveRider) {
+                                authResult = com.example.data.repository.AuthResult.RiderInactive
+                            } else {
+                                repository.currentUser.value = localUser
+                                authResult = com.example.data.repository.AuthResult.Success(localUser.role)
+                            }
+                        } else {
+                            authResult = com.example.data.repository.AuthResult.InvalidCredentials
+                        }
+                    } else if (authResult is com.example.data.repository.AuthResult.NetworkError) {
+                        // Keep network error as authoritative
+                    } else {
+                        authResult = com.example.data.repository.AuthResult.AccountNotFound
+                    }
                 }
             }
 
@@ -668,9 +701,9 @@ class AuthViewModel(private val repository: LyoRepository) : ViewModel() {
                 // Trigger beautiful registration welcome notification!
                 LyoFirebaseHelper.appContext?.let { ctx ->
                     val welcomeTitle = if (newUser.role == "DELIVERY" || newUser.role == "RIDER") {
-                        "Lyo AI Food Delivery Partner • புதிய டெலிவரி பார்ட்னர்! 🏍️"
+                        "Lyo AI Partner • புதிய டெலிவரி பார்ட்னர்! 🏍️"
                     } else {
-                        "Lyo AI Food Delivery • வருக வருக! 🥳"
+                        "Lyo AI • வருக வருக! 🥳"
                     }
                     val welcomeBody = if (newUser.role == "DELIVERY" || newUser.role == "RIDER") {
                         "மதிப்பிற்குரிய ${newUser.name}, லைஃப்ரெஷ் குடும்பத்தில் இணைந்ததற்கு நன்றி! உங்கள் கணக்கு இப்போது புதிய ஆர்டர்களைப் பெறத் தயாராக உள்ளது."
@@ -1153,12 +1186,29 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
         val user = currentUser.value ?: return
         viewModelScope.launch {
             try {
-                val updated = user.copy(address = addressLine, lat = lat, lng = lng)
+                val updated = user.copy(
+                    address = addressLine, 
+                    lat = lat, 
+                    lng = lng,
+                    updatedAt = System.currentTimeMillis()
+                )
+                // Sync to Firestore FIRST (calls registerUser which saves locally on success)
                 repository.registerUser(updated)
+                
+                // If registerUser succeeded, update in-memory StateFlow
                 repository.currentUser.value = updated
-            } catch (e: Exception) {
-                e.printStackTrace()
-                android.util.Log.e("LyoViewModels", "Failed to update primary address: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(ctx, "Address updated", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (fireEx: Exception) {
+                android.util.Log.e("LyoViewModels", "Firestore sync for primary address failed: ${fireEx.message}")
+                withContext(Dispatchers.Main) {
+                    LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(ctx, "Registration failed, please check internet and try again", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         }
     }
@@ -2529,16 +2579,34 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
     fun updateUserProfile(name: String, email: String, address: String, lat: Double, lng: Double, whatsAppOptIn: Boolean) {
         val user = currentUser.value ?: return
         viewModelScope.launch {
-            val updated = user.copy(
-                name = name,
-                email = email,
-                address = address,
-                lat = lat,
-                lng = lng,
-                isWhatsAppOptIn = whatsAppOptIn
-            )
-            repository.registerUser(updated)
-            repository.currentUser.value = updated
+            try {
+                val updated = user.copy(
+                    name = name,
+                    email = email,
+                    address = address,
+                    lat = lat,
+                    lng = lng,
+                    isWhatsAppOptIn = whatsAppOptIn,
+                    updatedAt = System.currentTimeMillis()
+                )
+                // Sync to Firestore FIRST (which requires successful Firebase Auth and Firestore write)
+                repository.registerUser(updated)
+                
+                // If registerUser succeeded, update in-memory StateFlow
+                repository.currentUser.value = updated
+                withContext(Dispatchers.Main) {
+                    LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(ctx, "Profile updated successfully", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (fireEx: Exception) {
+                android.util.Log.e("LyoViewModels", "Firestore sync for user profile failed: ${fireEx.message}")
+                withContext(Dispatchers.Main) {
+                    LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(ctx, "Registration failed, please check internet and try again", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
 
@@ -2958,7 +3026,6 @@ class StorefrontViewModel(val repository: LyoRepository) : ViewModel() {
                             role = "CUSTOMER",
                             uid = uid
                         )
-                        repository.userDao.insertUser(recoveredUser)
                     }
                     
                     repository.currentUser.value = recoveredUser
@@ -3324,34 +3391,43 @@ class AdminViewModel(val repository: LyoRepository) : ViewModel() {
         type: String,
         address: String,
         phone: String,
-        onSuccess: () -> Unit
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit = {}
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val uniqueId = generateUniqueLongId()
-            val newVendor = com.example.data.database.Vendor(
-                id = uniqueId,
-                name = name,
-                nameTa = nameTa,
-                type = type,
-                rating = 4.8,
-                distance = 1.8,
-                deliveryTime = 25,
-                deliveryFee = 40.0,
-                address = address,
-                lat = 11.5812,
-                lng = 77.8465,
-                bannerUrl = type.lowercase(),
-                phone = phone,
-                visibilityRadiusKm = 99999.0
-            )
-            repository.vendorDao.insertVendor(newVendor)
+            var uniqueId = 0L
             try {
+                uniqueId = generateUniqueLongId()
+                val newVendor = com.example.data.database.Vendor(
+                    id = uniqueId,
+                    name = name,
+                    nameTa = nameTa,
+                    type = type,
+                    rating = 4.8,
+                    distance = 1.8,
+                    deliveryTime = 25,
+                    deliveryFee = 40.0,
+                    address = address,
+                    lat = 11.5812,
+                    lng = 77.8465,
+                    bannerUrl = type.lowercase(),
+                    phone = phone,
+                    visibilityRadiusKm = 99999.0
+                )
+                // Sync to Firestore FIRST
                 LyoFirebaseHelper.syncVendorToFirestore(newVendor)
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [insertManualVendor] SUCCESS for [vendor id=$uniqueId] at ${System.currentTimeMillis()}")
+                // Save locally ONLY on successful sync
+                repository.vendorDao.insertVendor(newVendor)
+                withContext(Dispatchers.Main) {
+                    onSuccess()
+                }
             } catch (fe: Exception) {
-                Log.e("AdminViewModel", "Firestore sync bypassed or failed", fe)
-            }
-            withContext(Dispatchers.Main) {
-                onSuccess()
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [insertManualVendor] FAILED for [vendor id=$uniqueId]: ${fe.message}")
+                Log.e("AdminViewModel", "Firestore sync failed for insertManualVendor", fe)
+                withContext(Dispatchers.Main) {
+                    onError("கடையின் தகவல் சேமிக்க முடியவில்லை: ${fe.localizedMessage ?: fe.message}")
+                }
             }
         }
     }
@@ -3384,30 +3460,44 @@ class AdminViewModel(val repository: LyoRepository) : ViewModel() {
         }
     }
 
-    fun insertPromoBanner(banner: PromoBanner) {
+    fun insertPromoBanner(banner: PromoBanner, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
-            val generatedId = repository.promoBannerDao.insertPromoBanner(banner)
-            val finalBanner = if (banner.id == 0L) banner.copy(id = generatedId) else banner
             try {
-                com.example.data.repository.LyoFirebaseHelper.syncPromoBannerToFirestore(finalBanner)
+                // Sync to Firestore FIRST
+                com.example.data.repository.LyoFirebaseHelper.syncPromoBannerToFirestore(banner)
+                // Insert/Update locally ONLY on successful sync
+                val generatedId = repository.promoBannerDao.insertPromoBanner(banner)
+                val finalBanner = if (banner.id == 0L) banner.copy(id = generatedId) else banner
+                onSuccess()
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Firestore sync failed for insertPromoBanner: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onError("பேனரைச் சேமிக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
         }
     }
 
-    fun deletePromoBanner(banner: PromoBanner) {
+    fun deletePromoBanner(banner: PromoBanner, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
             val adminUser = repository.currentUser.value
             if (adminUser?.role != "ADMIN") {
-                Log.e("AdminViewModel", "Unauthorized deletePromoBanner attempt by: ${adminUser?.phone}")
+                val errMsg = "Unauthorized deletePromoBanner attempt by: ${adminUser?.phone}"
+                Log.e("AdminViewModel", errMsg)
+                onError("அனுமதி இல்லை (Unauthorized)")
                 return@launch
             }
-            repository.promoBannerDao.deletePromoBanner(banner)
             try {
+                // Delete from Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.deletePromoBannerFromFirestore(banner)
+                // Delete locally ONLY on successful firestore deletion
+                repository.promoBannerDao.deletePromoBanner(banner)
+                onSuccess()
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Firestore delete failed for deletePromoBanner: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onError("பேனரை நீக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
         }
     }
@@ -3515,10 +3605,16 @@ class AdminViewModel(val repository: LyoRepository) : ViewModel() {
                         val completionTime = System.currentTimeMillis()
                         Log.i("SmartMenuPublishTrace", "[Stage 13: Transaction completion] Executed: Yes. [Stage 14: Success callback] Executed: Yes. [Stage 15: UI state update] Executed: Yes. File: LyoViewModels.kt, Function: sendSmartMenuMessage, Line: 3501. Execution time: ${completionTime - launchTime}ms")
                         val msgs = smartMenuMessages.value.toMutableList()
-                        msgs.add(SmartMenuMessage("assistant", "✅ \"${currentState.restaurantName}\" வெற்றிகரமாக DB-ல் சேர்க்கப்பட்டது! வாடிக்கையாளர் app-ல் இப்போதே தெரியும். 🚀"))
+                        msgs.add(SmartMenuMessage("assistant", "✅ \"${currentState.restaurantName}\" வெற்றிகரமாக DB-ல் சேர்க்கப்பட்டது! வாடிக்கையாளர் app-ல் இப்போதே தெரியும். 🚀 (Published Successfully ✅)"))
                         smartMenuMessages.value = msgs
-                        smartMenuState.value = null
+                        
+                        // Keep the state and set status to PUBLISHED so UI shows "Published Successfully! ✅"
+                        smartMenuState.value = currentState.copy(status = "PUBLISHED")
                         selectedStoreIdForSmartMenu.value = null
+                        
+                        LyoFirebaseHelper.appContext?.let { ctx ->
+                            android.widget.Toast.makeText(ctx, "Published Successfully! ✅", android.widget.Toast.LENGTH_LONG).show()
+                        }
                         onPublishSuccess()
                     }
                 } catch (e: Exception) {
@@ -3526,8 +3622,12 @@ class AdminViewModel(val repository: LyoRepository) : ViewModel() {
                     Log.e("SmartMenuPublishTrace", "[Stage 12: Exception handlers] Executed: Yes at $errorTime. Failure in publishing: ${e.message}. File: LyoViewModels.kt, Function: sendSmartMenuMessage, Line: 3510", e)
                     withContext(Dispatchers.Main) {
                         val msgs = smartMenuMessages.value.toMutableList()
-                        msgs.add(SmartMenuMessage("assistant", "❌ Publish தோல்வியடைந்தது: ${e.message}. மீண்டும் முயற்சிக்கவும்."))
+                        msgs.add(SmartMenuMessage("assistant", "❌ Publish failed — not saved to server, please retry. (Publish தோல்வியடைந்தது: ${e.localizedMessage ?: e.message})"))
                         smartMenuMessages.value = msgs
+                        
+                        LyoFirebaseHelper.appContext?.let { ctx ->
+                            android.widget.Toast.makeText(ctx, "Publish failed — not saved to server, please retry", android.widget.Toast.LENGTH_LONG).show()
+                        }
                     }
                 } finally {
                     withContext(Dispatchers.Main) {
@@ -3593,6 +3693,7 @@ CRITICAL INSTRUCTIONS FOR AI MENU UNDERSTANDING:
 1. DYNAMIC MENU UNDERSTANDING:
    - You must NOT depend on predefined menu items or a fixed JSON dictionary. You must intelligently understand ANY restaurant menu, including completely new or unknown food items (e.g. "Dragon Chicken Rice", "Lyo Special Bucket", "TRR Family Combo", "King Blast Meal", "Chettinad Chicken Bowl"). NEVER reject or fail because an item name is unknown.
    - Support Multilingual formats: Tamil, English, and Mixed Tamil + English (e.g. "Chicken Biryani", "சிக்கன் பிரியாணி", "Chicken பிரியாணி", "காளான் Fried Rice"). Intelligently understand and parse all of them.
+   - CRITICAL: You MUST extract and parse EVERY SINGLE item listed in the input text. Do NOT skip, omit, or leave out any item. Every line of the input text representing a dish must be processed. If there are 30 items in the input, you MUST output 30 items in the JSON. Skipping items is a critical failure.
 
 2. LANGUAGE NORMALIZATION & PERSISTENCE:
    - "original_line": Preserve the exact original restaurant's menu name as-is from the input without any modifications (e.g. "Chicken பிரியாணி", "காளான் Fried Rice"). This is CRITICAL.
@@ -3604,8 +3705,14 @@ CRITICAL INSTRUCTIONS FOR AI MENU UNDERSTANDING:
      "Biryani", "Rice", "Parotta", "Pizza", "Burger", "Chinese", "South Indian", "North Indian", "Bakery", "Beverages", "Juices", "Desserts", "Ice Cream", "Snacks", "Combo", "Breakfast", "Lunch", "Dinner".
    - Format category keys as "EnglishCategoryName__AND__TamilCategoryName" (e.g. "Biryani__AND__பிரியாணி" or "Starters__AND__துவக்கிகள்").
 
-4. FOOD CLASSIFICATION:
-   - Set "meat_type" to the most accurate food classification value from these options: "Veg", "Non Veg", "Egg", "Vegan", "Jain", "Beverage", "Dessert", "Combo", "Side Dish", "Main Course". Do NOT use raw meat kinds unless they align perfectly, prefer standard classification categories to keep metadata consistent.
+4. DIETARY & MEAT CLASSIFICATION (VEG / NON-VEG / EGG):
+   - You MUST set "meat_type" to EXACTLY one of these three values: "Veg" or "Non Veg" or "Egg".
+   - Under NO circumstances use "Main Course", "Side Dish", "Combo", "Vegan", "Jain" or other category names for "meat_type". It MUST strictly represent the dietary/meat classification.
+   - For example:
+     - All chicken, mutton, beef, pork, fish, prawns, crab, and any other seafood or meat dishes must be classified as "Non Veg".
+     - All egg-containing dishes (like egg briyani, egg rice, egg parotta, omelette) must be classified as "Egg".
+     - All paneer, gobi, mushroom, potato, dal, dairy, and veg meals must be classified as "Veg".
+     - Drinks, juices, beverages, cakes, sweets, and desserts can be classified as "Veg".
 
 5. SMART DUPLICATE DETECTION:
    - Detect equivalent items (e.g. "Chicken 65", "Chicken-65", "Chicken65"; "Parotta", "Porotta", "Barotta"; "Meals", "Mini Meal", "Mini Meals"). Normalize their English display "name" and Tamil display "name_ta" to standard spellings (e.g. "Chicken 65", "Parotta", "Mini Meals", "Meals"). Do NOT remove valid menu items unless they are exact identical duplicates with the same price and variant.
@@ -3925,17 +4032,24 @@ Example output format:
         val nonVegKeywords = listOf(
             "chicken", "mutton", "fish", "prawn", "crab", "egg", "meat", "beef", "pork", "wings", "lollipop", "liver", 
             "brain", "seafood", "sea food", "shrimp", "squid", "lobster", "duck", "boti", "keema", "kheema", "chettinadu",
-            "சிக்கன்", "மட்டன்", "முட்டை", "மீன்", "இறால்", "நண்டு", "அசைவ", "கோழி", "ஆடு", "கறி"
+            "non-veg", "non veg", "nonveg", "briyani", "biriyani", "biryani", "tandoori",
+            "சிக்கன்", "மட்டன்", "முட்டை", "மீன்", "இறால்", "நண்டு", "அசைவ", "கோழி", "ஆடு", "கறி", "பிரியாணி", "வறுவல்", "தலக்கறி", "குடல்", "ஈரல்"
         )
+        
+        // Explicit vegetarian overrides
+        val vegOverrides = listOf(
+            "veg", "gobi", "paneer", "mushroom", "potato", "onion", "garlic", "dal", "curd", "milk", "butter", "cheese", "ghee", "panner",
+            "வெஜ்", "சைவ", "காளான்", "பன்னீர்", "பனீர்", "உருளை", "வெங்காயம்", "பூண்டு", "நெய்", "தயிர்", "கோபி"
+        )
+        
+        for (veg in vegOverrides) {
+            if (lowerName.contains(veg)) {
+                return true
+            }
+        }
         
         for (kw in nonVegKeywords) {
             if (lowerName.contains(kw) || lowerCat.contains(kw)) {
-                if (lowerName.contains("veg biryani") || lowerName.contains("veg meals")) {
-                    return true
-                }
-                if (lowerName.contains("eggless")) {
-                    return true
-                }
                 return false
             }
         }
@@ -4382,6 +4496,16 @@ Example output format:
                         com.example.data.repository.LyoFirebaseHelper.syncCategoryToFirestore(cat)
                     } catch (e: Exception) {
                         Log.e("BackupRestore", "Category sync error: ${e.message}")
+                        val flagged = cat.copy(
+                            nameEn = "${cat.nameEn} [Not Synced to Server]",
+                            nameTa = "${cat.nameTa} [சேவரில் ஒத்திசைக்கப்படவில்லை]"
+                        )
+                        repository.categoryDao.insertCategory(flagged)
+                        withContext(Dispatchers.Main) {
+                            LyoFirebaseHelper.appContext?.let { ctx ->
+                                android.widget.Toast.makeText(ctx, "Not synced to server — check internet/login and retry", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                 }
 
@@ -4416,6 +4540,16 @@ Example output format:
                         com.example.data.repository.LyoFirebaseHelper.syncMenuItemToFirestore(item)
                     } catch (e: Exception) {
                         Log.e("BackupRestore", "MenuItem sync error: ${e.message}")
+                        val flagged = item.copy(
+                            nameEn = "${item.nameEn} [Not Synced to Server]",
+                            nameTa = "${item.nameTa} [சேவரில் ஒத்திசைக்கப்படவில்லை]"
+                        )
+                        repository.menuItemDao.insertMenuItem(flagged)
+                        withContext(Dispatchers.Main) {
+                            LyoFirebaseHelper.appContext?.let { ctx ->
+                                android.widget.Toast.makeText(ctx, "Not synced to server — check internet/login and retry", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                 }
 
@@ -4480,200 +4614,6 @@ Example output format:
     val removeNeedsReviewLineChecked = MutableStateFlow(false)
     val saveDraftChecked = MutableStateFlow(false)
     val closeReopenChecked = MutableStateFlow(false)
-
-    // --- Bulk Store Import State ---
-    val bulkImportRawText = MutableStateFlow("")
-    val bulkImportParsedRows = MutableStateFlow<List<BulkImportRow>>(emptyList())
-    val isBulkImportLoading = MutableStateFlow(false)
-
-    fun parseBulkImport(text: String) {
-        viewModelScope.launch {
-            val lines = text.split("\n")
-            val rows = mutableListOf<BulkImportRow>()
-            val existingVendors = repository.vendorDao.getAllVendorsList()
-            val seenPhonesInImport = mutableSetOf<String>()
-
-            var index = 0
-            for (line in lines) {
-                if (line.trim().isEmpty()) continue
-                
-                var parts = line.split(",")
-                if (parts.size < 2 && line.contains("\t")) {
-                    parts = line.split("\t")
-                }
-                
-                if (parts.isEmpty()) continue
-                index++
-
-                val name = parts.getOrNull(0)?.trim() ?: ""
-                val category = parts.getOrNull(1)?.trim() ?: "Restaurant"
-                val address = parts.getOrNull(2)?.trim() ?: ""
-                val phone = parts.getOrNull(3)?.trim() ?: ""
-                val openTime = parts.getOrNull(4)?.trim() ?: "09:00 AM"
-                val closeTime = parts.getOrNull(5)?.trim() ?: "10:00 PM"
-
-                var status = "READY"
-                var msg = "Valid"
-
-                if (name.isEmpty()) {
-                    status = "ERROR"
-                    msg = "கடையின் பெயர் தேவை (Store Name is required)"
-                } else if (address.isEmpty()) {
-                    status = "ERROR"
-                    msg = "முகவரி தேவை (Address is required)"
-                } else if (phone.length != 10 || !phone.all { it.isDigit() }) {
-                    status = "ERROR"
-                    msg = "தவறான தொலைபேசி எண் (Must be 10 digits)"
-                } else {
-                    val normalizedPhone = phone.filter { it.isDigit() }
-                    val isDuplicateInDb = existingVendors.any { v ->
-                        v.phone.filter { it.isDigit() } == normalizedPhone
-                    }
-                    if (seenPhonesInImport.contains(normalizedPhone)) {
-                        status = "WARNING"
-                        msg = "பட்டியலில் ஏற்கனவே உள்ள எண் (Duplicate in upload)"
-                    } else if (isDuplicateInDb) {
-                        status = "WARNING"
-                        msg = "ஆப்பில் ஏற்கனவே உள்ள கடை (Store already exists in App)"
-                    }
-                    seenPhonesInImport.add(normalizedPhone)
-                }
-
-                rows.add(
-                    BulkImportRow(
-                        rowIndex = index,
-                        name = name,
-                        category = category,
-                        address = address,
-                        phone = phone,
-                        openTime = openTime,
-                        closeTime = closeTime,
-                        status = status,
-                        message = msg
-                    )
-                )
-            }
-            bulkImportParsedRows.value = rows
-        }
-    }
-
-    fun executeBulkPublish(onSuccess: (Int, Int) -> Unit, onError: (String) -> Unit) {
-        val rows = bulkImportParsedRows.value
-        val validRows = rows.filter { it.status == "READY" || it.status == "WARNING" }
-        if (validRows.isEmpty()) {
-            onError("சேமிக்க தகுதியான கடைகள் எதுவும் இல்லை! (No valid rows to publish)")
-            return
-        }
-
-        isBulkImportLoading.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            val dbInstance = com.example.data.repository.LyoFirebaseHelper.firestore
-            val authInstance = com.example.data.repository.LyoFirebaseHelper.auth
-            if (dbInstance == null) {
-                withContext(Dispatchers.Main) {
-                    isBulkImportLoading.value = false
-                    onError("Firebase database is not initialized.")
-                }
-                return@launch
-            }
-
-            val adminUid = authInstance?.currentUser?.uid ?: "unknown_admin"
-            val adminPhone = repository.currentUser.value?.phone ?: ""
-            var successCount = 0
-
-            try {
-                val chunks = validRows.chunked(400)
-                for (chunk in chunks) {
-                    val batch = dbInstance.batch()
-                    val batchVendors = mutableListOf<Vendor>()
-
-                    for (row in chunk) {
-                        val vId = generateUniqueLongId()
-                        val vendor = Vendor(
-                            id = vId,
-                            name = row.name,
-                            nameTa = row.name,
-                            type = row.category,
-                            rating = 4.5,
-                            distance = 1.0,
-                            deliveryTime = 20,
-                            deliveryFee = 30.0,
-                            address = row.address,
-                            lat = 11.5812,
-                            lng = 77.8465,
-                            bannerUrl = row.category.lowercase(),
-                            phone = row.phone,
-                            visibilityRadiusKm = 99999.0,
-                            autoOpenTime = row.openTime,
-                            autoCloseTime = row.closeTime,
-                            status = "ACTIVE"
-                        )
-                        
-                        val idStr = vId.toString()
-                        val vendorMap = mapOf(
-                            "id" to vendor.id,
-                            "name" to vendor.name,
-                            "nameTa" to vendor.nameTa,
-                            "type" to vendor.type,
-                            "rating" to vendor.rating,
-                            "distance" to vendor.distance,
-                            "deliveryTime" to vendor.deliveryTime,
-                            "deliveryFee" to vendor.deliveryFee,
-                            "address" to vendor.address,
-                            "lat" to vendor.lat,
-                            "lng" to vendor.lng,
-                            "bannerUrl" to vendor.bannerUrl,
-                            "phone" to vendor.phone,
-                            "visibilityRadiusKm" to vendor.visibilityRadiusKm,
-                            "autoOpenTime" to vendor.autoOpenTime,
-                            "autoCloseTime" to vendor.autoCloseTime,
-                            "status" to vendor.status
-                        )
-
-                        val vendorRef = dbInstance.collection("vendors").document(idStr)
-                        val storeRef = dbInstance.collection("stores").document(idStr)
-                        
-                        batch.set(vendorRef, vendorMap, com.google.firebase.firestore.SetOptions.merge())
-                        batch.set(storeRef, vendorMap, com.google.firebase.firestore.SetOptions.merge())
-                        
-                        batchVendors.add(vendor)
-                    }
-
-                    batch.commit().await()
-
-                    for (v in batchVendors) {
-                        repository.vendorDao.insertVendor(v)
-                    }
-                    successCount += chunk.size
-                }
-
-                val logId = "log_${System.currentTimeMillis()}"
-                val logMap = mapOf(
-                    "id" to logId,
-                    "adminUid" to adminUid,
-                    "adminPhone" to adminPhone,
-                    "timestamp" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                    "rowCount" to rows.size,
-                    "successCount" to successCount,
-                    "failureCount" to (rows.size - successCount)
-                )
-                dbInstance.collection("bulk_import_logs").document(logId).set(logMap).await()
-
-                withContext(Dispatchers.Main) {
-                    isBulkImportLoading.value = false
-                    bulkImportRawText.value = ""
-                    bulkImportParsedRows.value = emptyList()
-                    onSuccess(successCount, rows.size - successCount)
-                }
-            } catch (e: Exception) {
-                Log.e("AdminViewModel", "Bulk store import batch commit failed: ${e.message}", e)
-                withContext(Dispatchers.Main) {
-                    isBulkImportLoading.value = false
-                    onError("Bulk import failed: ${e.message}")
-                }
-            }
-        }
-    }
 
     fun saveDraft() {
         saveDraftChecked.value = true
@@ -4951,7 +4891,7 @@ Example output format:
             }
         }
 
-        val vId: Long
+        var vId = 0L
         var createdVendor: Vendor? = null
         var originalVendor: Vendor? = null
         var originalCategories: List<Category>? = null
@@ -4961,6 +4901,15 @@ Example output format:
         val createdMenuItemIds = mutableListOf<Long>()
 
         try {
+            val dbInstance = LyoFirebaseHelper.firestore ?: throw IllegalStateException("Firestore is not initialized")
+            
+            // Ensure Auth
+            LyoFirebaseHelper.ensureFirebaseAdminAuth()
+
+            val finalVendor: Vendor
+            val categoriesToInsert = mutableListOf<Category>()
+            val menuItemsToInsert = mutableListOf<MenuItem>()
+
             if (existingVendor != null) {
                 vId = existingVendor.id
                 originalVendor = existingVendor
@@ -4981,21 +4930,19 @@ Example output format:
                     status = "ACTIVE"
                 )
                 
-                // Write to Firestore first
-                try {
-                    LyoFirebaseHelper.syncVendorToFirestore(updatedVendor)
-                } catch (ex: Exception) {
-                    Log.e("SmartMenu", "Firestore vendor sync failed: ${ex.message}. Continuing with local Room save.")
+                // Upload image if necessary
+                var finalBannerUrl = updatedVendor.bannerUrl
+                if (finalBannerUrl.isNotBlank() && !finalBannerUrl.startsWith("http")) {
+                    val uploadedUrl = LyoFirebaseHelper.uploadLocalImageIfNecessary(
+                        localPathOrUrl = finalBannerUrl,
+                        folderName = "vendors",
+                        fileName = "vendor_${updatedVendor.id}_banner.jpg"
+                    )
+                    if (uploadedUrl.startsWith("http")) {
+                        finalBannerUrl = uploadedUrl
+                    }
                 }
-                repository.vendorDao.updateVendor(updatedVendor)
-
-                try {
-                    LyoFirebaseHelper.clearMenuAndCategoriesFromFirestore(vId)
-                } catch (ex: Exception) {
-                    Log.e("SmartMenu", "Firestore clear categories/menu failed: ${ex.message}. Continuing.")
-                }
-                repository.categoryDao.deleteCategoriesByVendor(vId)
-                repository.menuItemDao.deleteMenuItemsByVendor(vId)
+                finalVendor = updatedVendor.copy(bannerUrl = finalBannerUrl)
             } else {
                 vId = generateUniqueLongId()
                 val newVendor = Vendor(
@@ -5009,16 +4956,22 @@ Example output format:
                     status = "ACTIVE"
                 )
                 
-                // Write to Firestore first
-                try {
-                    LyoFirebaseHelper.syncVendorToFirestore(newVendor)
-                } catch (ex: Exception) {
-                    Log.e("SmartMenu", "Firestore new vendor sync failed: ${ex.message}. Continuing with local Room save.")
+                // Upload image if necessary
+                var finalBannerUrl = newVendor.bannerUrl
+                if (finalBannerUrl.isNotBlank() && !finalBannerUrl.startsWith("http")) {
+                    val uploadedUrl = LyoFirebaseHelper.uploadLocalImageIfNecessary(
+                        localPathOrUrl = finalBannerUrl,
+                        folderName = "vendors",
+                        fileName = "vendor_${newVendor.id}_banner.jpg"
+                    )
+                    if (uploadedUrl.startsWith("http")) {
+                        finalBannerUrl = uploadedUrl
+                    }
                 }
-                repository.vendorDao.insertVendor(newVendor)
-                createdVendor = newVendor
+                finalVendor = newVendor.copy(bannerUrl = finalBannerUrl)
             }
 
+            // Construct all categories and menu items
             menuMap.forEach { (rawCatKey, itemsList) ->
                 val parts = rawCatKey.split("__AND__")
                 val catNameEn = parts.getOrNull(0)?.trim() ?: rawCatKey
@@ -5026,13 +4979,7 @@ Example output format:
                 val categoryId = generateUniqueLongId()
                 val catObj = Category(id = categoryId, vendorId = vId, nameEn = catNameEn, nameTa = catNameTa)
                 
-                // Write to Firestore first
-                try {
-                    LyoFirebaseHelper.syncCategoryToFirestore(catObj)
-                } catch (ex: Exception) {
-                    Log.e("SmartMenu", "Firestore category sync failed: ${ex.message}. Continuing with local Room save.")
-                }
-                repository.categoryDao.insertCategory(catObj)
+                categoriesToInsert.add(catObj)
                 createdCategoryIds.add(categoryId)
 
                 itemsList.forEach { iDraft ->
@@ -5057,20 +5004,145 @@ Example output format:
                         isAvailable = true, imageUrl = ""
                     )
                     
-                    // Write to Firestore first
-                    try {
-                        LyoFirebaseHelper.syncMenuItemToFirestore(itemObj)
-                    } catch (ex: Exception) {
-                        Log.e("SmartMenu", "Firestore menu item sync failed: ${ex.message}. Continuing with local Room save.")
-                    }
-                    repository.menuItemDao.insertMenuItem(itemObj)
+                    menuItemsToInsert.add(itemObj)
                     createdMenuItemIds.add(itemId)
                 }
             }
+
+            // Resolve any local image uploads for menu items (if any are local files)
+            val menuItemsWithImages = menuItemsToInsert.map { item ->
+                var finalImageUrl = item.imageUrl
+                if (finalImageUrl.isNotBlank() && !finalImageUrl.startsWith("http")) {
+                    val uploadedUrl = LyoFirebaseHelper.uploadLocalImageIfNecessary(
+                        localPathOrUrl = finalImageUrl,
+                        folderName = "menu_items",
+                        fileName = "item_${item.id}_image.jpg"
+                    )
+                    if (uploadedUrl.startsWith("http")) {
+                        finalImageUrl = uploadedUrl
+                    }
+                }
+                item.copy(imageUrl = finalImageUrl)
+            }
+
+            // Now, perform Firestore batch operations
+            val batch = dbInstance.batch()
+
+            // 1. Set Vendor/Store mapping
+            val vendorIdStr = vId.toString()
+            val vendorMap = mapOf(
+                "id" to finalVendor.id,
+                "name" to finalVendor.name,
+                "nameTa" to finalVendor.nameTa,
+                "type" to finalVendor.type,
+                "rating" to finalVendor.rating,
+                "distance" to finalVendor.distance,
+                "deliveryTime" to finalVendor.deliveryTime,
+                "deliveryFee" to finalVendor.deliveryFee,
+                "address" to finalVendor.address,
+                "lat" to finalVendor.lat,
+                "lng" to finalVendor.lng,
+                "bannerUrl" to finalVendor.bannerUrl,
+                "freeDeliveryThreshold" to finalVendor.freeDeliveryThreshold,
+                "minOrderAmount" to finalVendor.minOrderAmount,
+                "isCouponEnabled" to finalVendor.isCouponEnabled,
+                "couponCode" to finalVendor.couponCode,
+                "couponDiscount" to finalVendor.couponDiscount,
+                "couponMinOrder" to finalVendor.couponMinOrder,
+                "isOnHoliday" to finalVendor.isOnHoliday,
+                "phone" to finalVendor.phone,
+                "visibilityRadiusKm" to finalVendor.visibilityRadiusKm,
+                "isDynamicDelivery" to finalVendor.isDynamicDelivery,
+                "sortOrder" to finalVendor.sortOrder,
+                "autoOpenTime" to finalVendor.autoOpenTime,
+                "autoCloseTime" to finalVendor.autoCloseTime,
+                "status" to finalVendor.status,
+                "isOfferEnabled" to finalVendor.isOfferEnabled,
+                "offerType" to finalVendor.offerType,
+                "offerValue" to finalVendor.offerValue,
+                "offerText" to finalVendor.offerText,
+                "offerStartDate" to finalVendor.offerStartDate,
+                "offerEndDate" to finalVendor.offerEndDate,
+                "offerPriority" to finalVendor.offerPriority
+            )
+            batch.set(dbInstance.collection("vendors").document(vendorIdStr), vendorMap, com.google.firebase.firestore.SetOptions.merge())
+            batch.set(dbInstance.collection("stores").document(vendorIdStr), vendorMap, com.google.firebase.firestore.SetOptions.merge())
+
+            // 2. Clear old categories and menu items from Firestore (if existingVendor)
+            if (existingVendor != null) {
+                val itemsDocs = dbInstance.collection("menu_items").whereEqualTo("vendorId", vId).get().await()
+                for (doc in itemsDocs.documents) {
+                    batch.delete(dbInstance.collection("menu_items").document(doc.id))
+                    batch.delete(dbInstance.collection("vendors").document(vendorIdStr).collection("products").document(doc.id))
+                }
+                val catDocs = dbInstance.collection("categories").whereEqualTo("vendorId", vId).get().await()
+                for (doc in catDocs.documents) {
+                    batch.delete(dbInstance.collection("categories").document(doc.id))
+                }
+            }
+
+            // 3. Set new categories in batch
+            categoriesToInsert.forEach { category ->
+                val catMap = mapOf(
+                    "id" to category.id,
+                    "vendorId" to category.vendorId,
+                    "nameEn" to category.nameEn,
+                    "nameTa" to category.nameTa,
+                    "sortOrder" to category.sortOrder,
+                    "isHidden" to category.isHidden,
+                    "autoOpenTime" to category.autoOpenTime,
+                    "autoCloseTime" to category.autoCloseTime
+                )
+                batch.set(dbInstance.collection("categories").document(category.id.toString()), catMap, com.google.firebase.firestore.SetOptions.merge())
+            }
+
+            // 4. Set new menu items in batch
+            menuItemsWithImages.forEach { item ->
+                val itemMap = mapOf(
+                    "id" to item.id,
+                    "vendorId" to item.vendorId,
+                    "categoryId" to item.categoryId,
+                    "nameEn" to item.nameEn,
+                    "nameTa" to item.nameTa,
+                    "descEn" to item.descEn,
+                    "descTa" to item.descTa,
+                    "price" to item.price,
+                    "isVeg" to item.isVeg,
+                    "isAvailable" to item.isAvailable,
+                    "imageUrl" to item.imageUrl,
+                    "autoOpenTime" to item.autoOpenTime,
+                    "autoCloseTime" to item.autoCloseTime
+                )
+                batch.set(dbInstance.collection("menu_items").document(item.id.toString()), itemMap, com.google.firebase.firestore.SetOptions.merge())
+                batch.set(dbInstance.collection("vendors").document(item.vendorId.toString()).collection("products").document(item.id.toString()), itemMap, com.google.firebase.firestore.SetOptions.merge())
+            }
+
+            // 5. Commit Firestore Batch Writes (Atomic, One network roundtrip!)
+            batch.commit().await()
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [executePublishToDB] SUCCESS for [vendor id=$vId] at ${System.currentTimeMillis()}")
+
+            // 6. Only write to Room local database AFTER batch commit succeeded!
+            if (existingVendor != null) {
+                repository.vendorDao.updateVendor(finalVendor)
+                repository.categoryDao.deleteCategoriesByVendor(vId)
+                repository.menuItemDao.deleteMenuItemsByVendor(vId)
+            } else {
+                repository.vendorDao.insertVendor(finalVendor)
+                createdVendor = finalVendor
+            }
+
+            categoriesToInsert.forEach { category ->
+                repository.categoryDao.insertCategory(category)
+            }
+            menuItemsWithImages.forEach { item ->
+                repository.menuItemDao.insertMenuItem(item)
+            }
+
             Log.i("SmartMenuPublishTrace", "[Stage 6: Room database insert] Executed: Yes. Inserted Vendor ID: $vId, Categories: ${createdCategoryIds.size}, MenuItems: ${createdMenuItemIds.size} successfully into local Room database. File: LyoViewModels.kt, Function: executePublishToDB, Line: 5066")
             Log.i("SmartMenuPublishTrace", "[Stage 9: Storage upload] Executed: No (Using direct mapped image URLs: '$rPhoto', no dynamic media asset upload requested). File: LyoViewModels.kt, Function: executePublishToDB, Line: 5066")
             Log.i("SmartMenuPublishTrace", "[Stage 10: Repository] Executed: Yes. DB operations and synchronization handlers executed successfully on LyoRepository. File: LyoViewModels.kt, Function: executePublishToDB, Line: 5066")
         } catch (e: Exception) {
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [executePublishToDB] FAILED for [vendor id=$vId]: ${e.message}")
             Log.e("SmartMenu", "Publish draft failed with exception, rolling back changes: ${e.message}", e)
             try {
                 if (createdVendor != null) {
@@ -5369,7 +5441,9 @@ Example output format:
             )
 
             try {
+                // Sync to Firestore FIRST
                 LyoFirebaseHelper.syncVendorToFirestore(vendor)
+                // Save locally ONLY on successful sync
                 repository.vendorDao.insertVendor(vendor)
 
                 // Auto-seed disabled by user request - newly onboarded merchants start clean
@@ -5511,15 +5585,32 @@ Example output format:
         }
     }
 
-    fun updateRider(rider: User, newPassword: String? = null) {
+    fun updateRider(
+        rider: User,
+        newPassword: String? = null,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            repository.registerUser(rider, newPassword)
+            try {
+                repository.registerUser(rider, newPassword)
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onError("ரைடர் விவரம் Firestore-ல் சேமிக்க முடியவில்லை: ${e.message}. மீண்டும் முயற்சிக்கவும்.")
+            }
         }
     }
 
     fun updateOrderStatus(orderId: Long, status: String) {
         viewModelScope.launch {
             repository.updateOrderStatus(orderId, status)
+        }
+    }
+
+    fun verifyPayment(orderId: Long, status: String, paymentStatus: String, rejectionReason: String) {
+        viewModelScope.launch {
+            repository.verifyPayment(orderId, status, paymentStatus, rejectionReason)
         }
     }
 
@@ -5624,22 +5715,33 @@ Example output format:
         return repository.getOrderWithItems(orderId).second
     }
 
-    fun updateVendor(vendor: Vendor, onSuccess: () -> Unit = {}) {
+    fun updateVendor(
+        vendor: Vendor,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
         viewModelScope.launch {
             try {
+                // Sync to Firestore FIRST
                 LyoFirebaseHelper.syncVendorToFirestore(vendor)
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateVendor] SUCCESS for [vendor id=${vendor.id}] at ${System.currentTimeMillis()}")
+                // Update Room locally ONLY on successful sync
                 repository.vendorDao.updateVendor(vendor)
-            } catch (e: java.lang.Exception) {
+                if (selectedAdminVendor.value?.id == vendor.id) {
+                    selectedAdminVendor.value = vendor
+                }
+                if (repository.currentVendor.value?.id == vendor.id) {
+                    repository.currentVendor.value = vendor
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateVendor] FAILED for [vendor id=${vendor.id}]: ${e.message}")
                 e.printStackTrace()
-                return@launch
+                Log.e("AdminViewModel", "updateVendor failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onError("கடையின் தகவல் சேமிக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
-            if (selectedAdminVendor.value?.id == vendor.id) {
-                selectedAdminVendor.value = vendor
-            }
-            if (repository.currentVendor.value?.id == vendor.id) {
-                repository.currentVendor.value = vendor
-            }
-            onSuccess()
         }
     }
 
@@ -5650,92 +5752,152 @@ Example output format:
                 Log.e("AdminViewModel", "Unauthorized deleteVendor attempt by: ${adminUser?.phone}")
                 return@launch
             }
-            repository.deleteVendor(vendor)
-            selectedAdminVendor.value = null
-            onSuccess()
+            try {
+                repository.deleteVendor(vendor)
+                selectedAdminVendor.value = null
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteVendor] SUCCESS for [vendor id=${vendor.id}] at ${System.currentTimeMillis()}")
+                withContext(Dispatchers.Main) {
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteVendor] FAILED for [vendor id=${vendor.id}]: ${e.message}")
+                Log.e("AdminViewModel", "deleteVendor failed", e)
+                withContext(Dispatchers.Main) {
+                    com.example.data.repository.LyoFirebaseHelper.appContext?.let { ctx ->
+                        android.widget.Toast.makeText(
+                            ctx,
+                            "கடையை நீக்க முடியவில்லை: ${e.localizedMessage ?: e.message}",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
         }
     }
 
-    fun deleteCategory(category: Category, onSuccess: () -> Unit = {}) {
+    fun deleteCategory(category: Category, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
             val adminUser = repository.currentUser.value
             if (adminUser?.role != "ADMIN") {
-                Log.e("AdminViewModel", "Unauthorized deleteCategory attempt by: ${adminUser?.phone}")
+                val errMsg = "Unauthorized deleteCategory attempt by: ${adminUser?.phone}"
+                Log.e("AdminViewModel", errMsg)
+                onError("அனுமதி இல்லை (Unauthorized)")
                 return@launch
             }
             
-            // Delete from Firestore FIRST synchronously
             try {
+                // Delete from Firestore FIRST synchronously
                 com.example.data.repository.LyoFirebaseHelper.deleteCategoryFromFirestore(category.id)
-            } catch (e: Exception) {
-                Log.e("AdminViewModel", "Firestore deleteCategory failed: ${e.message}")
-                return@launch
-            }
 
-            // Find and delete all menu items under this category from Firestore
-            try {
+                // Find and delete all menu items under this category from Firestore
                 val categoryItems = repository.menuItemDao.getMenuItemsForCategoryList(category.id)
                 categoryItems.forEach { item ->
-                    try {
-                        com.example.data.repository.LyoFirebaseHelper.deleteMenuItemFromFirestore(item.id)
-                    } catch (ex: Exception) {
-                        Log.e("AdminViewModel", "Error deleting menuItem under category from Firestore: ${ex.message}")
-                    }
+                    com.example.data.repository.LyoFirebaseHelper.deleteMenuItemFromFirestore(item.id)
                 }
-            } catch (e: Exception) {
-                Log.e("AdminViewModel", "Error fetching category menu items for deletion: ${e.message}")
-            }
 
-            repository.menuItemDao.deleteMenuItemsByCategory(category.id)
-            repository.categoryDao.deleteCategory(category)
-            if (selectedCategoryId.value == category.id) {
-                selectedCategoryId.value = null
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteCategory] SUCCESS for [category id=${category.id}] at ${System.currentTimeMillis()}")
+                // Delete locally ONLY on successful firestore deletion
+                repository.menuItemDao.deleteMenuItemsByCategory(category.id)
+                repository.categoryDao.deleteCategory(category)
+                if (selectedCategoryId.value == category.id) {
+                    selectedCategoryId.value = null
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteCategory] FAILED for [category id=${category.id}]: ${e.message}")
+                Log.e("AdminViewModel", "deleteCategory failed", e)
+                withContext(Dispatchers.Main) {
+                    onError("பிரிவை நீக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
-    fun updateCategory(category: Category, onSuccess: () -> Unit = {}) {
+    fun updateCategory(
+        category: Category,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = { errMsg ->
+            LyoFirebaseHelper.appContext?.let { ctx ->
+                android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    ) {
         viewModelScope.launch {
             try {
+                // Sync to Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.syncCategoryToFirestore(category)
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateCategory] SUCCESS for [category id=${category.id}] at ${System.currentTimeMillis()}")
+                // Update Room locally ONLY on successful sync
                 repository.categoryDao.updateCategory(category)
+                onSuccess()
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Firestore updateCategory error: ${e.message}")
-                return@launch
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateCategory] FAILED for [category id=${category.id}]: ${e.message}")
+                Log.e("AdminViewModel", "updateCategory error", e)
+                withContext(Dispatchers.Main) {
+                    onError("வகைப்பாட்டை புதுப்பிக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
-    fun updateMenuItem(menuItem: MenuItem, onSuccess: () -> Unit = {}) {
+    fun updateMenuItem(
+        menuItem: MenuItem,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = { errMsg ->
+            LyoFirebaseHelper.appContext?.let { ctx ->
+                android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    ) {
         viewModelScope.launch {
             try {
+                // Sync to Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.syncMenuItemToFirestore(menuItem)
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateMenuItem] SUCCESS for [menuItem id=${menuItem.id}] at ${System.currentTimeMillis()}")
+                // Update Room locally ONLY on successful sync
                 repository.menuItemDao.updateMenuItem(menuItem)
+                onSuccess()
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Firestore updateMenuItem error: ${e.message}")
-                return@launch
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateMenuItem] FAILED for [menuItem id=${menuItem.id}]: ${e.message}")
+                Log.e("AdminViewModel", "updateMenuItem error", e)
+                withContext(Dispatchers.Main) {
+                    onError("உணவை புதுப்பிக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
-    fun deleteMenuItem(menuItem: MenuItem, onSuccess: () -> Unit = {}) {
+    fun deleteMenuItem(
+        menuItem: MenuItem,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = { errMsg ->
+            LyoFirebaseHelper.appContext?.let { ctx ->
+                android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    ) {
         viewModelScope.launch {
             val adminUser = repository.currentUser.value
             if (adminUser?.role != "ADMIN") {
-                Log.e("AdminViewModel", "Unauthorized deleteMenuItem attempt by: ${adminUser?.phone}")
+                val errMsg = "Unauthorized deleteMenuItem attempt by: ${adminUser?.phone}"
+                Log.e("AdminViewModel", errMsg)
+                onError("அனுமதி இல்லை (Unauthorized)")
                 return@launch
             }
             try {
+                // Delete from Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.deleteMenuItemFromFirestore(menuItem.id)
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteMenuItem] SUCCESS for [menuItem id=${menuItem.id}] at ${System.currentTimeMillis()}")
+                // Delete Room locally ONLY on successful deletion from Firestore
                 repository.menuItemDao.deleteMenuItem(menuItem)
+                onSuccess()
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Firestore deleteMenuItem error: ${e.message}")
-                return@launch
+                Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteMenuItem] FAILED for [menuItem id=${menuItem.id}]: ${e.message}")
+                Log.e("AdminViewModel", "deleteMenuItem error", e)
+                withContext(Dispatchers.Main) {
+                    onError("உணவை நீக்க முடியவில்லை: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
@@ -5764,22 +5926,28 @@ Example output format:
                 isActive = active,
                 sortOrder = order
             )
-            selectedCategoryId.value = categoryId
-            newCategoryNameEn.value = ""
-            newCategoryNameTa.value = ""
-            newCategoryIconKey.value = "Restaurant"
-            newCategoryAccentColor.value = "#16C7E8"
-            newCategoryIsActive.value = true
-            newCategorySortOrder.value = "0"
             try {
+                // Sync to Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.syncCategoryToFirestore(cat)
+                
+                // Save locally ONLY on successful sync
                 repository.categoryDao.insertCategory(cat)
+                
+                selectedCategoryId.value = categoryId
+                newCategoryNameEn.value = ""
+                newCategoryNameTa.value = ""
+                newCategoryIconKey.value = "Restaurant"
+                newCategoryAccentColor.value = "#16C7E8"
+                newCategoryIsActive.value = true
+                newCategorySortOrder.value = "0"
+                
+                onSuccess()
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Firestore createCategory error: ${e.message}")
-                onError("Firestore Category creation failed: ${e.message}")
-                return@launch
+                withContext(Dispatchers.Main) {
+                    onError("Category creation failed: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
@@ -5828,22 +5996,27 @@ Example output format:
                 imageUrl = finalImg
             )
 
-            // Clear
-            newItemNameEn.value = ""
-            newItemNameTa.value = ""
-            newItemDescEn.value = ""
-            newItemDescTa.value = ""
-            newItemImageUrl.value = ""
-
             try {
+                // Sync to Firestore FIRST
                 com.example.data.repository.LyoFirebaseHelper.syncMenuItemToFirestore(mItem)
+                
+                // Save locally ONLY on successful sync
                 repository.menuItemDao.insertMenuItem(mItem)
+                
+                // Clear inputs only after success
+                newItemNameEn.value = ""
+                newItemNameTa.value = ""
+                newItemDescEn.value = ""
+                newItemDescTa.value = ""
+                newItemImageUrl.value = ""
+                
+                onSuccess()
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Firestore createMenuItem error: ${e.message}")
-                onError("Firestore Menu Item creation failed: ${e.message}")
-                return@launch
+                withContext(Dispatchers.Main) {
+                    onError("Menu Item creation failed: ${e.localizedMessage ?: e.message}")
+                }
             }
-            onSuccess()
         }
     }
 
@@ -6318,14 +6491,3 @@ class LyoViewModelFactory(private val repository: LyoRepository) : ViewModelProv
 }
 
 
-data class BulkImportRow(
-    val rowIndex: Int,
-    val name: String,
-    val category: String,
-    val address: String,
-    val phone: String,
-    val openTime: String,
-    val closeTime: String,
-    val status: String, // "READY", "ERROR", "WARNING"
-    val message: String
-)

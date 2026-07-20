@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -336,12 +337,148 @@ private fun TextButton(
     }
 }
 
+fun String.cleanNotSynced(): String {
+    return this.replace(" [Not Synced to Server]", "")
+               .replace("[Not Synced to Server]", "")
+               .replace(" [சேவரில் ஒத்திசைக்கப்படவில்லை]", "")
+               .replace("[சேவரில் ஒத்திசைக்கப்படவில்லை]", "")
+               .trim()
+}
+
+@Composable
+fun SyncStatusBadge(
+    isNotSynced: Boolean,
+    isSyncing: Boolean,
+    onRetryClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (isSyncing) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF3B82F6).copy(alpha = 0.2f))
+                    .border(0.5.dp, Color(0xFF3B82F6), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.size(8.dp)) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF3B82F6),
+                            strokeWidth = 1.dp,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Text("Syncing", color = Color(0xFF3B82F6), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else if (isNotSynced) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFEF4444).copy(alpha = 0.2f))
+                    .border(0.5.dp, Color(0xFFEF4444), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .clickable { onRetryClick() }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = "Sync Failed",
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text("Failed (Tap to Retry)", color = Color(0xFFEF4444), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF22C55E).copy(alpha = 0.2f))
+                    .border(0.5.dp, Color(0xFF22C55E), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = "Synced",
+                        tint = Color(0xFF22C55E),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text("Synced", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+data class VendorSyncState(
+    val vendorId: Long,
+    val vendorName: String,
+    val localCategories: Int,
+    val firestoreCategories: Int?,
+    val localMenuItems: Int,
+    val firestoreMenuItems: Int?,
+    val localVendorExists: Boolean,
+    val firestoreVendorExists: Boolean?,
+    val isFetching: Boolean = false,
+    val error: String? = null
+)
+
 @Composable
 fun AdminDashboardScreen(
     viewModel: AdminViewModel,
     onLogoutClick: () -> Unit,
     onSwitchToCustomer: (() -> Unit)? = null
 ) {
+    val localSyncingStores = remember { mutableStateMapOf<Long, Boolean>() }
+    val localSyncingMenuItems = remember { mutableStateMapOf<Long, Boolean>() }
+
+    var debugEmail by remember { mutableStateOf<String?>(null) }
+    var debugRole by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+            val firebaseUser = auth.currentUser
+            if (firebaseUser != null) {
+                debugEmail = firebaseUser.email ?: firebaseUser.uid
+                val uid = firebaseUser.uid
+                val db = com.example.data.repository.LyoFirebaseHelper.firestore
+                if (db != null) {
+                    val doc = db.collection("users").document(uid).get().await()
+                    if (doc.exists()) {
+                        debugRole = doc.getString("role") ?: "No Role"
+                    } else {
+                        debugRole = "Document Missing"
+                    }
+                } else {
+                    debugRole = "DB Null"
+                }
+            } else {
+                debugEmail = "Not Logged In"
+                debugRole = "None"
+            }
+        } catch (e: Exception) {
+            Log.e("AdminDashboardScreen", "Error fetching debug user info", e)
+            debugEmail = "Error"
+            debugRole = "Unknown"
+        }
+    }
+
     val vendors by viewModel.allVendors.collectAsState()
     val orders by viewModel.allOrders.collectAsState()
     val selectedVendor by viewModel.selectedAdminVendor.collectAsState()
@@ -354,7 +491,89 @@ fun AdminDashboardScreen(
 
     val scope = rememberCoroutineScope()
 
+    var showDebugScreen by remember { mutableStateOf(false) }
+    var vendorSyncStates by remember { mutableStateOf<List<VendorSyncState>>(emptyList()) }
 
+    val checkSyncStatus: (Long) -> Unit = { targetId ->
+        scope.launch {
+            vendorSyncStates = vendorSyncStates.map {
+                if (it.vendorId == targetId) it.copy(isFetching = true, error = null) else it
+            }
+
+            try {
+                val dbInstance = LyoFirebaseHelper.firestore
+                if (dbInstance == null) {
+                    vendorSyncStates = vendorSyncStates.map {
+                        if (it.vendorId == targetId) it.copy(isFetching = false, error = "Firestore not initialized") else it
+                    }
+                    return@launch
+                }
+
+                val catQueryTask = dbInstance.collection("categories")
+                    .whereEqualTo("vendorId", targetId)
+                    .get()
+
+                val itemQueryTask = dbInstance.collection("menu_items")
+                    .whereEqualTo("vendorId", targetId)
+                    .get()
+
+                val vendorQueryTask = dbInstance.collection("vendors")
+                    .document(targetId.toString())
+                    .get()
+
+                val catQuery = catQueryTask.await()
+                val itemQuery = itemQueryTask.await()
+                val vendorQuery = vendorQueryTask.await()
+
+                val fsCats = catQuery.documents.size
+                val fsItems = itemQuery.documents.size
+                val fsVendorExists = vendorQuery.exists()
+
+                vendorSyncStates = vendorSyncStates.map {
+                    if (it.vendorId == targetId) {
+                        it.copy(
+                            isFetching = false,
+                            firestoreCategories = fsCats,
+                            firestoreMenuItems = fsItems,
+                            firestoreVendorExists = fsVendorExists,
+                            error = null
+                        )
+                    } else it
+                }
+            } catch (e: Exception) {
+                Log.e("AdminDebug", "Failed fetching sync state for vendor $targetId", e)
+                vendorSyncStates = vendorSyncStates.map {
+                    if (it.vendorId == targetId) it.copy(isFetching = false, error = e.localizedMessage ?: "Unknown error") else it
+                }
+            }
+        }
+    }
+
+    val checkAllSyncStatus: () -> Unit = {
+        vendorSyncStates.forEach { state ->
+            checkSyncStatus(state.vendorId)
+        }
+    }
+
+    LaunchedEffect(showDebugScreen, vendors) {
+        if (showDebugScreen) {
+            val states = vendors.map { vendor ->
+                val localCatsCount = viewModel.repository.categoryDao.getCategoriesForVendorList(vendor.id).size
+                val localItemsCount = viewModel.repository.menuItemDao.getMenuItemsForVendorList(vendor.id).size
+                VendorSyncState(
+                    vendorId = vendor.id,
+                    vendorName = vendor.name,
+                    localCategories = localCatsCount,
+                    firestoreCategories = null,
+                    localMenuItems = localItemsCount,
+                    firestoreMenuItems = null,
+                    localVendorExists = true,
+                    firestoreVendorExists = null
+                )
+            }
+            vendorSyncStates = states
+        }
+    }
 
     var showAssignRiderOrderId by remember { mutableStateOf<Long?>(null) }
     var showDispatchConfirmDialog by remember { mutableStateOf(false) }
@@ -536,11 +755,19 @@ fun AdminDashboardScreen(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(LyoColors.VegGreen),
+                            .background(LyoColors.VegGreen)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onLongPress = {
+                                        android.widget.Toast.makeText(context, "Admin Debug Mode Activated!", android.widget.Toast.LENGTH_SHORT).show()
+                                        showDebugScreen = true
+                                    }
+                                )
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         androidx.compose.material3.Text(
-                            text = "Lyo",
+                            text = "Lyo AI",
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -549,7 +776,7 @@ fun AdminDashboardScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         androidx.compose.material3.Text(
-                            text = "Lyo AI Food Delivery",
+                            text = "Lyo AI",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = LyoColors.TextPrimary
@@ -577,6 +804,13 @@ fun AdminDashboardScreen(
                                 color = LyoColors.VegGreen
                             )
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        androidx.compose.material3.Text(
+                            text = "Logged in as: ${debugEmail ?: "Loading..."} • Role: ${debugRole ?: "Loading..."}",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.LightGray
+                        )
                     }
                 }
 
@@ -617,10 +851,8 @@ fun AdminDashboardScreen(
             ) {
                 val tabs = mutableListOf(
                     "ANALYTICS" to "Analytics",
-                    "LIVE_TEST" to "Live Test 🧪",
                     "SMART_MENU" to "Smart Menu 🤖",
                     "VENDORS" to "Stores",
-                    "BULK_IMPORT" to "Bulk Import 📤",
                     "BANNERS" to "Banners",
                     "LOGISTICS" to "Orders",
                     "RIDERS" to "Riders",
@@ -664,10 +896,6 @@ fun AdminDashboardScreen(
                     AnalyticsDashboardTab(viewModel = viewModel)
                 }
 
-                "LIVE_TEST" -> {
-                    LiveTestMonitorTab(viewModel = viewModel)
-                }
-
                 "SMART_MENU" -> {
                     SmartMenuManagerTab(viewModel = viewModel)
                 }
@@ -695,10 +923,6 @@ fun AdminDashboardScreen(
 
                 "FIREBASE" -> {
                     FirebaseSettingsTab(viewModel = viewModel)
-                }
-
-                "BULK_IMPORT" -> {
-                    BulkImportTab(viewModel = viewModel)
                 }
 
                 "RIDERS" -> {
@@ -1471,7 +1695,7 @@ fun AdminDashboardScreen(
                     val filteredOrders = remember(orders, logisticsSubTab) {
                         orders.filter { ord ->
                             when (logisticsSubTab) {
-                                "ACTIVE" -> ord.status != "DELIVERED" && ord.status != "CANCELLED"
+                                "ACTIVE" -> ord.status != "DELIVERED" && ord.status != "CANCELLED" && ord.status != "PAID_PENDING_VERIFICATION" && ord.status != "PAYMENT_REJECTED"
                                 "COMPLETED" -> ord.status == "DELIVERED"
                                 "CANCELLED" -> ord.status == "CANCELLED"
                                 else -> true
@@ -1570,7 +1794,7 @@ fun AdminDashboardScreen(
                                                     }
                                                 }
                                                 val displayPhone = allCustomers.firstOrNull { it.uid == ord.userId }?.phone?.ifBlank { null } ?: ord.userId.take(10)
-                                                val displayCustomer = allCustomers.firstOrNull { it.uid == ord.userId }?.name?.ifBlank { null } ?: "Lyo Customer"
+                                                val displayCustomer = allCustomers.firstOrNull { it.uid == ord.userId }?.name?.ifBlank { null } ?: "Lyo AI Customer"
                                                 Text("Customer: $displayCustomer ($displayPhone)", color = LyoColors.TextSecondary, fontSize = 12.sp)
                                                 Text("Store: ${ord.vendorName}", color = LyoColors.TextSecondary, fontSize = 12.sp)
                                                 Text("Amount: ₹${ord.totalAmount.toInt()}", color = LyoColors.AmberYellow, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -1866,9 +2090,9 @@ fun AdminDashboardScreen(
                                                 invoiceScope.launch {
                                                     val items = viewModel.getOrderItems(ord.id)
                                                     val customer = viewModel.repository.findUser(ord.userId)
-                                                    val cName = customer?.name ?: "Lyo Customer"
+                                                    val cName = customer?.name ?: "Lyo AI Customer"
                                                     val cPhone = customer?.phone ?: ord.userId
-                                                    val cAddr = customer?.address ?: "Lyo Delivery Address"
+                                                    val cAddr = customer?.address ?: "Lyo AI Delivery Address"
                                                     com.example.WhatsAppHelper.sendInvoiceMessage(invoiceContext, ord, items, cName, cPhone, cAddr)
                                                 }
                                             },
@@ -1899,7 +2123,7 @@ fun AdminDashboardScreen(
                                                 coroutineScope.launch {
                                                     val items = viewModel.getOrderItems(ord.id)
                                                     val customerUser = viewModel.repository.findUser(ord.userId)
-                                                    val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                                    val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Customer"
                                                     val customerPhone = customerUser?.phone?.ifBlank { null } ?: ord.userId
                                                     val customerAddress = customerUser?.address?.ifBlank { null } ?: "Coordinates (${ord.customerLat}, ${ord.customerLng})"
                                                     LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items, customerName, customerPhone, customerAddress)
@@ -1934,9 +2158,9 @@ fun AdminDashboardScreen(
                                                      val ownerPhone = vendor?.phone ?: ""
                                                      val kotText = buildString {
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                                         append("👨‍🍳 *LYO FRESH — KITCHEN ORDER (KOT)* 👨‍🍳\n")
+                                                         append("👨‍🍳 *Lyo AI — KITCHEN ORDER (KOT)* 👨‍🍳\n")
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                                         append("🏪 *உணவகம் (Shop):* ${vendor?.name ?: "Lyo AI Food Delivery Partner"}\n")
+                                                         append("🏪 *உணவகம் (Shop):* ${vendor?.name ?: "Lyo AI Partner"}\n")
                                                          append("📦 *ஆர்டர் ஐடி (Order ID):* #Lyo-${ord.id}\n")
                                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
                                                          append("*தயாரிக்க வேண்டிய உணவுகள் (Items):*\n")
@@ -1982,7 +2206,7 @@ fun AdminDashboardScreen(
                                                   coroutineScope.launch {
                                                       val items = viewModel.getOrderItems(ord.id)
                                                       val customerUser = viewModel.repository.findUser(ord.userId)
-                                                      val customerName = customerUser?.name ?: "Lyo AI Food Delivery Customer"
+                                                      val customerName = customerUser?.name ?: "Lyo AI Customer"
                                                       LyoNotificationHelper.generateKitchenKotPdfAndShare(context, ord, items, customerName)
                                                   }
                                               },
@@ -2012,7 +2236,7 @@ fun AdminDashboardScreen(
                                                  coroutineScope.launch {
                                                      val items = viewModel.getOrderItems(ord.id)
                                                      val customerUser = viewModel.repository.findUser(ord.userId)
-                                                     val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                                     val customerName = customerUser?.name?.ifBlank { null } ?: "Lyo AI Customer"
                                                      val customerPhone = customerUser?.phone?.ifBlank { null } ?: ord.userId
                                                      val customerAddress = customerUser?.address?.ifBlank { null } ?: "Coordinates (${ord.customerLat}, ${ord.customerLng})"
                                                      LyoNotificationHelper.generateOrderPdfAndShare(context, ord, items, customerName, customerPhone, customerAddress)
@@ -2074,7 +2298,7 @@ fun AdminDashboardScreen(
                      }
                  }
 
-                 "VENDORS" -> {
+                "VENDORS" -> {
                     // ACTIVE VENDORS LIST - CLIK INTO NESTED CATALOG MANAGER
                     var vendorSearchQuery by remember { mutableStateOf("") }
                     var menuSearchQuery by remember { mutableStateOf("") }
@@ -2094,6 +2318,7 @@ fun AdminDashboardScreen(
                             val coroutineScope = rememberCoroutineScope()
                             val globalCategoriesFlow = remember { viewModel.repository.categoryDao.getCategoriesForVendor(-1L) }
                             val globalCategories by globalCategoriesFlow.collectAsState(initial = emptyList())
+                            var categoryToDeleteByAdmin by remember { mutableStateOf<com.example.data.database.Category?>(null) }
 
                             val newCatNameEn by viewModel.newCategoryNameEn.collectAsState()
                             val newCatNameTa by viewModel.newCategoryNameTa.collectAsState()
@@ -2358,7 +2583,7 @@ fun AdminDashboardScreen(
                                                          IconButton(
                                                              onClick = {
                                                                  coroutineScope.launch {
-                                                                     viewModel.repository.categoryDao.deleteCategory(cat)
+                                                                     categoryToDeleteByAdmin = cat
                                                                  }
                                                              },
                                                              modifier = Modifier.size(24.dp)
@@ -2378,6 +2603,32 @@ fun AdminDashboardScreen(
                                          }
                                      ) {
                                          Text("முடிந்தது (DONE)", color = LyoColors.VegGreen, fontWeight = FontWeight.Bold)
+                                          if (categoryToDeleteByAdmin != null) {
+                                              val targetCat = categoryToDeleteByAdmin!!
+                                              AlertDialog(
+                                                  onDismissRequest = { categoryToDeleteByAdmin = null },
+                                                  title = { Text("வகைப்பாட்டை நீக்கலாமா? • Delete Classification?", color = Color.White, fontWeight = FontWeight.Bold) },
+                                                  text = { Text("Are you sure you want to delete '${targetCat.nameEn}'? This cannot be undone.", color = Color.LightGray, fontSize = 12.sp) },
+                                                  containerColor = Color(0xFF1E293B),
+                                                  confirmButton = {
+                                                      TextButton(
+                                                          onClick = {
+                                                              coroutineScope.launch {
+                                                                  viewModel.repository.categoryDao.deleteCategory(targetCat)
+                                                              }
+                                                              categoryToDeleteByAdmin = null
+                                                          }
+                                                      ) {
+                                                          Text("YES, DELETE", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                                                      }
+                                                  },
+                                                  dismissButton = {
+                                                      TextButton(onClick = { categoryToDeleteByAdmin = null }) {
+                                                          Text("CANCEL", color = Color.White)
+                                                      }
+                                                  }
+                                              )
+                                          }
                                      }
                                  },
                                  containerColor = Color(0xFF0F172A),
@@ -2450,6 +2701,13 @@ fun AdminDashboardScreen(
                             }
 
                             items(filteredVendors, key = { it.id }) { item ->
+                                val isNotSynced = item.name.contains("[Not Synced to Server]") ||
+                                        item.nameTa.contains("[Not Synced to Server]") ||
+                                        item.nameTa.contains("[சேவரில் ஒத்திசைக்கப்படவில்லை]")
+                                val isSyncing = localSyncingStores[item.id] == true
+                                val displayName = item.name.cleanNotSynced()
+                                val displayNameTa = item.nameTa.cleanNotSynced()
+
                                 Box(modifier = Modifier.padding(vertical = 8.dp)) {
                                     GlassCard(
                                         modifier = Modifier.fillMaxWidth(),
@@ -2461,14 +2719,43 @@ fun AdminDashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                                Text(
-                                                    text = if (item.nameTa.isNotBlank()) "${item.name} (${item.nameTa})" else item.name,
-                                                    color = Color.White,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.sp,
-                                                    maxLines = 1,
-                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (displayNameTa.isNotBlank()) "$displayName ($displayNameTa)" else displayName,
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp,
+                                                        modifier = Modifier.weight(1f, fill = false),
+                                                        maxLines = 1,
+                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                    )
+                                                    SyncStatusBadge(
+                                                        isNotSynced = isNotSynced,
+                                                        isSyncing = isSyncing,
+                                                        onRetryClick = {
+                                                            localSyncingStores[item.id] = true
+                                                            scope.launch {
+                                                                val cleanedVendor = item.copy(
+                                                                    name = displayName,
+                                                                    nameTa = displayNameTa
+                                                                )
+                                                                viewModel.updateVendor(
+                                                                    vendor = cleanedVendor,
+                                                                    onSuccess = {
+                                                                        localSyncingStores.remove(item.id)
+                                                                    },
+                                                                    onError = { errMsg ->
+                                                                        localSyncingStores.remove(item.id)
+                                                                        android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                }
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                     val st = item.status
@@ -2524,7 +2811,12 @@ fun AdminDashboardScreen(
                                                 IconButton(
                                                     onClick = {
                                                         scope.launch {
-                                                            viewModel.updateVendor(item.copy(sortOrder = item.sortOrder - 1))
+                                                            viewModel.updateVendor(
+                                                                vendor = item.copy(sortOrder = item.sortOrder - 1),
+                                                                onError = { errMsg ->
+                                                                    android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                                }
+                                                            )
                                                         }
                                                     },
                                                     modifier = Modifier.size(32.dp)
@@ -2534,7 +2826,12 @@ fun AdminDashboardScreen(
                                                 IconButton(
                                                     onClick = {
                                                         scope.launch {
-                                                            viewModel.updateVendor(item.copy(sortOrder = item.sortOrder + 1))
+                                                            viewModel.updateVendor(
+                                                                vendor = item.copy(sortOrder = item.sortOrder + 1),
+                                                                onError = { errMsg ->
+                                                                    android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                                }
+                                                            )
                                                         }
                                                     },
                                                     modifier = Modifier.size(32.dp)
@@ -2594,6 +2891,13 @@ fun AdminDashboardScreen(
                         var editLng by remember(partner.id) { mutableStateOf(partner.lng) }
                         var editSortOrder by remember(partner.id) { mutableStateOf(partner.sortOrder.toString()) }
                         var editStatus by remember(partner.id) { mutableStateOf(partner.status) }
+
+                        LaunchedEffect(selectedImageUriStr) {
+                            if (selectedImageUriStr != null && activeTab == "VENDORS") {
+                                editBannerUrl = selectedImageUriStr!!
+                                selectedImageUriStr = null
+                            }
+                        }
 
                         LaunchedEffect(partner) {
                             isCouponEnabled = partner.isCouponEnabled
@@ -3624,9 +3928,15 @@ fun AdminDashboardScreen(
                                                         offerPriority = editOfferPriority.toIntOrNull() ?: 0
                                                     )
                                                     val localContext = context
-                                                    viewModel.updateVendor(updated) {
-                                                        android.widget.Toast.makeText(localContext, "✅ கடையின் விவரங்கள் சேமிக்கப்பட்டன! (Store details saved!)", android.widget.Toast.LENGTH_SHORT).show()
-                                                    }
+                                                    viewModel.updateVendor(
+                                                        vendor = updated,
+                                                        onSuccess = {
+                                                            android.widget.Toast.makeText(localContext, "✅ கடையின் விவரங்கள் சேமிக்கப்பட்டன! (Store details saved!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        onError = { errMsg ->
+                                                            android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                        }
+                                                    )
                                                  },
                                                 colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),
                                                 shape = RoundedCornerShape(10.dp),
@@ -3730,9 +4040,15 @@ fun AdminDashboardScreen(
                                                         selectedBannerPreset = presetValue
                                                         val updated = partner.copy(bannerUrl = presetValue)
                                                         val localContext = context
-                                                        viewModel.updateVendor(updated) {
-                                                            android.widget.Toast.makeText(localContext, "✅ பேனர் புதுப்பிக்கப்பட்டது! (Banner updated!)", android.widget.Toast.LENGTH_SHORT).show()
-                                                        }
+                                                        viewModel.updateVendor(
+                                                            vendor = updated,
+                                                            onSuccess = {
+                                                                android.widget.Toast.makeText(localContext, "✅ பேனர் புதுப்பிக்கப்பட்டது! (Banner updated!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            onError = { errMsg ->
+                                                                android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                            }
+                                                        )
                                                     }
                                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
@@ -3761,9 +4077,15 @@ fun AdminDashboardScreen(
                                                 isCouponEnabled = it
                                                 val updated = partner.copy(isCouponEnabled = it)
                                                 val localContext = context
-                                                viewModel.updateVendor(updated) {
-                                                    android.widget.Toast.makeText(localContext, if (it) "✅ கூப்பன் செயல்படுத்தப்பட்டது! (Coupon enabled!)" else "⚠️ கூப்பன் முடக்கப்பட்டது! (Coupon disabled!)", android.widget.Toast.LENGTH_SHORT).show()
-                                                }
+                                                viewModel.updateVendor(
+                                                    vendor = updated,
+                                                    onSuccess = {
+                                                        android.widget.Toast.makeText(localContext, if (it) "✅ கூப்பன் செயல்படுத்தப்பட்டது! (Coupon enabled!)" else "⚠️ கூப்பன் முடக்கப்பட்டது! (Coupon disabled!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    onError = { errMsg ->
+                                                        android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                    }
+                                                )
                                             },
                                             colors = SwitchDefaults.colors(checkedThumbColor = LyoColors.AccentOrange)
                                         )
@@ -3813,9 +4135,15 @@ fun AdminDashboardScreen(
                                                     bannerUrl = selectedBannerPreset
                                                 )
                                                 val localContext = context
-                                                viewModel.updateVendor(updated) {
-                                                    android.widget.Toast.makeText(localContext, "✅ பேனர் புதுப்பிக்கப்பட்டது! (Banner updated!)", android.widget.Toast.LENGTH_SHORT).show()
-                                                }
+                                                viewModel.updateVendor(
+                                                    vendor = updated,
+                                                    onSuccess = {
+                                                        android.widget.Toast.makeText(localContext, "✅ பேனர் புதுப்பிக்கப்பட்டது! (Banner updated!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    onError = { errMsg ->
+                                                        android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                    }
+                                                )
                                             },
                                             modifier = Modifier.fillMaxWidth()
                                         )
@@ -4073,16 +4401,66 @@ fun AdminDashboardScreen(
                                                 onValueChange = { viewModel.newItemPrice.value = it },
                                                 label = { Text("Price in INR (₹)") },
                                                 colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier.fillMaxWidth()
                                             )
-                                            Spacer(modifier = Modifier.width(16.dp))
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Checkbox(
-                                                    checked = itemIsVeg,
-                                                    onCheckedChange = { viewModel.newItemIsVeg.value = it },
-                                                    colors = CheckboxDefaults.colors(checkedColor = LyoColors.VegGreen)
-                                                )
-                                                Text("Veg Dish", color = Color.White, fontSize = 13.sp)
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("உணவு வகை (Food Type):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            // Veg Button
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (itemIsVeg) Color(0x3322C55E) else Color(0x11FFFFFF))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (itemIsVeg) Color(0xFF22C55E) else Color(0x33FFFFFF),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable { viewModel.newItemIsVeg.value = true }
+                                                    .padding(vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(10.dp)
+                                                            .background(Color(0xFF22C55E), shape = RoundedCornerShape(2.dp))
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("சைவம் (Veg)", color = if (itemIsVeg) Color(0xFF22C55E) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
+                                            // Non-Veg Button
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (!itemIsVeg) Color(0x33EF4444) else Color(0x11FFFFFF))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (!itemIsVeg) Color(0xFFEF4444) else Color(0x33FFFFFF),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable { viewModel.newItemIsVeg.value = false }
+                                                    .padding(vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(10.dp)
+                                                            .background(Color(0xFFEF4444), shape = RoundedCornerShape(2.dp))
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("அசைவம் (Non-Veg)", color = if (!itemIsVeg) Color(0xFFEF4444) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
                                         }
 
@@ -4295,6 +4673,13 @@ fun AdminDashboardScreen(
                                 }
                             } else {
                                 items(filteredMenuItems, key = { it.id }) { dish ->
+                                val isNotSynced = dish.nameEn.contains("[Not Synced to Server]") ||
+                                        dish.nameTa.contains("[Not Synced to Server]") ||
+                                        dish.nameTa.contains("[சேவரில் ஒத்திசைக்கப்படவில்லை]")
+                                val isSyncing = localSyncingMenuItems[dish.id] == true
+                                val displayNameEn = dish.nameEn.cleanNotSynced()
+                                val displayNameTa = dish.nameTa.cleanNotSynced()
+
                                 Box(modifier = Modifier.padding(vertical = 4.dp)) {
                                     GlassCard(
                                         modifier = Modifier
@@ -4310,8 +4695,37 @@ fun AdminDashboardScreen(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(dish.nameEn, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                    Text(dish.nameTa, color = LyoColors.AccentOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = displayNameEn,
+                                                            color = Color.White,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 14.sp,
+                                                            modifier = Modifier.weight(1f, fill = false),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        SyncStatusBadge(
+                                                            isNotSynced = isNotSynced,
+                                                            isSyncing = isSyncing,
+                                                            onRetryClick = {
+                                                                localSyncingMenuItems[dish.id] = true
+                                                                scope.launch {
+                                                                    val cleanedMenuItem = dish.copy(
+                                                                        nameEn = displayNameEn,
+                                                                        nameTa = displayNameTa
+                                                                    )
+                                                                    viewModel.updateMenuItem(cleanedMenuItem) {
+                                                                        localSyncingMenuItems.remove(dish.id)
+                                                                    }
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    Text(displayNameTa, color = LyoColors.AccentOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                     
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     Text(dish.descEn, color = LyoColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -4477,16 +4891,66 @@ fun AdminDashboardScreen(
                                                 onValueChange = { priceStr = it },
                                                 colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                                                 label = { Text("Price (₹)") },
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier.fillMaxWidth()
                                             )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Checkbox(
-                                                    checked = isVeg,
-                                                    onCheckedChange = { isVeg = it },
-                                                    colors = CheckboxDefaults.colors(checkedColor = LyoColors.VegGreen)
-                                                )
-                                                Text("Veg", color = Color.White, fontSize = 12.sp)
+                                        }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("உணவு வகை (Food Type):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            // Veg Button
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isVeg) Color(0x3322C55E) else Color(0x11FFFFFF))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (isVeg) Color(0xFF22C55E) else Color(0x33FFFFFF),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable { isVeg = true }
+                                                    .padding(vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(10.dp)
+                                                            .background(Color(0xFF22C55E), shape = RoundedCornerShape(2.dp))
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("சைவம் (Veg)", color = if (isVeg) Color(0xFF22C55E) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
+                                            // Non-Veg Button
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (!isVeg) Color(0x33EF4444) else Color(0x11FFFFFF))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (!isVeg) Color(0xFFEF4444) else Color(0x33FFFFFF),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable { isVeg = false }
+                                                    .padding(vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(10.dp)
+                                                            .background(Color(0xFFEF4444), shape = RoundedCornerShape(2.dp))
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("அசைவம் (Non-Veg)", color = if (!isVeg) Color(0xFFEF4444) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
                                         }
 
@@ -5004,7 +5468,7 @@ fun AdminDashboardScreen(
                                      context = context,
                                      order = ord,
                                      items = dispatchOrderItemsState,
-                                     customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Food Delivery Customer" },
+                                     customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Customer" },
                                      customerPhone = dispatchCustomerPhoneState.ifBlank { ord.userId },
                                      customerAddress = dispatchCustomerAddressState.ifBlank { "Coordinates (${ord.customerLat}, ${ord.customerLng})" }
                                  )
@@ -5026,9 +5490,9 @@ fun AdminDashboardScreen(
                                  try {
                                      val kotText = buildString {
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                         append("👨‍🍳 *LYO FRESH — KITCHEN ORDER (KOT)* 👨‍🍳\n")
+                                         append("👨‍🍳 *Lyo AI — KITCHEN ORDER (KOT)* 👨‍🍳\n")
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n")
-                                         append("🏪 *உணவகம் (Shop):* ${dispatchVendorState?.name ?: "Lyo AI Food Delivery Partner"}\n")
+                                         append("🏪 *உணவகம் (Shop):* ${dispatchVendorState?.name ?: "Lyo AI Partner"}\n")
                                          append("📦 *ஆர்டர் ஐடி (Order ID):* #Lyo-${ord.id}\n")
                                          append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
                                          append("*தயாரிக்க வேண்டிய உணவுகள் (Items):*\n")
@@ -5070,7 +5534,7 @@ fun AdminDashboardScreen(
                           Button(
                               onClick = {
                                   try {
-                                      val customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Food Delivery Customer" }
+                                      val customerName = dispatchCustomerNameState.ifBlank { "Lyo AI Customer" }
                                       LyoNotificationHelper.generateKitchenKotPdfAndShare(context, ord, dispatchOrderItemsState, customerName)
                                   } catch (e: Exception) {
                                       e.printStackTrace()
@@ -5132,15 +5596,15 @@ fun AdminDashboardScreen(
                                      dispatchOrderItemsState = items
                                      dispatchRiderNameState = rdr.name
                                      dispatchRiderPhoneState = rdr.phone
-                                     dispatchCustomerNameState = customer?.name?.ifBlank { null } ?: "Lyo AI Food Delivery Customer"
+                                     dispatchCustomerNameState = customer?.name?.ifBlank { null } ?: "Lyo AI Customer"
                                      dispatchCustomerPhoneState = customer?.phone?.ifBlank { null } ?: order.userId
                                      dispatchCustomerAddressState = customer?.address?.ifBlank { null } ?: "Coordinates (${order.customerLat}, ${order.customerLng})"
                                      showDispatchConfirmDialog = true
                                      // AUTOMATIC TRIGGER 1: WhatsApp messages to Customer and Restaurant Owner KOT
                                      val settings = com.example.WhatsAppHelper.getSettings(context)
-                                     val cName = customer?.name ?: "Lyo Customer"
+                                     val cName = customer?.name ?: "Lyo AI Customer"
                                      val cPhone = customer?.phone ?: order.userId
-                                     val cAddr = customer?.address ?: "Lyo Delivery Address"
+                                     val cAddr = customer?.address ?: "Lyo AI Delivery Address"
                                      com.example.WhatsAppHelper.sendOrderAssignedMessages(
                                          context = context,
                                          order = order,
@@ -5172,7 +5636,374 @@ fun AdminDashboardScreen(
              containerColor = Color(0xFF1E293B)
          )
      }
+
+     AdminSyncDebugDialog(
+         show = showDebugScreen,
+         onDismiss = { showDebugScreen = false },
+         vendorSyncStates = vendorSyncStates,
+         onCheckSync = { checkSyncStatus(it) },
+         onCheckAllSync = { checkAllSyncStatus() }
+     )
  }
+
+@Composable
+fun AdminSyncDebugDialog(
+   show: Boolean,
+   onDismiss: () -> Unit,
+   vendorSyncStates: List<VendorSyncState>,
+   onCheckSync: (Long) -> Unit,
+   onCheckAllSync: () -> Unit
+) {
+   if (!show) return
+
+   androidx.compose.material3.AlertDialog(
+       onDismissRequest = onDismiss,
+       title = {
+           Row(
+               modifier = Modifier.fillMaxWidth(),
+               horizontalArrangement = Arrangement.SpaceBetween,
+               verticalAlignment = Alignment.CenterVertically
+           ) {
+               Column {
+                   androidx.compose.material3.Text(
+                       text = "மிரர் தரவு சரிபார்ப்பு",
+                       color = Color.White,
+                       fontSize = 12.sp,
+                       fontWeight = FontWeight.Bold
+                   )
+                   androidx.compose.material3.Text(
+                       text = "Firebase Sync Status",
+                       color = LyoColors.AccentOrange,
+                       fontSize = 18.sp,
+                       fontWeight = FontWeight.ExtraBold
+                   )
+               }
+               IconButton(
+                   onClick = onDismiss,
+                   modifier = Modifier.size(36.dp)
+               ) {
+                   Icon(
+                       imageVector = Icons.Filled.Close,
+                       contentDescription = "Close Debug Screen",
+                       tint = Color.White
+                   )
+               }
+           }
+       },
+       text = {
+           Column(
+               modifier = Modifier
+                   .fillMaxWidth()
+                   .heightIn(max = 500.dp)
+           ) {
+               androidx.compose.material3.Text(
+                   text = "Directly verify if your local changes have successfully reached the cloud Firestore database in real-time.",
+                   color = LyoColors.TextSecondary,
+                   fontSize = 11.sp,
+                   modifier = Modifier.padding(bottom = 16.dp)
+               )
+
+               androidx.compose.material3.Button(
+                   onClick = onCheckAllSync,
+                   colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                       containerColor = LyoColors.AccentOrange,
+                       contentColor = Color.Black
+                   ),
+                   modifier = Modifier
+                       .fillMaxWidth()
+                       .padding(bottom = 16.dp)
+                       .testTag("check_sync_status_button"),
+                   shape = RoundedCornerShape(8.dp)
+                ) {
+                   Row(
+                       horizontalArrangement = Arrangement.Center,
+                       verticalAlignment = Alignment.CenterVertically
+                   ) {
+                       Icon(
+                           imageVector = Icons.Filled.Refresh,
+                           contentDescription = "Refresh all sync status",
+                           modifier = Modifier.size(18.dp)
+                       )
+                       Spacer(modifier = Modifier.width(8.dp))
+                       androidx.compose.material3.Text(
+                           text = "CHECK SYNC STATUS",
+                           fontWeight = FontWeight.Bold,
+                           fontSize = 13.sp
+                       )
+                   }
+               }
+
+               if (vendorSyncStates.isEmpty()) {
+                   Box(
+                       modifier = Modifier
+                           .fillMaxWidth()
+                           .weight(1f),
+                       contentAlignment = Alignment.Center
+                   ) {
+                       androidx.compose.material3.CircularProgressIndicator(color = LyoColors.AccentOrange)
+                   }
+               } else {
+                   LazyColumn(
+                       modifier = Modifier
+                           .fillMaxWidth()
+                           .weight(1f),
+                       verticalArrangement = Arrangement.spacedBy(10.dp)
+                   ) {
+                       items(vendorSyncStates) { state ->
+                           GlassCard(
+                               modifier = Modifier.fillMaxWidth(),
+                               cornerRadius = 12.dp,
+                               borderWidth = 1.dp,
+                               innerPadding = 12.dp
+                           ) {
+                               Column(modifier = Modifier.fillMaxWidth()) {
+                                   Row(
+                                       modifier = Modifier.fillMaxWidth(),
+                                       horizontalArrangement = Arrangement.SpaceBetween,
+                                       verticalAlignment = Alignment.CenterVertically
+                                   ) {
+                                       Column(modifier = Modifier.weight(1f)) {
+                                           androidx.compose.material3.Text(
+                                               text = state.vendorName,
+                                               color = Color.White,
+                                               fontSize = 14.sp,
+                                               fontWeight = FontWeight.Bold
+                                           )
+                                           androidx.compose.material3.Text(
+                                               text = "Vendor ID: ${state.vendorId}",
+                                               color = LyoColors.TextSecondary,
+                                               fontSize = 11.sp
+                                           )
+                                       }
+
+                                       IconButton(
+                                           onClick = { onCheckSync(state.vendorId) },
+                                           modifier = Modifier.size(32.dp)
+                                       ) {
+                                           if (state.isFetching) {
+                                               androidx.compose.material3.CircularProgressIndicator(
+                                                   color = LyoColors.AccentOrange,
+                                                   modifier = Modifier.size(16.dp),
+                                                   strokeWidth = 2.dp
+                                               )
+                                           } else {
+                                               Icon(
+                                                    imageVector = Icons.Filled.Refresh,
+                                                    contentDescription = "Sync vendor status",
+                                                    tint = LyoColors.TextSecondary,
+                                                    modifier = Modifier.size(16.dp)
+                                               )
+                                           }
+                                       }
+                                   }
+
+                                   Spacer(modifier = Modifier.height(8.dp))
+
+                                   if (state.error != null) {
+                                       androidx.compose.material3.Text(
+                                           text = "Error: ${state.error}",
+                                           color = LyoColors.NonVegRed,
+                                           fontSize = 11.sp,
+                                           modifier = Modifier.padding(bottom = 6.dp)
+                                       )
+                                   }
+
+                                   Row(
+                                       modifier = Modifier.fillMaxWidth(),
+                                       horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                   ) {
+                                       Box(
+                                           modifier = Modifier
+                                               .weight(1f)
+                                               .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                                               .padding(6.dp)
+                                       ) {
+                                           Column(
+                                               modifier = Modifier.fillMaxWidth(),
+                                               horizontalAlignment = Alignment.CenterHorizontally
+                                           ) {
+                                               androidx.compose.material3.Text(
+                                                   text = "VENDOR RECORD",
+                                                   color = LyoColors.TextSecondary,
+                                                   fontSize = 8.sp,
+                                                   fontWeight = FontWeight.Bold
+                                               )
+                                               Spacer(modifier = Modifier.height(4.dp))
+                                               Row(
+                                                   verticalAlignment = Alignment.CenterVertically,
+                                                   horizontalArrangement = Arrangement.Center,
+                                                   modifier = Modifier.fillMaxWidth()
+                                               ) {
+                                                   androidx.compose.material3.Text(
+                                                       text = "Room: Yes",
+                                                       color = LyoColors.VegGreen,
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.SemiBold
+                                                   )
+                                                   Spacer(modifier = Modifier.width(4.dp))
+                                                   androidx.compose.material3.Text(text = "•", color = Color.Gray, fontSize = 10.sp)
+                                                   Spacer(modifier = Modifier.width(4.dp))
+                                                   val fsExists = state.firestoreVendorExists
+                                                   androidx.compose.material3.Text(
+                                                       text = when (fsExists) {
+                                                           true -> "FS: Yes"
+                                                           false -> "FS: No"
+                                                           null -> "FS: ?"
+                                                       },
+                                                       color = when (fsExists) {
+                                                           true -> LyoColors.VegGreen
+                                                           false -> LyoColors.NonVegRed
+                                                           null -> LyoColors.TextSecondary
+                                                       },
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.SemiBold
+                                                   )
+                                               }
+                                           }
+                                       }
+
+                                       Box(
+                                           modifier = Modifier
+                                               .weight(1f)
+                                               .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                                               .padding(6.dp)
+                                       ) {
+                                           Column(
+                                               modifier = Modifier.fillMaxWidth(),
+                                               horizontalAlignment = Alignment.CenterHorizontally
+                                           ) {
+                                               androidx.compose.material3.Text(
+                                                   text = "CATEGORIES",
+                                                   color = LyoColors.TextSecondary,
+                                                   fontSize = 8.sp,
+                                                   fontWeight = FontWeight.Bold
+                                               )
+                                               Spacer(modifier = Modifier.height(4.dp))
+                                               Row(
+                                                   verticalAlignment = Alignment.CenterVertically,
+                                                   horizontalArrangement = Arrangement.Center,
+                                                   modifier = Modifier.fillMaxWidth()
+                                               ) {
+                                                   androidx.compose.material3.Text(
+                                                       text = "Local: ${state.localCategories}",
+                                                       color = Color.White,
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.Bold
+                                                   )
+                                                   Spacer(modifier = Modifier.width(4.dp))
+                                                   androidx.compose.material3.Text(text = "vs", color = Color.Gray, fontSize = 10.sp)
+                                                   Spacer(modifier = Modifier.width(4.dp))
+                                                   val fsCats = state.firestoreCategories
+                                                   androidx.compose.material3.Text(
+                                                       text = if (fsCats != null) "Live: $fsCats" else "Live: ?",
+                                                       color = if (fsCats == null) LyoColors.TextSecondary
+                                                               else if (fsCats == state.localCategories) LyoColors.VegGreen
+                                                               else LyoColors.NonVegRed,
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.Bold
+                                                   )
+                                               }
+                                           }
+                                       }
+                                   }
+
+                                   Spacer(modifier = Modifier.height(6.dp))
+
+                                   Row(
+                                       modifier = Modifier.fillMaxWidth(),
+                                       horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                   ) {
+                                       Box(
+                                           modifier = Modifier
+                                               .fillMaxWidth()
+                                               .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                                               .padding(6.dp)
+                                       ) {
+                                           Column(
+                                               modifier = Modifier.fillMaxWidth(),
+                                               horizontalAlignment = Alignment.CenterHorizontally
+                                           ) {
+                                               androidx.compose.material3.Text(
+                                                   text = "MENU ITEMS",
+                                                   color = LyoColors.TextSecondary,
+                                                   fontSize = 8.sp,
+                                                   fontWeight = FontWeight.Bold
+                                               )
+                                               Spacer(modifier = Modifier.height(4.dp))
+                                               Row(
+                                                   verticalAlignment = Alignment.CenterVertically,
+                                                   horizontalArrangement = Arrangement.Center,
+                                                   modifier = Modifier.fillMaxWidth()
+                                               ) {
+                                                   androidx.compose.material3.Text(
+                                                       text = "Local: ${state.localMenuItems}",
+                                                       color = Color.White,
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.Bold
+                                                   )
+                                                   Spacer(modifier = Modifier.width(6.dp))
+                                                   androidx.compose.material3.Text(text = "vs", color = Color.Gray, fontSize = 10.sp)
+                                                   Spacer(modifier = Modifier.width(6.dp))
+                                                   val fsItems = state.firestoreMenuItems
+                                                   androidx.compose.material3.Text(
+                                                       text = if (fsItems != null) "Live: $fsItems" else "Live: ?",
+                                                       color = if (fsItems == null) LyoColors.TextSecondary
+                                                               else if (fsItems == state.localMenuItems) LyoColors.VegGreen
+                                                               else LyoColors.NonVegRed,
+                                                       fontSize = 10.sp,
+                                                       fontWeight = FontWeight.Bold
+                                                   )
+                                               }
+                                           }
+                                        }
+                                   }
+
+                                   Spacer(modifier = Modifier.height(6.dp))
+
+                                   val isSynced = state.firestoreCategories == state.localCategories &&
+                                                  state.firestoreMenuItems == state.localMenuItems &&
+                                                  state.firestoreVendorExists == true
+
+                                   val badgeColor = when {
+                                       state.firestoreCategories == null || state.firestoreMenuItems == null -> Color.Gray
+                                       isSynced -> LyoColors.VegGreen
+                                       else -> LyoColors.NonVegRed
+                                   }
+
+                                   val badgeText = when {
+                                       state.firestoreCategories == null || state.firestoreMenuItems == null -> "AWAITING FRESH STATUS CHECK"
+                                       isSynced -> "ALL DATA PERFECTLY IN SYNC (DATABASE MIRRORED)"
+                                       else -> "OUT OF SYNC (PENDING CLOUD WRITES)"
+                                   }
+
+                                   Box(
+                                       modifier = Modifier
+                                           .fillMaxWidth()
+                                           .background(badgeColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                           .padding(6.dp),
+                                       contentAlignment = Alignment.Center
+                                   ) {
+                                       androidx.compose.material3.Text(
+                                           text = badgeText,
+                                           color = badgeColor,
+                                           fontSize = 9.sp,
+                                           fontWeight = FontWeight.Black,
+                                           textAlign = TextAlign.Center
+                                        )
+                                   }
+                               }
+                           }
+                       }
+                   }
+               }
+           }
+       },
+       confirmButton = {},
+       dismissButton = {},
+       containerColor = Color(0xFF0F172A),
+       modifier = Modifier.border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(12.dp))
+   )
+}
 
 @Composable
 fun RidersManagementTab(viewModel: AdminViewModel) {
@@ -6035,7 +6866,16 @@ fun RidersManagementTab(viewModel: AdminViewModel) {
                             salaryType = editSalaryType,
                             salaryRate = editSalaryRate.toDoubleOrNull() ?: currentRider.salaryRate
                         )
-                        viewModel.updateRider(updated, editPassword.ifBlank { null })
+                        viewModel.updateRider(
+                            rider = updated,
+                            newPassword = editPassword.ifBlank { null },
+                            onSuccess = {
+                                android.widget.Toast.makeText(context, "✅ ரைடர் விவரங்கள் புதுப்பிக்கப்பட்டன!", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            onError = { errMsg ->
+                                android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        )
                         riderToEdit = null
                     }
                 ) {
@@ -6295,6 +7135,7 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
     var password by remember { mutableStateOf("") }
     var opError by remember { mutableStateOf<String?>(null) }
     var opSuccessMessage by remember { mutableStateOf<String?>(null) }
+    var adminToDelete by remember { mutableStateOf<com.example.data.database.User?>(null) }
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -6603,7 +7444,7 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
                             }
 
                             IconButton(
-                                onClick = { viewModel.deleteAdmin(admin) },
+                                onClick = { adminToDelete = admin },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .background(Color(0x1AEF4444), CircleShape)
@@ -6614,6 +7455,30 @@ fun AdminsManagementTab(viewModel: AdminViewModel) {
                                     tint = LyoColors.NonVegRed,
                                     modifier = Modifier.size(14.dp)
                                 )
+                                if (adminToDelete != null) {
+                                    val targetAdmin = adminToDelete!!
+                                    AlertDialog(
+                                        onDismissRequest = { adminToDelete = null },
+                                        title = { Text("அட்மினை நீக்கலாமா? • Delete Admin?", color = Color.White, fontWeight = FontWeight.Bold) },
+                                        text = { Text("Are you absolutely sure you want to permanently delete helper admin account \"${targetAdmin.name}\"? This cannot be undone.", color = Color.LightGray, fontSize = 12.sp) },
+                                        containerColor = Color(0xFF1E293B),
+                                        confirmButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.deleteAdmin(targetAdmin)
+                                                    adminToDelete = null
+                                                }
+                                            ) {
+                                                Text("YES, DELETE", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { adminToDelete = null }) {
+                                                Text("CANCEL", color = Color.White)
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -6966,7 +7831,7 @@ fun FirebaseSettingsTab(viewModel: com.example.ui.viewmodels.AdminViewModel) {
                     // Test button
                     Button(
                         onClick = {
-                            val testMsg = "✅ Lyo WhatsApp connection test successful!\nKOT messages இந்த number-க்கு வரும்."
+                            val testMsg = "✅ Lyo AI WhatsApp connection test successful!\nKOT messages இந்த number-க்கு வரும்."
                             com.example.WhatsAppHelper.sendMessage(context, waSettings.restaurantOwnerPhone, testMsg)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
@@ -8230,6 +9095,7 @@ fun BannersManagementTab(
     var promoCode by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var imageUrl by remember { mutableStateOf("") }
+    var bannerToDelete by remember { mutableStateOf<com.example.data.database.PromoBanner?>(null) }
 
     LaunchedEffect(selectedImageUriStr) {
         if (selectedImageUriStr != null) {
@@ -8454,11 +9320,7 @@ fun BannersManagementTab(
                         text = "ADD PROMO SLIDER TO HOMEPAGE",
                         onClick = {
                             if (promoCode.isNotBlank() && description.isNotBlank()) {
-                                val finalUrl = if (imageUrl.startsWith("/")) {
-                                    compressAndEncodeToBase64(imageUrl) ?: imageUrl
-                                } else {
-                                    imageUrl.trim()
-                                }
+                                val finalUrl = imageUrl.trim()
                                 viewModel.insertPromoBanner(
                                     PromoBanner(
                                         code = promoCode.trim().uppercase(),
@@ -8578,7 +9440,7 @@ fun BannersManagementTab(
                         Spacer(modifier = Modifier.width(10.dp))
 
                         IconButton(
-                            onClick = { viewModel.deletePromoBanner(banner) },
+                            onClick = { bannerToDelete = banner },
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
@@ -8590,6 +9452,30 @@ fun BannersManagementTab(
                                 tint = Color(0xFFEF4444),
                                 modifier = Modifier.size(16.dp)
                             )
+                            if (bannerToDelete != null) {
+                                val targetBanner = bannerToDelete!!
+                                AlertDialog(
+                                    onDismissRequest = { bannerToDelete = null },
+                                    title = { Text("சலுகை விளம்பரத்தை நீக்கலாமா? • Delete Promo Banner?", color = Color.White, fontWeight = FontWeight.Bold) },
+                                    text = { Text("Are you sure you want to delete this promotional banner/broadcast? This cannot be undone.", color = Color.LightGray, fontSize = 12.sp) },
+                                    containerColor = Color(0xFF1E293B),
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.deletePromoBanner(targetBanner)
+                                                bannerToDelete = null
+                                            }
+                                        ) {
+                                            Text("YES, DELETE", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { bannerToDelete = null }) {
+                                            Text("CANCEL", color = Color.White)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -8980,6 +9866,9 @@ fun SmartMenuManagerTab(viewModel: AdminViewModel) {
                                     mNameTa = ""
                                     mAddress = ""
                                     mPhone = ""
+                                },
+                                onError = { errMsg ->
+                                    android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
                                 }
                             )
                         }
@@ -9832,7 +10721,7 @@ fun ChatInterfaceSection(
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = if (isAdmin) "Admin 👤" else "Lyo Smart Menu Manager 🤖",
+                                text = if (isAdmin) "Admin 👤" else "Lyo AI Smart Menu Manager 🤖",
                                 color = if (isAdmin) Color(0xFFFFCCAA) else LyoColors.AmberYellow,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 9.sp
@@ -10995,47 +11884,50 @@ fun InteractivePreviewSection(
                             return
                         }
                         currentSegment = index
-                        val params = android.os.Bundle()
-                        params.putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "segment_$index")
-                        tts?.speak(segments[index], android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "segment_$index")
-                    }
-                    
-                    DisposableEffect(context) {
-                        var instance: android.speech.tts.TextToSpeech? = null
-                        instance = android.speech.tts.TextToSpeech(context) { status ->
-                            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                                val result = instance?.setLanguage(java.util.Locale("ta", "IN"))
-                                if (result == android.speech.tts.TextToSpeech.LANG_MISSING_DATA || result == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
-                                    instance?.language = java.util.Locale.US
+                        if (tts == null) {
+                            val instance = android.speech.tts.TextToSpeech(context) { status ->
+                                if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                                    val result = tts?.setLanguage(java.util.Locale("ta", "IN"))
+                                    if (result == android.speech.tts.TextToSpeech.LANG_MISSING_DATA || result == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
+                                        tts?.language = java.util.Locale.US
+                                    }
+                                    ttsReady = true
+                                    val params = android.os.Bundle()
+                                    params.putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "segment_$index")
+                                    tts?.speak(segments[index], android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "segment_$index")
                                 }
-                                ttsReady = true
                             }
-                        }
-                        tts = instance
-                        
-                        instance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                            override fun onStart(utteranceId: String?) {}
-                            override fun onDone(utteranceId: String?) {
-                                val idx = utteranceId?.substringAfter("segment_")?.toIntOrNull()
-                                if (idx != null) {
-                                    scope.launch {
-                                        if (isPlaying && !isPaused) {
-                                            playSegment(idx + 1)
+                            tts = instance
+                            instance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                                override fun onStart(utteranceId: String?) {}
+                                override fun onDone(utteranceId: String?) {
+                                    val idx = utteranceId?.substringAfter("segment_")?.toIntOrNull()
+                                    if (idx != null) {
+                                        scope.launch {
+                                            if (isPlaying && !isPaused) {
+                                                playSegment(idx + 1)
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            override fun onError(utteranceId: String?) {
-                                scope.launch {
-                                    isPlaying = false
-                                    isPaused = false
+                                override fun onError(utteranceId: String?) {
+                                    scope.launch {
+                                        isPlaying = false
+                                        isPaused = false
+                                    }
                                 }
-                            }
-                        })
-                        
+                            })
+                        } else {
+                            val params = android.os.Bundle()
+                            params.putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "segment_$index")
+                            tts?.speak(segments[index], android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "segment_$index")
+                        }
+                    }
+                    
+                    DisposableEffect(context) {
                         onDispose {
-                            instance.stop()
-                            instance.shutdown()
+                            tts?.stop()
+                            tts?.shutdown()
                         }
                     }
                     
@@ -11805,820 +12697,5 @@ fun MetadataRow(label: String, value: String) {
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold
         )
-    }
-}
-
-@Composable
-fun LiveTestMonitorTab(viewModel: AdminViewModel) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-    val orders by viewModel.allOrders.collectAsState()
-    val activeRides by viewModel.activeDeliveryRides.collectAsState()
-
-    val testPhones = listOf("9999900001", "9999900002", "9999900003", "9999900004", "9999900005")
-
-    var reportsState by remember { mutableStateOf<List<com.example.data.repository.TestOrderReport>>(emptyList()) }
-
-    LaunchedEffect(orders, activeRides) {
-        val list = mutableListOf<com.example.data.repository.TestOrderReport>()
-        for (phone in testPhones) {
-            val order = orders.firstOrNull { it.userId == phone }
-            if (order != null) {
-                val ride = activeRides.firstOrNull { it.orderId == order.id } ?: viewModel.repository.getRideForOrder(order.id)
-                val items = viewModel.getOrderItems(order.id)
-                val report = com.example.data.repository.LyoLiveTestTracker.getReportForOrder(order, ride, items)
-                list.add(report)
-            } else {
-                list.add(
-                    com.example.data.repository.TestOrderReport(
-                        orderId = 0L,
-                        customerPhone = phone,
-                        customerName = when (phone) {
-                            "9999900001" -> "Test Customer 1"
-                            "9999900002" -> "Test Customer 2"
-                            "9999900003" -> "Test Customer 3"
-                            "9999900004" -> "Test Customer 4"
-                            "9999900005" -> "Test Customer 5"
-                            else -> "Test Customer"
-                        },
-                        shopName = "None",
-                        itemsText = "None",
-                        price = 0.0,
-                        riderName = "Unassigned",
-                        riderPhone = "Unassigned",
-                        placementTimeStr = "Pending",
-                        adminAcceptanceTimeStr = "Pending",
-                        riderAssignmentTimeStr = "Pending",
-                        departureTimeStr = "Pending",
-                        completionTimeStr = "Pending",
-                        durationMinutes = 0,
-                        gpsCoordinatesLog = "None",
-                        notificationLogsStr = "None",
-                        checklist = mapOf(
-                            "A" to "NOT TESTED",
-                            "B" to "NOT TESTED",
-                            "C" to "NOT TESTED",
-                            "D" to "NOT TESTED",
-                            "E" to "NOT TESTED",
-                            "F" to "NOT TESTED"
-                        ),
-                        finalStatus = "NOT TESTED"
-                    )
-                )
-            }
-        }
-        reportsState = list
-    }
-
-    val totalOrdersCount = reportsState.count { it.orderId > 0L }
-    val completedCount = reportsState.count { it.finalStatus == "PASS" }
-    val overallStatus = when {
-        completedCount == 5 -> "PASS (COMPLETE) 🎉"
-        totalOrdersCount > 0 -> "RUNNING (IN PROGRESS) 🧪"
-        else -> "READY (NOT TESTED) ⚡"
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Master Banner
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Live Test Monitor 🧪", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("5-Customer Concurrent Multi-Device Live Order Flow", color = LyoColors.TextSecondary, fontSize = 11.sp)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                when {
-                                    completedCount == 5 -> Color(0x3322C55E)
-                                    totalOrdersCount > 0 -> Color(0x33F97316)
-                                    else -> Color(0x3364748B)
-                                }
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = overallStatus,
-                            color = when {
-                                completedCount == 5 -> Color(0xFF22C55E)
-                                totalOrdersCount > 0 -> Color(0xFFF97316)
-                                else -> Color(0xFF94A3B8)
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Stats row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text("Active Test Devices", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                        Text("5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text("Orders Placed", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                        Text("$totalOrdersCount / 5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text("Full Flows Passed", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                        Text("$completedCount / 5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Export buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    androidx.compose.material3.Button(
-                        onClick = {
-                            val textBuilder = StringBuilder()
-                            textBuilder.append("=== Lyo AI Food Delivery System Test Report ===\n")
-                            textBuilder.append("Timestamp: ${java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())} IST\n")
-                            textBuilder.append("Overall Status: $overallStatus\n")
-                            textBuilder.append("Passed Flows: $completedCount / 5\n\n")
-                            for (rep in reportsState) {
-                                textBuilder.append("Slot ${rep.customerName} (${rep.customerPhone}):\n")
-                                textBuilder.append("  Order ID: ${if (rep.orderId > 0L) "#" + rep.orderId else "Pending"}\n")
-                                textBuilder.append("  Status: ${rep.finalStatus}\n")
-                                textBuilder.append("  Shop: ${rep.shopName} | Rider: ${rep.riderName}\n")
-                                textBuilder.append("  Timestamps: Placement: ${rep.placementTimeStr} | Acceptance: ${rep.adminAcceptanceTimeStr} | Rider assignment: ${rep.riderAssignmentTimeStr} | Dispatch: ${rep.departureTimeStr} | Delivery: ${rep.completionTimeStr}\n")
-                                textBuilder.append("  Checklist: A:${rep.checklist["A"]} B:${rep.checklist["B"]} C:${rep.checklist["C"]} D:${rep.checklist["D"]} E:${rep.checklist["E"]} F:${rep.checklist["F"]}\n")
-                                textBuilder.append("  GPS Log: ${rep.gpsCoordinatesLog}\n")
-                                textBuilder.append("  Device Push Notifications: ${rep.notificationLogsStr}\n")
-                                textBuilder.append("--------------------------------------------------\n")
-                            }
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Lyo Test Report", textBuilder.toString()))
-                            android.widget.Toast.makeText(context, "Plain Text report copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
-                        },
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0x3338BDF8)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("📋 Copy Text Report", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    androidx.compose.material3.Button(
-                        onClick = {
-                            LyoNotificationHelper.generateTestReportPdfAndShare(context, reportsState)
-                        },
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("📄 Export PDF Report", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text("Concurrent Test Channels (5 Devices)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-
-        for (i in reportsState.indices) {
-            val report = reportsState[i]
-            var isExpanded by remember { mutableStateOf(true) }
-            var showDebugDetails by remember { mutableStateOf(false) }
-
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                borderColor = when (report.finalStatus) {
-                    "PASS" -> Color(0xFF22C55E).copy(alpha = 0.3f)
-                    "IN PROGRESS" -> LyoColors.AccentOrange.copy(alpha = 0.3f)
-                    else -> Color(0xFF64748B).copy(alpha = 0.1f)
-                }
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { isExpanded = !isExpanded },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(LyoColors.AccentOrange)
-                                    .wrapContentSize(Alignment.Center)
-                            ) {
-                                Text((i + 1).toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(report.customerName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text("Device Contact: ${report.customerPhone}", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    when (report.finalStatus) {
-                                        "PASS" -> Color(0x3322C55E)
-                                        "IN PROGRESS" -> Color(0x33F97316)
-                                        else -> Color(0x3364748B)
-                                    }
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = report.finalStatus,
-                                color = when (report.finalStatus) {
-                                    "PASS" -> Color(0xFF22C55E)
-                                    "IN PROGRESS" -> Color(0xFFF97316)
-                                    else -> Color(0xFF94A3B8)
-                                },
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (isExpanded) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        androidx.compose.material3.HorizontalDivider(color = Color(0x11FFFFFF), thickness = 1.dp)
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Step statuses checklist row
-                        Text("Checklist Evaluation (A to F):", color = LyoColors.TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            val steps = listOf("A", "B", "C", "D", "E", "F")
-                            val stepsTa = listOf("Placed", "Accepted", "Rider Assign", "Live GPS", "Notifications", "Delivered")
-                            for (j in steps.indices) {
-                                val stepKey = steps[j]
-                                val stepStatus = report.checklist[stepKey] ?: "NOT TESTED"
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                when (stepStatus) {
-                                                    "PASS" -> Color(0x3322C55E)
-                                                    "IN PROGRESS" -> Color(0x33F97316)
-                                                    else -> Color(0x3364748B)
-                                                }
-                                            )
-                                            .wrapContentSize(Alignment.Center)
-                                    ) {
-                                        Text(
-                                            text = stepKey,
-                                            color = when (stepStatus) {
-                                                "PASS" -> Color(0xFF22C55E)
-                                                "IN PROGRESS" -> Color(0xFFF97316)
-                                                else -> Color(0xFF94A3B8)
-                                            },
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(stepsTa[j], color = LyoColors.TextSecondary, fontSize = 7.sp, maxLines = 1)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-                        androidx.compose.material3.HorizontalDivider(color = Color(0x11FFFFFF), thickness = 1.dp)
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Production summary metrics block displaying high-level metrics
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Column 1: Overall Result
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.03f))
-                                    .padding(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text("Overall Result", color = Color.Gray, fontSize = 9.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = when (report.finalStatus) {
-                                        "PASS" -> "PASS 🎉"
-                                        "IN PROGRESS" -> "RUNNING 🧪"
-                                        else -> "READY 💤"
-                                    },
-                                    color = when (report.finalStatus) {
-                                        "PASS" -> Color(0xFF22C55E)
-                                        "IN PROGRESS" -> Color(0xFFF97316)
-                                        else -> Color(0xFF94A3B8)
-                                    },
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            // Column 2: Pass / Fail
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.03f))
-                                    .padding(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text("Pass / Fail", color = Color.Gray, fontSize = 9.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (report.finalStatus == "PASS") "SUCCESS ✔" else if (report.finalStatus == "IN PROGRESS") "EVALUATING ⏳" else "PENDING ❌",
-                                    color = if (report.finalStatus == "PASS") Color(0xFF22C55E) else if (report.finalStatus == "IN PROGRESS") Color(0xFFF97316) else Color(0xFFEF4444),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            // Column 3: Execution Time
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.03f))
-                                    .padding(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text("Execution Time", color = Color.Gray, fontSize = 9.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "${report.durationMinutes} mins",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Expandable card panel for Debug/Developer Logs
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .clickable { showDebugDetails = !showDebugDetails }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = if (showDebugDetails) "▼ Hide Debug Details" else "▶ View Debug Details",
-                                    color = LyoColors.AmberYellow,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Text(
-                                text = "DEVELOPER LOGS",
-                                color = Color.Gray,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (showDebugDetails) {
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Order info
-                            Text("Order details:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Linked Order:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                  Text(if (report.orderId > 0L) "#LYO-${report.orderId}" else "Not created yet", color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Selected Store:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.shopName, color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Order Items & Subtotal:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text("${report.itemsText} (₹${report.price.toInt()})", color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Selected Delivery Partner:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text("${report.riderName} (${report.riderPhone})", color = Color.White, fontSize = 10.sp)
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Flow Milestones Timestamps:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("A • Order Creation Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.placementTimeStr, color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("B • Admin Acceptance Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.adminAcceptanceTimeStr, color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("C • Partner Dispatch Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.riderAssignmentTimeStr, color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("D • Rider Out For Delivery Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.departureTimeStr, color = Color.White, fontSize = 10.sp)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("F • Successful Handover Timestamp:", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                                Text(report.completionTimeStr, color = Color.White, fontSize = 10.sp)
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Live GPS Logs (Salem Road, Idappadi):", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(report.gpsCoordinatesLog, color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Device Notification Receipts Logs:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(report.notificationLogsStr, color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BulkImportTab(viewModel: AdminViewModel) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    val rawText by viewModel.bulkImportRawText.collectAsState()
-    val parsedRows by viewModel.bulkImportParsedRows.collectAsState()
-    val isLoading by viewModel.isBulkImportLoading.collectAsState()
-
-    var showSuccessDialog by remember { mutableStateOf(false) }
-    var showErrorDialog by remember { mutableStateOf(false) }
-    var successMsg by remember { mutableStateOf("") }
-    var errorMsg by remember { mutableStateOf("") }
-
-    val totalRows = parsedRows.size
-    val readyRowsCount = parsedRows.count { it.status == "READY" }
-    val warningRowsCount = parsedRows.count { it.status == "WARNING" }
-    val errorRowsCount = parsedRows.count { it.status == "ERROR" }
-
-    Box(
-        modifier = Modifier.fillMaxSize().background(LyoColors.DarkCyanBg),
-        contentAlignment = Alignment.TopCenter
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 600.dp)
-                .padding(16.dp)
-        ) {
-        // Title block
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Filled.ArrowUpward,
-                contentDescription = "Bulk Import",
-                tint = LyoColors.AccentOrange,
-                modifier = Modifier.size(28.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "மொத்த கடைகள் பதிவேற்றம் • BULK STORE IMPORT",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Guidelines block
-        Card(
-            colors = CardDefaults.cardColors(containerColor = LyoColors.CardSlate),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Instruction Guide / வழிகாட்டி:",
-                    color = LyoColors.AccentOrange,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "1. CSV அல்லது Excel வரிகளை நகலெடுத்து (Copy) கீழே உள்ள பெட்டியில் ஒட்டவும் (Paste).\n" +
-                           "2. நெடுவரிசை வரிசை (Column Format):\n" +
-                           "   Store Name, Category, Address, Phone, Open Time, Close Time\n" +
-                           "3. எ.கா (Example):\n" +
-                           "   Aroma Biryani, Biryani Center, 12 Main Road Salem, 9876543210, 09:00 AM, 10:00 PM",
-                    color = LyoColors.TextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Text Area for Input
-        OutlinedTextField(
-            value = rawText,
-            onValueChange = { viewModel.bulkImportRawText.value = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(140.dp)
-                .testTag("bulk_import_textarea"),
-            placeholder = { Text("கடை விவரங்களை இங்கே ஒட்டவும் (Paste store records here)...", color = Color.Gray, fontSize = 12.sp) },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                focusedBorderColor = LyoColors.AccentOrange, unfocusedBorderColor = Color(0x33F8FAFC)
-            ),
-            textStyle = TextStyle(fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Action Buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Button(
-                onClick = {
-                    val sample = "Lyo Sree Saravana Bhavan, Restaurant, Main Road Salem, 9876543211, 07:00 AM, 11:00 PM\n" +
-                                 "Lyo Sweet Corner, Sweet Stall, Bypass Salem, 9876543212, 09:00 AM, 10:00 PM\n" +
-                                 "Lyo Fruit Juice, Juice Shop, Town Bus Stand Salem, 9876543213, 08:00 AM, 09:00 PM"
-                    viewModel.bulkImportRawText.value = sample
-                    viewModel.parseBulkImport(sample)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.testTag("bulk_import_sample_btn")
-            ) {
-                Text(" மாதிரி விவரங்கள் • LOAD SAMPLE", fontSize = 11.sp, color = Color.White)
-            }
-
-            Button(
-                onClick = { viewModel.parseBulkImport(rawText) },
-                colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.testTag("bulk_import_parse_btn")
-            ) {
-                Text("வரிகளைச் சரிபார் • VALIDATE ROWS 🔍", fontSize = 11.sp, color = Color.White)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Stats Summary
-        if (totalRows > 0) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF111E2E)),
-                border = BorderStroke(1.dp, LyoColors.GlassBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("மொத்தம் (Total)", color = LyoColors.TextSecondary, fontSize = 10.sp)
-                        Text("$totalRows", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("தயார் (Ready)", color = LyoColors.VegGreen, fontSize = 10.sp)
-                        Text("$readyRowsCount", color = LyoColors.VegGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("எச்சரிக்கை (Warning)", color = Color(0xFFFBBF24), fontSize = 10.sp)
-                        Text("$warningRowsCount", color = Color(0xFFFBBF24), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("பிழை (Error)", color = LyoColors.NonVegRed, fontSize = 10.sp)
-                        Text("$errorRowsCount", color = LyoColors.NonVegRed, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Scrollable Preview List
-            Text(
-                text = "விவரங்களின் முன்னோட்டம் • PREVIEW & REVIEW:",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                items(parsedRows.size) { idx ->
-                    val row = parsedRows[idx]
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = LyoColors.CardSlate),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            when (row.status) {
-                                "READY" -> LyoColors.VegGreen.copy(alpha = 0.3f)
-                                "WARNING" -> Color(0xFFFBBF24).copy(alpha = 0.3f)
-                                else -> LyoColors.NonVegRed.copy(alpha = 0.3f)
-                            }
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "#${row.rowIndex} • ${row.name}",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                // Badge
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            when (row.status) {
-                                                "READY" -> LyoColors.VegGreen.copy(alpha = 0.15f)
-                                                "WARNING" -> Color(0xFFFBBF24).copy(alpha = 0.15f)
-                                                else -> LyoColors.NonVegRed.copy(alpha = 0.15f)
-                                            }
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = row.status,
-                                        color = when (row.status) {
-                                            "READY" -> LyoColors.VegGreen
-                                            "WARNING" -> Color(0xFFFBBF24)
-                                            else -> LyoColors.NonVegRed
-                                        },
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Category: ${row.category} | Phone: ${row.phone}", color = LyoColors.TextSecondary, fontSize = 11.sp)
-                            Text("Address: ${row.address}", color = LyoColors.TextSecondary, fontSize = 11.sp)
-                            Text("Hours: ${row.openTime} - ${row.closeTime}", color = LyoColors.TextSecondary, fontSize = 11.sp)
-                            
-                            if (row.message.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Status Message: ${row.message}",
-                                    color = when (row.status) {
-                                        "READY" -> LyoColors.VegGreen
-                                        "WARNING" -> Color(0xFFFBBF24)
-                                        else -> LyoColors.NonVegRed
-                                    },
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Publish Button
-            Button(
-                onClick = {
-                    viewModel.executeBulkPublish(
-                        onSuccess = { success, failure ->
-                            successMsg = "வெற்றிகரமாக $success கடைகள் பதிவேற்றப்பட்டன! (Successfully imported $success stores, failures: $failure)"
-                            showSuccessDialog = true
-                        },
-                        onError = { error ->
-                            errorMsg = error
-                            showErrorDialog = true
-                        }
-                    )
-                },
-                enabled = !isLoading && (readyRowsCount > 0 || warningRowsCount > 0),
-                colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen, disabledContainerColor = Color.Gray),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("bulk_import_publish_btn")
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("பதிவேற்றப்படுகிறது... PUBLISHING...", color = Color.White, fontWeight = FontWeight.Bold)
-                } else {
-                    Text("இறக்குமதி செய் • PUBLISH TO DB 🚀", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        } else {
-            // Empty view illustration / hint
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Filled.ArrowUpward,
-                        contentDescription = "Upload stores",
-                        tint = LyoColors.TextSecondary.copy(alpha = 0.3f),
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "இன்னும் கடைகள் எதுவும் சரிபார்க்கப்படவில்லை\nNo stores validated yet.",
-                        color = LyoColors.TextSecondary,
-                        fontSize = 12.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-
-    // Dialogs
-    if (showSuccessDialog) {
-        AlertDialog(
-            onDismissRequest = { showSuccessDialog = false },
-            title = { Text("வெற்றி • SUCCESS 🎉", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text(successMsg, color = LyoColors.TextSecondary) },
-            confirmButton = {
-                TextButton(onClick = { showSuccessDialog = false }) {
-                    Text("சரி • OK", color = LyoColors.VegGreen, fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color(0xFF1E293B)
-        )
-    }
-
-    if (showErrorDialog) {
-        AlertDialog(
-            onDismissRequest = { showErrorDialog = false },
-            title = { Text("பிழை • ERROR ❌", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text(errorMsg, color = LyoColors.TextSecondary) },
-            confirmButton = {
-                TextButton(onClick = { showErrorDialog = false }) {
-                    Text("சரி • OK", color = LyoColors.NonVegRed, fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color(0xFF1E293B)
-        )
-    }
     }
 }

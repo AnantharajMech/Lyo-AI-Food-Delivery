@@ -2,15 +2,23 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Premium Luxury Color Palette for Lyo - Reimagined with Color Psychology & Cognitive Science
-val LyoMidnightBg = Color(0xFF0B1120)       // Premium Deep Navy Background
-val LyoSurfaceSlate = Color(0xFF131B2E)     // Premium Slate Card Surface
-val LyoGoldPrimary = Color(0xFF00D9FF)      // Tech-Forward Electric Cyan Accent
-val LyoGoldLight = Color(0xFF38BDF8)        // Radiant Sky Cyan Accent
-val LyoOrangeExpress = Color(0xFFFF7622)    // Premium Coral/Orange Accent for Primary Actions
-val LyoCyanActive = Color(0xFF00D9FF)       // Electric Cyan live telemetry / AI focus
-val LyoTextSlate = Color(0xFFCBD5E1)        // Highly readable Subdued Platinum/Silver-Gray for perfect dark contrast
-val LyoTextWhite = Color(0xFFFFFFFF)        // Highly contrasting Premium Pure White Text
-val LyoVegGreen = Color(0xFF10B981)         // Success Emerald Green
-val LyoNonVegRed = Color(0xFFEF4444)        // Hot Coral Red
+// Premium Luxury Futuristic Design System Color Palette for Lyo
+val LyoMidnightBg = Color(0xFF060B16)       // Background
+val LyoSecondaryBg = Color(0xFF0D1424)     // Secondary Background
+val LyoSurfaceSlate = Color(0xFF121A33)     // Surface (old LyoSurfaceSlate)
+val LyoGoldPrimary = Color(0xFF00E5FF)      // Primary Accent (Neon Cyan/Blue)
+val LyoGoldLight = Color(0xFF00E5FF)        // Light Cyan
+val LyoOrangeExpress = Color(0xFF7C4DFF)    // Secondary Accent (Neon Purple/Violet)
+val LyoCyanActive = Color(0xFF00E5FF)       // Primary Accent (live telemetry / AI focus)
+val LyoTextSlate = Color(0xFF9AA6C4)        // Secondary Text (Silver-Gray)
+val LyoTextWhite = Color(0xFFF5F7FA)        // Primary Text (Platinum White)
+val LyoVegGreen = Color(0xFF00C853)         // Success Accent
+val LyoNonVegRed = Color(0xFFFF5252)        // Danger/Error Accent
+val LyoHighlight = Color(0xFFFFB300)        // Highlight Accent
+val LyoWarning = Color(0xFFFFC400)          // Warning Accent
+
+// Glass and borders
+val LyoGlass = Color(0x0DFFFFFF)            // rgba(255,255,255,0.05)
+val LyoBorder = Color(0x14FFFFFF)           // rgba(255,255,255,0.08)
+
 

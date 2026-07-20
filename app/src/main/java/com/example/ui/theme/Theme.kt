@@ -16,19 +16,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = LyoGoldPrimary, // Electric Cyan Accent
-    secondary = LyoOrangeExpress, // Electric Cyan Accent
-    tertiary = LyoCyanActive, // Electric Cyan Accent
-    background = LyoMidnightBg, // Deep Navy Background
-    surface = LyoSurfaceSlate, // Deep Slate Card Surface
-    onPrimary = Color(0xFF0B1120), // Dark Navy text on Electric Cyan
-    onSecondary = Color(0xFF0B1120),
-    onTertiary = Color(0xFF0B1120),
-    onBackground = LyoTextWhite, // Pure White text
-    onSurface = LyoTextWhite, // Pure White text
-    surfaceVariant = Color(0xFF1E293B), // Dark Slate variant
-    onSurfaceVariant = LyoTextSlate, // Platinum/Silver-Gray subtext
-    outline = Color(0x3300D9FF), // Electric Cyan Translucent Outline
+    primary = LyoGoldPrimary, // Neon Cyan Accent
+    secondary = LyoOrangeExpress, // Neon Purple Accent
+    tertiary = LyoCyanActive,
+    background = LyoMidnightBg, // Background #060B16
+    surface = LyoSurfaceSlate, // Surface #121A33
+    onPrimary = Color(0xFF060B16),
+    onSecondary = Color(0xFF060B16),
+    onTertiary = Color(0xFF060B16),
+    onBackground = LyoTextWhite, // Platinum text #F5F7FA
+    onSurface = LyoTextWhite,
+    surfaceVariant = LyoSecondaryBg, // Secondary Background #0D1424
+    onSurfaceVariant = LyoTextSlate, // Secondary text #9AA6C4
+    outline = LyoBorder, // Border rgba(255,255,255,0.08)
     error = LyoNonVegRed,
     onError = Color.White
 )
@@ -39,14 +39,14 @@ private val LightColorScheme = lightColorScheme(
     tertiary = LyoCyanActive,
     background = LyoMidnightBg,
     surface = LyoSurfaceSlate,
-    onPrimary = Color(0xFF0B1120),
-    onSecondary = Color(0xFF0B1120),
-    onTertiary = Color(0xFF0B1120),
+    onPrimary = Color(0xFF060B16),
+    onSecondary = Color(0xFF060B16),
+    onTertiary = Color(0xFF060B16),
     onBackground = LyoTextWhite,
     onSurface = LyoTextWhite,
-    surfaceVariant = Color(0xFF1E293B),
+    surfaceVariant = LyoSecondaryBg,
     onSurfaceVariant = LyoTextSlate,
-    outline = Color(0x3300D9FF),
+    outline = LyoBorder,
     error = LyoNonVegRed,
     onError = Color.White
 )

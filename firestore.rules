@@ -21,7 +21,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isAuthenticated() && (request.auth.uid == userId || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
       allow list: if isAdmin();
-      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin()) &&
+                    (request.resource.data.role != 'ADMIN' || isAdmin());
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+                    (request.resource.data.role == resource.data.role || isAdmin());
+      allow update: if isAdmin();
       allow delete: if isAdmin();
 
       match /sessions/{sessionId} {
@@ -95,8 +99,18 @@ service cloud.firestore {
     // --- Orders ---
     match /ek_orders/{orderId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']));
+      allow create: if isAuthenticated() && 
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.total is number && request.resource.data.total > 0 &&
+                    request.resource.data.itemsTotal is number && request.resource.data.itemsTotal > 0 &&
+                    request.resource.data.deliveryFee is number && request.resource.data.deliveryFee > 0 &&
+                    request.resource.data.status == 'PENDING' &&
+                    request.resource.data.paymentStatus == 'UNPAID';
+      allow update: if isAuthenticated() && (
+                    hasAnyRole(['ADMIN', 'RIDER', 'DELIVERY']) ||
+                    (resource.data.userId == request.auth.uid &&
+                     !request.resource.data.diff(resource.data).affectedKeys().hasAny(['total', 'itemsTotal', 'deliveryFee', 'status', 'paymentStatus']))
+                    );
       allow delete: if isAdmin();
     }
 
@@ -201,4 +215,3 @@ service cloud.firestore {
     }
   }
 }
-

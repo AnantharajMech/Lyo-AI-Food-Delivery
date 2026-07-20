@@ -560,7 +560,7 @@ fun DeliveryPartnerDashboardScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     androidx.compose.material3.Text(
-                                        text = "Lyo",
+                                        text = "Lyo AI",
                                         color = Color.White,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold
@@ -569,7 +569,7 @@ fun DeliveryPartnerDashboardScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     androidx.compose.material3.Text(
-                                        text = "Lyo AI Food Delivery",
+                                        text = "Lyo AI",
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = LyoColors.TextPrimary,
@@ -2524,7 +2524,7 @@ fun DeliveryJobCard(
 
                             Text("RESTAURANT PICKUP GEOFENCE", color = LyoColors.TextSecondary, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             Text(vendor?.name ?: "Kitchen Outlets", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(vendor?.address ?: "Lyo AI Food Delivery Partner Merchant", color = LyoColors.TextSecondary, fontSize = 10.sp)
+                            Text(vendor?.address ?: "Lyo AI Partner Merchant", color = LyoColors.TextSecondary, fontSize = 10.sp)
 
                             Spacer(modifier = Modifier.height(14.dp))
 

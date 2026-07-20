@@ -87,8 +87,8 @@ fun NativeTrackingMap(
             .fillMaxWidth()
             .height(280.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(Color(0xFF0F172A)) // Luxury slate fallback backing
-            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(24.dp))
+            .background(LyoColors.DarkCyanBg) // Luxury slate fallback backing
+            .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(24.dp))
     ) {
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()
@@ -311,7 +311,7 @@ fun NativeTrackingMap(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(12.dp)
-                    .background(Color(0xE60F172A), RoundedCornerShape(12.dp))
+                    .background(LyoColors.DarkCyanBg.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
                     .border(1.dp, LyoNonVegRed.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                     .padding(vertical = 10.dp, horizontal = 14.dp),
                 contentAlignment = Alignment.Center

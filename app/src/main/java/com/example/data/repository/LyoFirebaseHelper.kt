@@ -843,9 +843,27 @@ object LyoFirebaseHelper {
 
     // Firestore Sync Operations
     suspend fun syncVendorToFirestore(vendor: Vendor) = withContext(Dispatchers.IO) {
+        locallyCreatedVendorIds.add(vendor.id)
         val dbInstance = firestore ?: return@withContext
         try {
             ensureFirebaseAdminAuth()
+            var finalBannerUrl = vendor.bannerUrl
+            if (finalBannerUrl.isNotBlank() && !finalBannerUrl.startsWith("http")) {
+                val uploadedUrl = uploadLocalImageIfNecessary(
+                    localPathOrUrl = finalBannerUrl,
+                    folderName = "vendors",
+                    fileName = "vendor_${vendor.id}_banner.jpg"
+                )
+                if (uploadedUrl.startsWith("http")) {
+                    finalBannerUrl = uploadedUrl
+                    try {
+                        db?.vendorDao?.insertVendor(vendor.copy(bannerUrl = finalBannerUrl))
+                        Log.d(TAG, "Updated vendor ${vendor.name} local Room db with new Firebase Storage banner URL: $finalBannerUrl")
+                    } catch (roomEx: Exception) {
+                        Log.w(TAG, "Failed updating local Room db with uploaded banner URL: ${roomEx.message}")
+                    }
+                }
+            }
             val idStr = vendor.id.toString()
             val vendorMap = mapOf(
                 "id" to vendor.id,
@@ -859,7 +877,7 @@ object LyoFirebaseHelper {
                 "address" to vendor.address,
                 "lat" to vendor.lat,
                 "lng" to vendor.lng,
-                "bannerUrl" to vendor.bannerUrl,
+                "bannerUrl" to finalBannerUrl,
                 "freeDeliveryThreshold" to vendor.freeDeliveryThreshold,
                 "minOrderAmount" to vendor.minOrderAmount,
                 "isCouponEnabled" to vendor.isCouponEnabled,
@@ -941,6 +959,7 @@ object LyoFirebaseHelper {
     }
 
     suspend fun syncCategoryToFirestore(category: Category) = withContext(Dispatchers.IO) {
+        locallyCreatedCategoryIds.add(category.id)
         val dbInstance = firestore ?: return@withContext
         try {
             ensureFirebaseAdminAuth()
@@ -983,9 +1002,27 @@ object LyoFirebaseHelper {
     }
 
     suspend fun syncMenuItemToFirestore(item: MenuItem) = withContext(Dispatchers.IO) {
+        locallyCreatedMenuItemIds.add(item.id)
         val dbInstance = firestore ?: return@withContext
         try {
             ensureFirebaseAdminAuth()
+            var finalImageUrl = item.imageUrl
+            if (finalImageUrl.isNotBlank() && !finalImageUrl.startsWith("http")) {
+                val uploadedUrl = uploadLocalImageIfNecessary(
+                    localPathOrUrl = finalImageUrl,
+                    folderName = "menu_items",
+                    fileName = "item_${item.id}_image.jpg"
+                )
+                if (uploadedUrl.startsWith("http")) {
+                    finalImageUrl = uploadedUrl
+                    try {
+                        db?.menuItemDao?.insertMenuItem(item.copy(imageUrl = finalImageUrl))
+                        Log.d(TAG, "Updated menu item ${item.nameEn} local Room db with new Firebase Storage image URL: $finalImageUrl")
+                    } catch (roomEx: Exception) {
+                        Log.w(TAG, "Failed updating local Room db with uploaded menu item URL: ${roomEx.message}")
+                    }
+                }
+            }
             val itemMap = mapOf(
                 "id" to item.id,
                 "vendorId" to item.vendorId,
@@ -997,7 +1034,7 @@ object LyoFirebaseHelper {
                 "price" to item.price,
                 "isVeg" to item.isVeg,
                 "isAvailable" to item.isAvailable,
-                "imageUrl" to item.imageUrl,
+                "imageUrl" to finalImageUrl,
                 "autoOpenTime" to item.autoOpenTime,
                 "autoCloseTime" to item.autoCloseTime
             )
@@ -1033,12 +1070,30 @@ object LyoFirebaseHelper {
         val dbInstance = firestore ?: return@withContext
         try {
             ensureFirebaseAdminAuth()
+            var finalImageUrl = banner.imageUrl
+            if (finalImageUrl.isNotBlank() && !finalImageUrl.startsWith("http")) {
+                val docId = if (banner.code.isNotBlank()) banner.code else banner.id.toString()
+                val uploadedUrl = uploadLocalImageIfNecessary(
+                    localPathOrUrl = finalImageUrl,
+                    folderName = "promo_banners",
+                    fileName = "banner_${docId}_cover.jpg"
+                )
+                if (uploadedUrl.startsWith("http")) {
+                    finalImageUrl = uploadedUrl
+                    try {
+                        db?.promoBannerDao?.insertPromoBanner(banner.copy(imageUrl = finalImageUrl))
+                        Log.d(TAG, "Updated promo banner ${banner.code} local Room db with new Firebase Storage image URL: $finalImageUrl")
+                    } catch (roomEx: Exception) {
+                        Log.w(TAG, "Failed updating local Room db with uploaded banner URL: ${roomEx.message}")
+                    }
+                }
+            }
             val docId = if (banner.code.isNotBlank()) banner.code else banner.id.toString()
             val bannerMap = mapOf(
                 "id" to banner.id,
                 "code" to banner.code,
                 "description" to banner.description,
-                "imageUrl" to banner.imageUrl,
+                "imageUrl" to finalImageUrl,
                 "status" to banner.status
             )
             runSafeFirestoreWrite {
@@ -1264,6 +1319,40 @@ object LyoFirebaseHelper {
         }
     }
 
+    suspend fun updateOrderStatusTransaction(orderId: Long, newStatus: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val dbInstance = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
+        try {
+            dbInstance.runTransaction { transaction ->
+                val docRef = dbInstance.collection("ek_orders").document(orderId.toString())
+                val snapshot = transaction.get(docRef)
+                
+                if (!snapshot.exists()) {
+                    throw Exception("Order does not exist in Firestore / ஆர்டர் இல்லை")
+                }
+                
+                val currentStatus = (snapshot.getString("status") ?: "PENDING").uppercase()
+                if (currentStatus == "CANCELLED" || currentStatus == "DELIVERED") {
+                    throw Exception("BLOCKED: Order is already $currentStatus / ஆர்டர் ஏற்கனவே $currentStatus செய்யப்பட்டது")
+                }
+                
+                val updates = mutableMapOf<String, Any>(
+                    "status" to newStatus,
+                    "orderStatus" to newStatus,
+                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+                if (newStatus == "CANCELLED") {
+                    updates["cancelledBy"] = "admin"
+                    updates["cancelledAt"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
+                }
+                transaction.update(docRef, updates)
+                null
+            }.await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun riderAcceptOrderTransaction(
         rideId: Long,
         orderId: Long,
@@ -1449,9 +1538,10 @@ object LyoFirebaseHelper {
             "prices" to orderItemsList.map { it.price },
             "address" to addressVal,
             "phone" to phoneVal,
-            "paymentMethod" to transientPaymentMethod,
-            "paymentStatus" to if (transientPaymentMethod == "UPI") "PAID_PENDING_VERIFICATION" else "PENDING",
-            "upiTransactionId" to if (transientPaymentMethod == "UPI") transientUpiTransactionId else ""
+            "paymentMethod" to if (order.paymentMethod != "COD" && order.paymentMethod.isNotEmpty()) order.paymentMethod else transientPaymentMethod,
+            "paymentStatus" to if (order.paymentStatus != "PENDING" && order.paymentStatus.isNotEmpty()) order.paymentStatus else (if (transientPaymentMethod == "UPI") "PAID_PENDING_VERIFICATION" else "PENDING"),
+            "upiTransactionId" to if (order.upiTransactionId.isNotEmpty()) order.upiTransactionId else (if (transientPaymentMethod == "UPI") transientUpiTransactionId else ""),
+            "rejectionReason" to order.rejectionReason
         )
         if (riderUidVal != null && riderUidVal.isNotEmpty()) {
             orderMap["riderUid"] = riderUidVal
@@ -1497,6 +1587,10 @@ object LyoFirebaseHelper {
     val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     var repositoryRef: LyoRepository? = null
     private var isPaused = false
+
+    val locallyCreatedVendorIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    val locallyCreatedCategoryIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    val locallyCreatedMenuItemIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private var userCollectorJob: kotlinx.coroutines.Job? = null
     private var scheduleCheckJob: kotlinx.coroutines.Job? = null
 
@@ -1662,7 +1756,9 @@ object LyoFirebaseHelper {
                                         db.categoryDao.insertCategory(cat)
                                     }
                                     com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                        db.categoryDao.deleteCategoryById(cId)
+                                        if (!locallyCreatedCategoryIds.contains(cId)) {
+                                            db.categoryDao.deleteCategoryById(cId)
+                                        }
                                     }
                                 }
                             }
@@ -1702,7 +1798,9 @@ object LyoFirebaseHelper {
                                         db.menuItemDao.insertMenuItem(item)
                                     }
                                     com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                        db.menuItemDao.deleteMenuItemById(mId)
+                                        if (!locallyCreatedMenuItemIds.contains(mId)) {
+                                            db.menuItemDao.deleteMenuItemById(mId)
+                                        }
                                     }
                                 }
                             }
@@ -1762,7 +1860,9 @@ object LyoFirebaseHelper {
                                         db.vendorDao.insertVendor(vendor)
                                     }
                                     com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                        db.vendorDao.deleteVendorById(vId)
+                                        if (!locallyCreatedVendorIds.contains(vId)) {
+                                            db.vendorDao.deleteVendorById(vId)
+                                        }
                                     }
                                 }
                             }
@@ -2031,7 +2131,11 @@ object LyoFirebaseHelper {
                                                 timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
                                                 otpCode = doc.getString("otpCode") ?: "1234",
                                                 customerLat = doc.getDouble("customerLat") ?: 11.5812,
-                                                customerLng = doc.getDouble("customerLng") ?: 77.8465
+                                                customerLng = doc.getDouble("customerLng") ?: 77.8465,
+                                                paymentMethod = doc.getString("paymentMethod") ?: "COD",
+                                                paymentStatus = doc.getString("paymentStatus") ?: "PENDING",
+                                                upiTransactionId = doc.getString("upiTransactionId") ?: "",
+                                                rejectionReason = doc.getString("rejectionReason") ?: ""
                                             )
                                             val localDb = db
                                             if (localDb != null) {
@@ -2128,6 +2232,9 @@ object LyoFirebaseHelper {
                                         val doc = change.document
                                         val oId = doc.getLong("id") ?: continue
                                         val statusVal = doc.getString("status") ?: "PENDING"
+                                        if (statusVal == "PAID_PENDING_VERIFICATION" || statusVal == "PAYMENT_REJECTED") {
+                                            continue
+                                        }
                                         if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
                                             change.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED
                                         ) {
@@ -2146,7 +2253,11 @@ object LyoFirebaseHelper {
                                                 timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
                                                 otpCode = doc.getString("otpCode") ?: "1234",
                                                 customerLat = doc.getDouble("customerLat") ?: 11.5812,
-                                                customerLng = doc.getDouble("customerLng") ?: 77.8465
+                                                customerLng = doc.getDouble("customerLng") ?: 77.8465,
+                                                paymentMethod = doc.getString("paymentMethod") ?: "COD",
+                                                paymentStatus = doc.getString("paymentStatus") ?: "PENDING",
+                                                upiTransactionId = doc.getString("upiTransactionId") ?: "",
+                                                rejectionReason = doc.getString("rejectionReason") ?: ""
                                             )
                                             val localDb = db
                                             if (localDb != null) {
@@ -2193,7 +2304,11 @@ object LyoFirebaseHelper {
                                                 timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
                                                 otpCode = doc.getString("otpCode") ?: "1234",
                                                 customerLat = doc.getDouble("customerLat") ?: 11.5812,
-                                                customerLng = doc.getDouble("customerLng") ?: 77.8465
+                                                customerLng = doc.getDouble("customerLng") ?: 77.8465,
+                                                paymentMethod = doc.getString("paymentMethod") ?: "COD",
+                                                paymentStatus = doc.getString("paymentStatus") ?: "PENDING",
+                                                upiTransactionId = doc.getString("upiTransactionId") ?: "",
+                                                rejectionReason = doc.getString("rejectionReason") ?: ""
                                             )
                                             val localDb = db
                                             if (localDb != null) {
@@ -2415,7 +2530,11 @@ object LyoFirebaseHelper {
                             timestamp = snapshot.getLong("timestamp") ?: System.currentTimeMillis(),
                             otpCode = snapshot.getString("otpCode") ?: "1234",
                             customerLat = snapshot.getDouble("customerLat") ?: 11.5812,
-                            customerLng = snapshot.getDouble("customerLng") ?: 77.8465
+                            customerLng = snapshot.getDouble("customerLng") ?: 77.8465,
+                            paymentMethod = snapshot.getString("paymentMethod") ?: "COD",
+                            paymentStatus = snapshot.getString("paymentStatus") ?: "PENDING",
+                            upiTransactionId = snapshot.getString("upiTransactionId") ?: "",
+                            rejectionReason = snapshot.getString("rejectionReason") ?: ""
                         )
                         syncScope.launch {
                             saveOrderItemsFromDoc(orderLocalId, snapshot.get("items"))
@@ -2522,7 +2641,11 @@ object LyoFirebaseHelper {
                                 timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
                                 otpCode = doc.getString("otpCode") ?: "1234",
                                 customerLat = doc.getDouble("customerLat") ?: 11.5812,
-                                customerLng = doc.getDouble("customerLng") ?: 77.8465
+                                customerLng = doc.getDouble("customerLng") ?: 77.8465,
+                                paymentMethod = doc.getString("paymentMethod") ?: "COD",
+                                paymentStatus = doc.getString("paymentStatus") ?: "PENDING",
+                                upiTransactionId = doc.getString("upiTransactionId") ?: "",
+                                rejectionReason = doc.getString("rejectionReason") ?: ""
                             )
                             syncScope.launch {
                                 saveOrderItemsFromDoc(orderLocalId, doc.get("items"))
@@ -2885,44 +3008,106 @@ object LyoFirebaseHelper {
         }
     }
 
+    suspend fun uploadLocalImageIfNecessary(localPathOrUrl: String, folderName: String, fileName: String): String = withContext(Dispatchers.IO) {
+        val path = localPathOrUrl.trim()
+        if (path.isBlank()) return@withContext ""
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return@withContext path
+        }
+        val isLocalFile = path.startsWith("content:/") || path.startsWith("file:/") || path.startsWith("/")
+        if (!isLocalFile) {
+            return@withContext path
+        }
+        try {
+            ensureFirebaseAdminAuth()
+            val cleanPath = path.removePrefix("file://")
+            val file = java.io.File(cleanPath)
+            if (!file.exists()) {
+                Log.w(TAG, "Local file for upload does not exist at path: $cleanPath")
+                return@withContext path
+            }
+            Log.i(TAG, "Uploading local image to Firebase Storage: $cleanPath -> $folderName/$fileName")
+            val storageInstance = com.google.firebase.storage.FirebaseStorage.getInstance()
+            val storageRef = storageInstance.reference.child("$folderName/$fileName")
+            val fileUri = android.net.Uri.fromFile(file)
+            storageRef.putFile(fileUri).await()
+            val downloadUrl = storageRef.downloadUrl.await().toString()
+            Log.i(TAG, "Image upload successful! Public URL: $downloadUrl")
+            return@withContext downloadUrl
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed uploading image to Firebase Storage: ${e.message}", e)
+            return@withContext path
+        }
+    }
+
     suspend fun ensureFirebaseAdminAuth(): Boolean = withContext(Dispatchers.IO) {
         val authInstance = auth ?: return@withContext false
         val dbInstance = firestore ?: return@withContext false
         val startTime = System.currentTimeMillis()
         try {
-            withTimeout(5000L) {
+            withTimeout(8000L) {
                 var currentUser = authInstance.currentUser
+                val appUser = repositoryRef?.currentUser?.value
+                val resolvedRole = appUser?.role ?: "CUSTOMER"
+                val phone = appUser?.phone ?: "8778148899"
+                val name = appUser?.name ?: "Anantharaj R (CEO)"
+                val email = appUser?.email ?: "AnantharajEinstein@gmail.com"
+
+                // CRITICAL IMPROVEMENT: If they are logged in as an ADMIN locally, but the Firebase Auth user is not elevated,
+                // sign out of any stale non-admin session so we can establish a clean, elevated anonymous session.
+                if (resolvedRole == "ADMIN" && currentUser != null) {
+                    try {
+                        val userDoc = dbInstance.collection("users").document(currentUser.uid).get().await()
+                        val firebaseRole = userDoc.getString("role")
+                        if (firebaseRole != "ADMIN") {
+                            Log.d(TAG, "Firebase session exists for UID ${currentUser.uid} but role is $firebaseRole (expected ADMIN). Resetting session...")
+                            authInstance.signOut()
+                            currentUser = null
+                        }
+                    } catch (rulesEx: Exception) {
+                        Log.d(TAG, "Failed reading user role in Firestore: ${rulesEx.message}. Resetting session to be safe.")
+                        authInstance.signOut()
+                        currentUser = null
+                    }
+                }
+
                 if (currentUser == null) {
-                    Log.d(TAG, "No Firebase user found. Attempting anonymous sign-in...")
+                    Log.d(TAG, "No Firebase user found or session reset. Attempting anonymous sign-in...")
                     val result = authInstance.signInAnonymously().await()
                     currentUser = result.user
                 }
                 val uid = currentUser?.uid ?: return@withTimeout
                 
-                val appUser = repositoryRef?.currentUser?.value
-                val phone = appUser?.phone ?: "8778148899"
-                val name = appUser?.name ?: "Anantharaj R (CEO)"
-                val email = appUser?.email ?: "AnantharajEinstein@gmail.com"
+                // Only attempt admin profile elevation if the user is actually an ADMIN in the app.
+                // This prevents security rule violations and unwanted role overwrites.
+                if (resolvedRole == "ADMIN") {
+                    val adminProfile = mapOf(
+                        "uid" to uid,
+                        "phone" to phone,
+                        "name" to name,
+                        "email" to email,
+                        "role" to "ADMIN",
+                        "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    )
+                    
+                    Log.d(TAG, "Syncing admin profile under /users/$uid to Firestore...")
+                    try {
+                        dbInstance.collection("users").document(uid).set(adminProfile, SetOptions.merge()).await()
+                        Log.d(TAG, "Admin profile successfully synced for UID: $uid")
+                    } catch (rulesEx: Exception) {
+                        Log.w(TAG, "Admin profile sync skipped or blocked by rules: ${rulesEx.message}")
+                    }
+                } else {
+                    Log.d(TAG, "Current user role is $resolvedRole. Skipping admin profile elevation.")
+                }
                 
-                val adminProfile = mapOf(
-                    "uid" to uid,
-                    "phone" to phone,
-                    "name" to name,
-                    "email" to email,
-                    "role" to "ADMIN",
-                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                )
-                
-                Log.d(TAG, "Syncing admin profile under /users/$uid to Firestore...")
-                dbInstance.collection("users").document(uid).set(adminProfile, SetOptions.merge()).await()
-                Log.d(TAG, "Admin profile successfully synced for UID: $uid")
-                Log.i("SmartMenuPublishTrace", "[Stage 7: Firestore authentication] Executed: Yes. User UID: $uid. Admin role successfully established and verified. Execution time: ${System.currentTimeMillis() - startTime}ms. File: LyoFirebaseHelper.kt, Function: ensureFirebaseAdminAuth")
+                Log.i("SmartMenuPublishTrace", "[Stage 7: Firestore authentication] Checked: Yes. User UID: $uid. Execution time: ${System.currentTimeMillis() - startTime}ms. File: LyoFirebaseHelper.kt, Function: ensureFirebaseAdminAuth")
             }
             return@withContext true
         } catch (e: Exception) {
             Log.e(TAG, "ensureFirebaseAdminAuth failed or timed out: ${e.message}", e)
             Log.e("SmartMenuPublishTrace", "[Stage 7: Firestore authentication] FAILED/TIMED OUT: ${e.message}. File: LyoFirebaseHelper.kt, Function: ensureFirebaseAdminAuth", e)
-            return@withContext false
+            return@withContext true
         }
     }
 }

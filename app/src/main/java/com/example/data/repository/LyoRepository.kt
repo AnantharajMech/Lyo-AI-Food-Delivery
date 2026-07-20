@@ -710,12 +710,17 @@ class LyoRepository(val db: AppDatabase) {
             }
         }
  
+        val isUpi = LyoFirebaseHelper.transientPaymentMethod == "UPI"
+        val initialStatus = if (isUpi) "PAID_PENDING_VERIFICATION" else "PENDING"
+        val initialPaymentStatus = if (isUpi) "PAID_PENDING_VERIFICATION" else "PENDING"
+        val initialUpiTxId = if (isUpi) LyoFirebaseHelper.transientUpiTransactionId else ""
+
         val newOrder = Order(
             id = uniqueOrderId, // Pass directly so Room uses this unique ID instead of autoincrementing from 1
             userId = userId,
             vendorId = vendor.id,
             vendorName = vendor.name,
-            status = "PENDING",
+            status = initialStatus,
             subtotal = subtotal,
             deliveryFee = deliveryFee,
             couponDiscount = couponDiscount,
@@ -725,7 +730,10 @@ class LyoRepository(val db: AppDatabase) {
             otpCode = otp,
             customerLat = customerLat,
             customerLng = customerLng,
-            redeemedPoints = redeemedPoints
+            redeemedPoints = redeemedPoints,
+            paymentMethod = LyoFirebaseHelper.transientPaymentMethod,
+            paymentStatus = initialPaymentStatus,
+            upiTransactionId = initialUpiTxId
         )
         
         db.orderDao.insertOrder(newOrder)
@@ -800,7 +808,7 @@ class LyoRepository(val db: AppDatabase) {
         LyoFirebaseHelper.appContext?.let { ctx ->
             com.example.ui.screens.LyoNotificationHelper.showPushNotification(
                 ctx,
-                "Lyo AI Food Delivery • ஆர்டர் செய்யப்பட்டது 🎉",
+                "Lyo AI • ஆர்டர் செய்யப்பட்டது 🎉",
                 "ஆர்டர் #${finalOrder.id} எடப்பாடியில் வெற்றிகரமாக பதிவுபெற்றுள்ளது! விரைவில் உங்கள் இல்லம் வந்தடையும். 🛵"
             )
         }
@@ -913,22 +921,28 @@ class LyoRepository(val db: AppDatabase) {
             }
         }
         
-        // Rule 7: Admin acceptance must also use runTransaction
-        if (status == "ACCEPTED") {
-            val txResult = LyoFirebaseHelper.adminAcceptOrderTransaction(orderId)
-            if (txResult.isFailure) {
-                val ex = txResult.exceptionOrNull() ?: Exception("Unknown error")
-                val errorMsg = LyoFirebaseHelper.getFriendlyPermissionErrorMessage(ex)
-                Log.e("LyoRepository", "Admin acceptance failed: $errorMsg")
-                withContext(Dispatchers.Main) {
-                    LyoFirebaseHelper.appContext?.let { ctx ->
-                        android.widget.Toast.makeText(ctx, errorMsg, android.widget.Toast.LENGTH_LONG).show()
-                    }
-                }
-                return@withContext Result.failure(Exception(errorMsg))
-            }
+        // Write to Firestore first inside a transaction
+        val txResult = if (status == "ACCEPTED") {
+            LyoFirebaseHelper.adminAcceptOrderTransaction(orderId)
+        } else {
+            LyoFirebaseHelper.updateOrderStatusTransaction(orderId, status)
         }
 
+        if (txResult.isFailure) {
+            val ex = txResult.exceptionOrNull() ?: Exception("Unknown error")
+            val errorMsg = LyoFirebaseHelper.getFriendlyPermissionErrorMessage(ex)
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateOrderStatus] FAILED for [order id=$orderId]: $errorMsg")
+            Log.e("LyoRepository", "Order status transition to $status failed: $errorMsg")
+            withContext(Dispatchers.Main) {
+                LyoFirebaseHelper.appContext?.let { ctx ->
+                    android.widget.Toast.makeText(ctx, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            return@withContext Result.failure(Exception(errorMsg))
+        }
+
+        Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [updateOrderStatus] SUCCESS for [order id=$orderId] at ${System.currentTimeMillis()}")
+        // Only update local Room after Firestore confirms success
         db.orderDao.updateOrderStatus(orderId, status)
         
         val testOrder = db.orderDao.getOrderById(orderId)
@@ -944,18 +958,6 @@ class LyoRepository(val db: AppDatabase) {
         val live = activeLiveOrder.value
         if (live != null && live.id == orderId) {
             activeLiveOrder.value = live.copy(status = status)
-        }
-
-        val updatedOrder = db.orderDao.getOrderById(orderId)
-        if (updatedOrder != null) {
-            try {
-                // If status is ACCEPTED, it is already synced/updated via transaction
-                if (status != "ACCEPTED") {
-                    LyoFirebaseHelper.syncOrderToFirestore(updatedOrder)
-                }
-            } catch (e: Exception) {
-                Log.e("LyoRepository", "Background update order sync failed: ${e.message}")
-            }
         }
 
         if (status == "DELIVERED") {
@@ -1030,6 +1032,44 @@ class LyoRepository(val db: AppDatabase) {
                 }
             }
         }
+        Result.success(Unit)
+    }
+
+    suspend fun verifyPayment(orderId: Long, status: String, paymentStatus: String, rejectionReason: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val oldOrder = db.orderDao.getOrderById(orderId)
+        if (oldOrder != null) {
+            if (oldOrder.status == "CANCELLED" || oldOrder.status == "DELIVERED") {
+                Log.w("LyoRepository", "Cannot update payment: Order #${orderId} is already ${oldOrder.status}")
+                return@withContext Result.failure(Exception("Cannot modify an order that is already ${oldOrder.status}."))
+            }
+        }
+
+        db.orderDao.verifyPayment(orderId, status, paymentStatus, rejectionReason)
+
+        val updatedOrder = db.orderDao.getOrderById(orderId)
+        if (updatedOrder != null) {
+            try {
+                LyoFirebaseHelper.syncOrderToFirestore(updatedOrder)
+            } catch (e: Exception) {
+                Log.e("LyoRepository", "Payment verification Firestore sync failed: ${e.message}")
+            }
+        }
+        
+        // Update live order cache if matched
+        val live = activeLiveOrder.value
+        if (live != null && live.id == orderId) {
+            activeLiveOrder.value = live.copy(status = status, paymentStatus = paymentStatus, rejectionReason = rejectionReason)
+        }
+
+        // Local State updates -> System Push Notification
+        if (oldOrder != null && oldOrder.status != status) {
+            LyoFirebaseHelper.appContext?.let { ctx ->
+                val title = if (status == "CONFIRMED") "Payment Verified! 🎉" else "Payment Rejected ❌"
+                val body = if (status == "CONFIRMED") "Your UPI payment for order #${orderId} is verified! We are preparing your food." else "Your payment was rejected: $rejectionReason"
+                com.example.ui.screens.LyoNotificationHelper.showPushNotification(ctx, title, body)
+            }
+        }
+
         Result.success(Unit)
     }
 
@@ -1148,6 +1188,12 @@ class LyoRepository(val db: AppDatabase) {
         // Firestore is the SINGLE SOURCE OF TRUTH.
         // Before seeding, check if Firestore already contains any vendors.
         // If Firestore is not empty, we MUST skip seeding to avoid overwriting or seeding duplicate data.
+        var waitCount = 0
+        while (!LyoFirebaseHelper.isInitialized && waitCount < 50) {
+            delay(100)
+            waitCount++
+        }
+
         var isFirestoreEmpty = true
         if (LyoFirebaseHelper.isInitialized) {
             try {
@@ -1173,13 +1219,7 @@ class LyoRepository(val db: AppDatabase) {
         }
 
         // 1. Seed Support, Customer, and Rider Users
-        val seedUsers = listOf(
-            User("9999900001", "Test Customer 1", "testcustomer1@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
-            User("9999900002", "Test Customer 2", "testcustomer2@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
-            User("9999900003", "Test Customer 3", "testcustomer3@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
-            User("9999900004", "Test Customer 4", "testcustomer4@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER"),
-            User("9999900005", "Test Customer 5", "testcustomer5@lyofresh.in", "Lyo Salem HQ, Salem Road, Idappadi", 11.5812, 77.8465, false, "CUSTOMER")
-        )
+        val seedUsers = emptyList<User>()
 
         for (u in seedUsers) {
             userDao.insertUser(u)
@@ -1787,41 +1827,37 @@ class LyoRepository(val db: AppDatabase) {
     }
 
     suspend fun deleteVendor(vendor: Vendor) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        // Cascade delete categories and menu items of this vendor from Firebase Firestore first
-        try {
-            val vendorItems = db.menuItemDao.getMenuItemsForVendorList(vendor.id)
-            vendorItems.forEach { item ->
-                try {
-                    LyoFirebaseHelper.deleteMenuItemFromFirestore(item.id)
-                } catch (ex: Exception) {
-                    Log.e("LyoRepository", "Error deleting menuItem of deleted vendor from Firestore: ${ex.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("LyoRepository", "Error fetching vendor menu items for deletion: ${e.message}")
+        val dbInstance = LyoFirebaseHelper.firestore ?: throw Exception("Firebase Firestore not initialized")
+        LyoFirebaseHelper.ensureFirebaseAdminAuth()
+
+        // 1. Fetch vendor's categories and menu items
+        val vendorItems = db.menuItemDao.getMenuItemsForVendorList(vendor.id)
+        val vendorCategories = db.categoryDao.getCategoriesForVendorList(vendor.id)
+
+        // 2. Perform Firestore write batch deletions
+        val batch = dbInstance.batch()
+        
+        // Vendor deletions
+        val vendorIdStr = vendor.id.toString()
+        batch.delete(dbInstance.collection("vendors").document(vendorIdStr))
+        batch.delete(dbInstance.collection("stores").document(vendorIdStr))
+        
+        // Category deletions
+        vendorCategories.forEach { cat ->
+            batch.delete(dbInstance.collection("categories").document(cat.id.toString()))
+        }
+        
+        // Menu item deletions
+        vendorItems.forEach { item ->
+            val itemIdStr = item.id.toString()
+            batch.delete(dbInstance.collection("menu_items").document(itemIdStr))
+            batch.delete(dbInstance.collection("vendors").document(vendorIdStr).collection("products").document(itemIdStr))
         }
 
-        try {
-            val vendorCategories = db.categoryDao.getCategoriesForVendorList(vendor.id)
-            vendorCategories.forEach { cat ->
-                try {
-                    LyoFirebaseHelper.deleteCategoryFromFirestore(cat.id)
-                } catch (ex: Exception) {
-                    Log.e("LyoRepository", "Error deleting category of deleted vendor from Firestore: ${ex.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("LyoRepository", "Error fetching vendor categories for deletion: ${e.message}")
-        }
+        // Commit batch and await result
+        batch.commit().await()
 
-        // Delete from Firestore FIRST synchronously
-        try {
-            LyoFirebaseHelper.deleteVendorFromFirestore(vendor.id)
-        } catch (e: Exception) {
-            Log.e("LyoRepository", "Firestore deleteVendor failed: ${e.message}")
-            throw e
-        }
-
+        // 3. Delete from local Room database ONLY on success
         db.menuItemDao.deleteMenuItemsByVendor(vendor.id)
         db.categoryDao.deleteCategoriesByVendor(vendor.id)
         db.vendorDao.deleteVendor(vendor)

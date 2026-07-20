@@ -283,3 +283,228 @@ exports.onDeliveryRideCreatedOrUpdated = functions.firestore
       }
     }
   });
+
+exports.callAiProvider = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated.'
+    );
+  }
+
+  const { provider, prompt, model } = data;
+  if (!provider || !prompt) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'The function must be called with provider and prompt arguments.'
+    );
+  }
+
+  const normalizedProvider = provider.toUpperCase();
+  
+  function getApiKey(prov) {
+    const envVar = `${prov}_API_KEY`;
+    if (process.env[envVar]) {
+      return process.env[envVar];
+    }
+    const config = functions.config();
+    if (config && config.ai) {
+      const key = config.ai[prov.toLowerCase() + "_key"] || config.ai[prov.toLowerCase()];
+      if (key) return key;
+    }
+    return null;
+  }
+
+  const apiKey = getApiKey(normalizedProvider);
+  if (!apiKey && normalizedProvider !== "OLLAMA") {
+    throw new functions.https.HttpsError(
+      'not-found',
+      `API Key for provider ${provider} is not configured on the server.`
+    );
+  }
+
+  let url = "";
+  let headers = {
+    "Content-Type": "application/json"
+  };
+  let body = {};
+
+  const temperature = 0.7;
+
+  if (normalizedProvider === "GEMINI") {
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-3.5-flash'}:generateContent?key=${apiKey}`;
+    body = {
+      contents: [{
+        parts: [{ text: prompt }]
+      }],
+      generationConfig: {
+        temperature: temperature
+      }
+    };
+  } else if (normalizedProvider === "OLLAMA") {
+    const ollamaBase = process.env.OLLAMA_API_URL || "http://localhost:11434";
+    url = `${ollamaBase}/api/generate`;
+    body = {
+      model: model || "llama3",
+      prompt: prompt,
+      stream: false
+    };
+  } else {
+    let baseUrl = "";
+    switch (normalizedProvider) {
+      case "GROQ":
+        baseUrl = "https://api.groq.com/openai/v1";
+        break;
+      case "ZAI":
+        baseUrl = "https://api.z.ai/api/paas/v4";
+        break;
+      case "OPENROUTER":
+        baseUrl = "https://openrouter.ai/api/v1";
+        break;
+      case "OPENAI":
+        baseUrl = "https://api.openai.com/v1";
+        break;
+      case "HUGGINGFACE":
+        baseUrl = "https://router.huggingface.co/v1";
+        break;
+      case "DEEPSEEK":
+        baseUrl = "https://api.deepseek.com";
+        break;
+      default:
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Unknown AI provider: ${provider}`
+        );
+    }
+    url = `${baseUrl}/chat/completions`;
+    headers["Authorization"] = `Bearer ${apiKey}`;
+    body = {
+      model: model,
+      messages: [
+        { role: "user", content: prompt }
+      ],
+      temperature: temperature
+    };
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Provider API error (${response.status}): ${errorText}`);
+      throw new functions.https.HttpsError(
+        'internal',
+        `Provider API returned error status ${response.status}: ${errorText}`
+      );
+    }
+
+    const resJson = await response.json();
+    
+    let responseText = "";
+    if (normalizedProvider === "GEMINI") {
+      if (resJson.candidates && resJson.candidates[0] && resJson.candidates[0].content && resJson.candidates[0].content.parts && resJson.candidates[0].content.parts[0]) {
+        responseText = resJson.candidates[0].content.parts[0].text || "";
+      }
+    } else if (normalizedProvider === "OLLAMA") {
+      responseText = resJson.response || "";
+    } else {
+      if (resJson.choices && resJson.choices[0] && resJson.choices[0].message) {
+        responseText = resJson.choices[0].message.content || "";
+      }
+    }
+
+    return { response: responseText };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    console.error("Error executing callAiProvider Cloud Function:", error);
+    throw new functions.https.HttpsError(
+      'internal',
+      error.message || "An error occurred during API execution."
+    );
+  }
+});
+
+exports.onOrderCreatedValidatePrice = functions.firestore
+  .document('ek_orders/{orderId}')
+  .onCreate(async (snapshot, context) => {
+    const orderData = snapshot.data();
+    if (!orderData) {
+      console.warn("No order data found on creation.");
+      return null;
+    }
+
+    const orderId = context.params.orderId;
+    console.log(`Validating prices for order: ${orderId}`);
+
+    const items = orderData.items || [];
+    if (items.length === 0) {
+      console.warn(`Order ${orderId} has no items.`);
+      return null;
+    }
+
+    const db = admin.firestore();
+    let recalculatedSubtotal = 0;
+
+    try {
+      const itemPromises = items.map(async (orderItem) => {
+        const itemId = String(orderItem.menuItemId);
+        const itemDoc = await db.collection("menu_items").doc(itemId).get();
+        if (!itemDoc.exists) {
+          throw new Error(`Menu item with ID ${itemId} does not exist in Firestore.`);
+        }
+        const itemData = itemDoc.data();
+        const serverPrice = parseFloat(itemData.price) || 0;
+        const quantity = parseInt(orderItem.quantity) || 0;
+        recalculatedSubtotal += serverPrice * quantity;
+      });
+
+      await Promise.all(itemPromises);
+
+      const deliveryFee = parseFloat(orderData.deliveryFee || orderData.deliveryCharge || 0);
+      const tipAmount = parseFloat(orderData.tipAmount || 0);
+      const couponDiscount = parseFloat(orderData.couponDiscount || 0);
+
+      const expectedTotal = recalculatedSubtotal + deliveryFee + tipAmount - couponDiscount;
+      const submittedTotal = parseFloat(orderData.total || orderData.grandTotal || orderData.totalAmount || 0);
+
+      const difference = Math.abs(expectedTotal - submittedTotal);
+      const tolerance = 0.05; // 5 cents/rupees rounding tolerance
+
+      if (difference > tolerance) {
+        console.warn(`Price mismatch detected for order ${orderId}! Submitted: ${submittedTotal}, Expected: ${expectedTotal}. Mismatch of ${difference}`);
+
+        // Update the order status in Firestore to FLAGGED_FOR_REVIEW and paymentStatus to DISPUTED
+        await snapshot.ref.update({
+          status: 'FLAGGED_FOR_REVIEW',
+          paymentStatus: 'DISPUTED'
+        });
+
+        // Write an admin alert to the 'fraud_alerts' collection
+        await db.collection("fraud_alerts").add({
+          orderId: orderId,
+          expectedTotal: expectedTotal,
+          submittedTotal: submittedTotal,
+          difference: difference,
+          userId: orderData.userId || null,
+          vendorId: orderData.vendorId || null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log(`Order ${orderId} has been successfully updated with FLAGGED_FOR_REVIEW and fraud_alerts written.`);
+      } else {
+        console.log(`Order ${orderId} price verification passed. Submitted: ${submittedTotal}, Expected: ${expectedTotal}`);
+      }
+    } catch (error) {
+      console.error(`Error in onOrderCreatedValidatePrice for order ${orderId}:`, error);
+    }
+    return null;
+  });
+
+

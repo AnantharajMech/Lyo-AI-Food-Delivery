@@ -48,19 +48,19 @@ val LocalIsLightTheme = androidx.compose.runtime.staticCompositionLocalOf { fals
 
 // Central Premium Theme Colors (Section 1)
 object LyoColors {
-    val DarkCyanBg = Color(0xFF071426) // Deep Navy Background (--bg)
-    val CardSlate = Color(0xFF0E1D34) // Deep Premium Slate Card Surface (--surface)
-    val AccentOrange = Color(0xFFFF7A1A) // Vibrant orange (--orange)
-    val AmberYellow = Color(0xFF14C7E8) // Premium Cyan (--cyan)
-    val GlassBorder = Color(0x4714C7E8) // Translucent border (--border)
-    val TranslucentSlate = Color(0xCC0E1D34) // Glass overlay
+    val DarkCyanBg = Color(0xFF060B16) // Background #060B16
+    val CardSlate = Color(0xFF121A33) // Surface #121A33
+    val AccentOrange = Color(0xFF00E5FF) // Primary Accent (Neon Cyan)
+    val AmberYellow = Color(0xFFFFB300) // Highlight #FFB300
+    val GlassBorder = Color(0x14FFFFFF) // Border rgba(255,255,255,0.08)
+    val TranslucentSlate = Color(0xCC121A33) // Glass overlay
     val TranslucentBlack = Color(0x99000000)
-    val TextPrimary = Color(0xFFF8FAFC) // Primary text (--text)
-    val TextSecondary = Color(0xFFA9B7CC) // Muted text (--muted)
-    val VegGreen = Color(0xFF22C55E) // Veg green (--green)
-    val NonVegRed = Color(0xFFEF4444) // Premium Coral Red
-    val WarningYellow = Color(0xFFFF7A1A) // Warning Amber Gold
-    val LiveCyan = Color(0xFF14C7E8) // Electric Cyan Accent
+    val TextPrimary = Color(0xFFF5F7FA) // Primary Text #F5F7FA
+    val TextSecondary = Color(0xFF9AA6C4) // Secondary Text #9AA6C4
+    val VegGreen = Color(0xFF00C853) // Success #00C853
+    val NonVegRed = Color(0xFFFF5252) // Danger #FF5252
+    val WarningYellow = Color(0xFFFFC400) // Warning #FFC400
+    val LiveCyan = Color(0xFF00E5FF) // Primary Accent
 }
 
 // ============================================
@@ -71,27 +71,27 @@ object LyoGlassDesignTokens {
     val HighlightAlpha = 0.60f
     
     // Core background colors with different transparency levels to replicate glass
-    val GlassCardBg = Color(0xCC131B2E) // Rich translucent deep slate card background
-    val GlassCardBgGlow = Color(0xDD1E293B) // Rich glowing card variant
+    val GlassCardBg = Color(0xCC121A33) // Surface glass background
+    val GlassCardBgGlow = Color(0xDD0D1424) // Secondary Background variant
     
     // Specular / Neon Gradient colors for the 3D Liquid border
-    val EdgeColorOrange = Color(0xFF1E3A8A)
-    val EdgeColorCyan = Color(0xFF00D9FF)
-    val EdgeColorGold = Color(0xFF00D9FF)
+    val EdgeColorOrange = Color(0xFF7C4DFF) // Secondary Accent
+    val EdgeColorCyan = Color(0xFF00E5FF) // Primary Accent
+    val EdgeColorGold = Color(0xFFFFB300) // Highlight Accent
     
     // Gradient definitions for borders
     val LiquidOrangeCyanBorder = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF00D9FF).copy(alpha = 0.6f), // Electric Cyan top-left
-            Color(0xFF1E3A8A).copy(alpha = 0.4f), // Deep Indigo bottom
-            Color(0xFF00D9FF).copy(alpha = 0.1f)  // Fading bottom-right
+            Color(0xFF00E5FF).copy(alpha = 0.6f), // Electric Cyan top-left
+            Color(0xFF7C4DFF).copy(alpha = 0.4f), // Deep Violet bottom
+            Color(0xFF00E5FF).copy(alpha = 0.1f)  // Fading bottom-right
         )
     )
 
     val LiquidGoldOrangeBorder = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF00D9FF).copy(alpha = 0.7f), // Electric Cyan
-            Color(0xFF1E3A8A).copy(alpha = 0.4f), // Deep Indigo
+            Color(0xFF00E5FF).copy(alpha = 0.7f), // Electric Cyan
+            Color(0xFF7C4DFF).copy(alpha = 0.4f), // Deep Violet
             Color(0x11FFFFFF)
         )
     )
@@ -105,7 +105,7 @@ object LyoGlassDesignTokens {
         elevation: Dp = Standard3DElevation,
         borderBrush: Brush = LiquidOrangeCyanBorder,
         borderWidth: Dp = 1.2.dp,
-        glowColor: Color = Color(0xFF00D9FF),
+        glowColor: Color = Color(0xFF00E5FF),
         backgroundColor: Color = GlassCardBg
     ): Modifier {
         return this
@@ -218,14 +218,14 @@ fun LyoBackground(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        LyoColors.DarkCyanBg, // Ultimate Deep Navy background (--bg)
+                        LyoColors.DarkCyanBg, // Background #060B16
                         LyoColors.DarkCyanBg,
-                        Color(0xFF0E1D34)  // Deep Indigo surface (--surface)
+                        Color(0xFF0D1424)  // Secondary Background #0D1424
                     )
                 )
             )
     ) {
-        // 1. Futuristic Indigo Soft Aura (Top-Right)
+        // 1. Futuristic Purple Soft Aura (Top-Right)
         Box(
             modifier = Modifier
                 .size(320.dp)
@@ -234,8 +234,8 @@ fun LyoBackground(
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF1E3A8A).copy(alpha = pulseOrange * 0.35f),
-                            Color(0xFF00D9FF).copy(alpha = pulseOrange * 0.18f),
+                            Color(0xFF7C4DFF).copy(alpha = pulseOrange * 0.35f),
+                            Color(0xFF00E5FF).copy(alpha = pulseOrange * 0.18f),
                             Color.Transparent
                         )
                     )
@@ -251,15 +251,15 @@ fun LyoBackground(
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF00D9FF).copy(alpha = pulseCyan * 0.28f),
-                            Color(0xFF1E3A8A).copy(alpha = pulseCyan * 0.15f),
+                            Color(0xFF00E5FF).copy(alpha = pulseCyan * 0.28f),
+                            Color(0xFF7C4DFF).copy(alpha = pulseCyan * 0.15f),
                             Color.Transparent
                         )
                     )
                 )
         )
 
-        // 3. Tech-Minded Indigo Aura (Bottom-Right)
+        // 3. Tech-Minded Violet Aura (Bottom-Right)
         Box(
             modifier = Modifier
                 .size(350.dp)
@@ -268,8 +268,8 @@ fun LyoBackground(
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF1E3A8A).copy(alpha = pulseMagenta * 0.25f),
-                            Color(0xFF00D9FF).copy(alpha = pulseMagenta * 0.12f),
+                            Color(0xFF7C4DFF).copy(alpha = pulseMagenta * 0.25f),
+                            Color(0xFF00E5FF).copy(alpha = pulseMagenta * 0.12f),
                             Color.Transparent
                         )
                     )
@@ -285,7 +285,7 @@ fun LyoBackground(
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF00D9FF).copy(alpha = pulseGreen * 0.22f),
+                            Color(0xFF00E5FF).copy(alpha = pulseGreen * 0.22f),
                             Color.Transparent
                         )
                     )
@@ -617,16 +617,16 @@ fun RatingStars(
 
 @Composable
 fun VegIndicator(isVeg: Boolean, modifier: Modifier = Modifier) {
-    val mainColor = if (isVeg) Color(0xFF10B981) else Color(0xFFF43F5E) // Premium Emerald vs Bright Rose/Red
+    val mainColor = if (isVeg) LyoColors.VegGreen else LyoColors.NonVegRed
     Box(
         modifier = modifier
             .size(13.dp)
             .background(
                 Brush.linearGradient(
                     colors = if (isVeg) {
-                        listOf(Color(0x2610B981), Color(0x0A10B981))
+                        listOf(LyoColors.VegGreen.copy(alpha = 0.15f), LyoColors.VegGreen.copy(alpha = 0.04f))
                     } else {
-                        listOf(Color(0x26EF4444), Color(0x0AEF4444))
+                        listOf(LyoColors.NonVegRed.copy(alpha = 0.15f), LyoColors.NonVegRed.copy(alpha = 0.04f))
                     }
                 ),
                 RoundedCornerShape(3.dp)
