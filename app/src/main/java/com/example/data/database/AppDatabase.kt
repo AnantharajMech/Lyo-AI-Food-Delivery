@@ -22,7 +22,7 @@ import androidx.room.RoomDatabase
         LyoNotification::class,
         SmartMenuCorrection::class
     ],
-    version = 30,
+    version = 32,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,13 +44,26 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        val MIGRATION_30_31 = object : androidx.room.migration.Migration(30, 31) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN iconImageUrl TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_31_32 = object : androidx.room.migration.Migration(31, 32) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE orders ADD COLUMN gstAmount REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "lyo_food_delivery_db"
-                ).fallbackToDestructiveMigration()
+                ).addMigrations(MIGRATION_30_31, MIGRATION_31_32)
+                 .fallbackToDestructiveMigration()
                  .build()
                 INSTANCE = instance
                 instance

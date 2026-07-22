@@ -146,9 +146,13 @@ object LyoNotificationHelper {
         customerPhone: String,
         customerAddress: String
     ) {
+        if (items.isEmpty()) {
+            Toast.makeText(context, "Order items not loaded yet. Please wait a moment and try again.", Toast.LENGTH_LONG).show()
+            return
+        }
         try {
             val canvasWidth = 380f
-            val canvasHeight = (500f + (items.size * 25f) + (if (order.couponDiscount > 0) 25f else 0f)).coerceAtLeast(620f)
+            val canvasHeight = (500f + (items.size * 25f) + (if (order.couponDiscount > 0) 25f else 0f) + (if (order.gstAmount > 0.0) 25f else 0f)).coerceAtLeast(620f)
             val pdfDocument = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(canvasWidth.toInt(), canvasHeight.toInt(), 1).create()
             val page = pdfDocument.startPage(pageInfo)
@@ -225,23 +229,16 @@ object LyoNotificationHelper {
             y += 18f
 
             // 4. Products List
-            if (items.isEmpty()) {
-                canvas.drawText("1", 20f, y, textPaint)
-                canvas.drawText("Standard Culinary Feast Platter", 60f, y, textPaint)
-                canvas.drawText("₹${order.subtotal.toInt()}", canvasWidth - 65f, y, textPaint)
-                y += 20f
-            } else {
-                for (item in items) {
-                    canvas.drawText(item.quantity.toString(), 20f, y, textPaint)
-                    val displayName = item.nameEn
-                    if (displayName.length > 25) {
-                        canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, textPaint)
-                    } else {
-                        canvas.drawText(displayName, 60f, y, textPaint)
-                    }
-                    canvas.drawText("₹${(item.price * item.quantity).toInt()}", canvasWidth - 65f, y, textPaint)
-                    y += 20f
+            for (item in items) {
+                canvas.drawText(item.quantity.toString(), 20f, y, textPaint)
+                val displayName = item.nameEn
+                if (displayName.length > 25) {
+                    canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, textPaint)
+                } else {
+                    canvas.drawText(displayName, 60f, y, textPaint)
                 }
+                canvas.drawText("₹${(item.price * item.quantity).toInt()}", canvasWidth - 65f, y, textPaint)
+                y += 20f
             }
 
             // 5. Subtotals Block
@@ -253,6 +250,11 @@ object LyoNotificationHelper {
             canvas.drawText("Delivery Fee:", 180f, y, textPaint)
             canvas.drawText("₹${order.deliveryFee.toInt()}", canvasWidth - 65f, y, textPaint)
             y += 15f
+            if (order.gstAmount > 0.0) {
+                canvas.drawText("GST (Tax):", 180f, y, textPaint)
+                canvas.drawText("₹${order.gstAmount.toInt()}", canvasWidth - 65f, y, textPaint)
+                y += 15f
+            }
             if (order.couponDiscount > 0) {
                 canvas.drawText("Discounts:", 180f, y, Paint().apply { color = Color.rgb(22, 163, 74); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
                 canvas.drawText("-₹${order.couponDiscount.toInt()}", canvasWidth - 65f, y, Paint().apply { color = Color.rgb(22, 163, 74); textSize = 9.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
@@ -283,12 +285,9 @@ object LyoNotificationHelper {
 
             // Build Message Text
             val textBuilder = StringBuilder()
-            val cleanItemsStr = if (items.isEmpty()) {
-                "   • 1 × Standard Platter — ₹${order.subtotal.toInt()}"
-            } else {
-                items.joinToString("\n") { "   • ${it.quantity} × ${it.nameEn} — ₹${(it.price * it.quantity).toInt()}" }
-            }
+            val cleanItemsStr = items.joinToString("\n") { "   • ${it.quantity} × ${it.nameEn} — ₹${(it.price * it.quantity).toInt()}" }
             val discountText = if (order.couponDiscount > 0) "\n🎁 *Discounts:* -₹${order.couponDiscount.toInt()}" else ""
+            val gstText = if (order.gstAmount > 0.0) "\n   • GST (Tax): ₹${order.gstAmount.toInt()}" else ""
             
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
             textBuilder.append("🛍️  *Lyo AI — INVOICE*\n")
@@ -304,11 +303,10 @@ object LyoNotificationHelper {
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n")
             textBuilder.append("💵 *Payment Details:*\n")
             textBuilder.append("   • Subtotal: ₹${order.subtotal.toInt()}\n")
-            textBuilder.append("   • Delivery Fee: ₹${order.deliveryFee.toInt()}$discountText\n")
+            textBuilder.append("   • Delivery Fee: ₹${order.deliveryFee.toInt()}$gstText$discountText\n")
             textBuilder.append("---------------------------------------\n")
             textBuilder.append("💰 *Grand Total:* *₹${order.totalAmount.toInt()}*\n")
             textBuilder.append("💳 *Payment Method:* Cash on Delivery\n")
-            textBuilder.append("🔑 *Delivery OTP:* *${order.otpCode}*\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━\n\n")
             textBuilder.append("Thank you for choosing Lyo AI! 🙏\n")
             textBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━")
@@ -340,6 +338,10 @@ object LyoNotificationHelper {
     }
 
     fun generateKitchenKotPdfAndShare(context: Context, order: Order, items: List<OrderItem>, customerName: String) {
+        if (items.isEmpty()) {
+            Toast.makeText(context, "Order items not loaded yet. Please wait a moment and try again.", Toast.LENGTH_LONG).show()
+            return
+        }
         try {
             val canvasWidth = 380f
             val canvasHeight = (420f + (items.size * 35f)).coerceAtLeast(550f)
@@ -412,27 +414,18 @@ object LyoNotificationHelper {
 
             // 4. Products List
             var totalItemsCount = 0
-            if (items.isEmpty()) {
-                canvas.drawText("1x", 20f, y, boldLargePaint)
-                canvas.drawText("Standard Culinary Platter", 60f, y, boldLargePaint)
+            for (item in items) {
+                canvas.drawText("${item.quantity}x", 20f, y, boldLargePaint)
+                val displayName = item.nameEn
+                if (displayName.length > 25) {
+                    canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, boldLargePaint)
+                } else {
+                    canvas.drawText(displayName, 60f, y, boldLargePaint)
+                }
                 y += 16f
                 canvas.drawText("Notes: Fresh Preparation", 60f, y, italicTextPaint)
                 y += 22f
-                totalItemsCount = 1
-            } else {
-                for (item in items) {
-                    canvas.drawText("${item.quantity}x", 20f, y, boldLargePaint)
-                    val displayName = item.nameEn
-                    if (displayName.length > 25) {
-                        canvas.drawText(displayName.substring(0, 23) + "...", 60f, y, boldLargePaint)
-                    } else {
-                        canvas.drawText(displayName, 60f, y, boldLargePaint)
-                    }
-                    y += 16f
-                    canvas.drawText("Notes: Fresh Preparation", 60f, y, italicTextPaint)
-                    y += 22f
-                    totalItemsCount += item.quantity
-                }
+                totalItemsCount += item.quantity
             }
 
             canvas.drawLine(20f, y, canvasWidth - 20f, y, linePaint)

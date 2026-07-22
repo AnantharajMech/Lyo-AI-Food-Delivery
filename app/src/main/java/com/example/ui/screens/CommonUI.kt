@@ -82,29 +82,29 @@ object LyoGlassDesignTokens {
     // Gradient definitions for borders
     val LiquidOrangeCyanBorder = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF00E5FF).copy(alpha = 0.6f), // Electric Cyan top-left
-            Color(0xFF7C4DFF).copy(alpha = 0.4f), // Deep Violet bottom
-            Color(0xFF00E5FF).copy(alpha = 0.1f)  // Fading bottom-right
+            Color(0xFF00E5FF).copy(alpha = 0.20f), // Electric Cyan top-left subtle edge
+            Color(0xFF7C4DFF).copy(alpha = 0.12f), // Deep Violet bottom
+            Color(0x05FFFFFF)  // Fading bottom-right
         )
     )
 
     val LiquidGoldOrangeBorder = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF00E5FF).copy(alpha = 0.7f), // Electric Cyan
-            Color(0xFF7C4DFF).copy(alpha = 0.4f), // Deep Violet
-            Color(0x11FFFFFF)
+            Color(0xFF00E5FF).copy(alpha = 0.20f), // Electric Cyan
+            Color(0xFF7C4DFF).copy(alpha = 0.12f), // Deep Violet
+            Color(0x05FFFFFF)
         )
     )
     
-    val Standard3DElevation = 3.dp
-    val Active3DElevation = 5.dp
+    val Standard3DElevation = 1.dp
+    val Active3DElevation = 2.dp
     
     @Composable
     fun Modifier.liquidGlass3D(
         cornerRadius: Dp = 20.dp,
         elevation: Dp = Standard3DElevation,
         borderBrush: Brush = LiquidOrangeCyanBorder,
-        borderWidth: Dp = 1.2.dp,
+        borderWidth: Dp = 0.5.dp,
         glowColor: Color = Color(0xFF00E5FF),
         backgroundColor: Color = GlassCardBg
     ): Modifier {
@@ -116,8 +116,8 @@ object LyoGlassDesignTokens {
             .shadow(
                 elevation = elevation,
                 shape = RoundedCornerShape(cornerRadius),
-                ambientColor = Color.Black.copy(alpha = 0.3f),
-                spotColor = glowColor.copy(alpha = 0.15f)
+                ambientColor = Color.Black.copy(alpha = 0.2f),
+                spotColor = glowColor.copy(alpha = 0.08f)
             )
             .background(
                 brush = Brush.verticalGradient(
@@ -314,7 +314,7 @@ fun LyoBackground(
 fun GlassCard(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 16.dp,
-    borderWidth: Dp = 1.0.dp,
+    borderWidth: Dp = 0.5.dp,
     borderColor: Color = LyoColors.GlassBorder,
     backgroundColor: Color = LyoGlassDesignTokens.GlassCardBg,
     glowColor: Color? = null,
@@ -340,7 +340,7 @@ fun GlassCard(
     }
 
     val finalBorderColor = glowColor ?: borderColor
-    val finalBorderWidth = if (glowColor != null) 1.5.dp else borderWidth
+    val finalBorderWidth = if (glowColor != null) 0.75.dp else borderWidth
     val finalElevation = if (glowColor != null) LyoGlassDesignTokens.Active3DElevation else LyoGlassDesignTokens.Standard3DElevation
     val finalSpotColor = glowColor ?: LyoColors.GlassBorder
 
@@ -351,7 +351,7 @@ fun GlassCard(
         targetValue = if (isPressed) 0.96f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+            stiffness = Spring.StiffnessMedium
         ),
         label = "scale_press"
     )
@@ -371,9 +371,9 @@ fun GlassCard(
     val specularBorderBrush = remember(finalBorderColor) {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.45f), // highlight specular notch (Refraction edge)
-                finalBorderColor.copy(alpha = 0.35f),
-                finalBorderColor.copy(alpha = 0.08f)
+                Color.White.copy(alpha = 0.20f), // ultra-thin specular highlight
+                finalBorderColor.copy(alpha = 0.15f),
+                finalBorderColor.copy(alpha = 0.04f)
             ),
             start = Offset(0f, 0f),
             end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
@@ -402,8 +402,8 @@ fun GlassCard(
         .shadow(
             elevation = finalElevation,
             shape = RoundedCornerShape(cornerRadius),
-            ambientColor = Color.Black.copy(alpha = 0.3f),
-            spotColor = finalSpotColor.copy(alpha = 0.3f)
+            ambientColor = Color.Black.copy(alpha = 0.15f),
+            spotColor = finalSpotColor.copy(alpha = 0.10f)
         )
         .clip(RoundedCornerShape(cornerRadius))
 
@@ -477,7 +477,7 @@ fun LyoButton(
         targetValue = if (isPressed) 0.95f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+            stiffness = Spring.StiffnessMedium
         ),
         label = "btn_press_scale"
     )
@@ -536,11 +536,11 @@ fun LyoButton(
                 } else Modifier
             )
             .border(
-                width = 1.5.dp,
+                width = 0.5.dp,
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.55f),
-                        baseColor.copy(alpha = 0.15f)
+                        Color.White.copy(alpha = 0.25f),
+                        baseColor.copy(alpha = 0.10f)
                     )
                 ),
                 shape = shape
@@ -632,11 +632,11 @@ fun VegIndicator(isVeg: Boolean, modifier: Modifier = Modifier) {
                 RoundedCornerShape(3.dp)
             )
             .border(
-                1.dp,
+                0.5.dp,
                 Brush.verticalGradient(
                     colors = listOf(
-                        mainColor.copy(alpha = 0.9f),
-                        mainColor.copy(alpha = 0.3f)
+                        mainColor.copy(alpha = 0.5f),
+                        mainColor.copy(alpha = 0.2f)
                     )
                 ),
                 RoundedCornerShape(3.dp)
@@ -1300,8 +1300,10 @@ fun LeafletMapView(
                 
                 <!-- Floating Map Mode Controls -->
                 <div class="style-toggle">
-                    <button class="btn-standard" onclick="setTileStyle('voyager')">🗺️ standard</button>
-                    <button class="btn-satellite active" onclick="setTileStyle('satellite')">🟡 satellite</button>
+                    <button class="btn-standard" onclick="setTileStyle('voyager')">🗺️ Normal</button>
+                    <button class="btn-satellite active" onclick="setTileStyle('satellite')">📡 Satellite</button>
+                    <button class="btn-hybrid" onclick="setTileStyle('hybrid')">🛰️ Hybrid</button>
+                    <button class="btn-terrain" onclick="setTileStyle('terrain')">🏔️ Terrain</button>
                 </div>
                 
                 <script>
@@ -1472,10 +1474,16 @@ fun LeafletMapView(
                             attr = '&copy; CARTO';
                         } else if (style === 'voyager') {
                             url = 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
-                            attr = '&copy; Google';
+                            attr = '&copy; Google Maps';
                         } else if (style === 'satellite') {
+                            url = 'https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
+                            attr = '&copy; Google Satellite';
+                        } else if (style === 'hybrid') {
                             url = 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
-                            attr = '&copy; Google';
+                            attr = '&copy; Google Hybrid';
+                        } else if (style === 'terrain') {
+                            url = 'https://mt{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}';
+                            attr = '&copy; Google Terrain';
                         }
                         
                         activeTileLayer = L.tileLayer(url, {
@@ -1489,7 +1497,13 @@ fun LeafletMapView(
                         document.querySelectorAll('.style-toggle button').forEach(function(btn) {
                             btn.classList.remove('active');
                         });
-                        var buttonClass = (style === 'voyager' ? 'btn-standard' : 'btn-satellite');
+                        var btnMap = {
+                            'voyager': 'btn-standard',
+                            'satellite': 'btn-satellite',
+                            'hybrid': 'btn-hybrid',
+                            'terrain': 'btn-terrain'
+                        };
+                        var buttonClass = btnMap[style] || 'btn-standard';
                         var targetBtn = document.querySelector('.' + buttonClass);
                         if (targetBtn) {
                             targetBtn.classList.add('active');
@@ -1750,7 +1764,7 @@ fun Simulated3DBikeAnimation(
             .height(130.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF0F172A))
-            .border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(16.dp)),
+            .border(0.5.dp, LyoColors.GlassBorder, RoundedCornerShape(16.dp)),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1874,7 +1888,7 @@ fun Simulated3DBikeAnimation(
                 .align(Alignment.TopStart)
                 .padding(12.dp)
                 .background(Color(0xBB0D0F14), RoundedCornerShape(8.dp))
-                .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
+                .border(0.5.dp, Color(0x2200E5FF), RoundedCornerShape(8.dp))
                 .padding(8.dp, 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1928,7 +1942,7 @@ fun Lyo3DSearchBar(
                 .fillMaxWidth()
                 .height(38.dp) // Slim height design
                 .background(LyoColors.CardSlate, shape = RoundedCornerShape(8.dp))
-                .border(1.dp, LyoColors.GlassBorder, shape = RoundedCornerShape(8.dp))
+                .border(0.5.dp, LyoColors.GlassBorder, shape = RoundedCornerShape(8.dp))
                 .padding(horizontal = 10.dp),
             contentAlignment = Alignment.CenterStart
         ) {
@@ -2002,7 +2016,7 @@ fun Lyo3DDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(containerColor, shape = RoundedCornerShape(24.dp))
-                    .border(1.5.dp, borderColor, shape = RoundedCornerShape(24.dp))
+                    .border(0.5.dp, borderColor.copy(alpha = 0.4f), shape = RoundedCornerShape(24.dp))
                     .padding(14.dp)
             ) {
                 content()
@@ -2068,6 +2082,9 @@ html,body {height:100%;width:100%;margin:0;padding:0;background:#0c0f17;overflow
 #offline-container {height:100%;width:100%;background:#0F172A;display:none;position:relative;}
 #offline-canvas {display:block;width:100%;height:100%;}
 .info-bar{position:absolute;top:8px;left:8px;right:8px;background:rgba(15,23,42,0.95);border:1px solid rgba(255,107,0,0.5);border-radius:8px;padding:6px 10px;font-size:11px;color:#FFB347;font-weight:bold;z-index:1001;text-align:center;box-shadow:0 2px 4px rgba(0,0,0,0.5);}
+.mode-row{display:flex;gap:4px;width:100%;}
+.btn-mode{flex:1;background:rgba(30,41,59,0.9);border:1px solid rgba(255,255,255,0.2);color:white;font-size:9px;font-weight:bold;padding:4px 2px;border-radius:4px;cursor:pointer;}
+.btn-mode.active{background:#FF6B00;color:white;border-color:#FF6B00;}
 .controls-container{position:absolute;bottom:8px;left:8px;right:8px;display:flex;flex-direction:column;gap:6px;z-index:1001;}
 .zoom-row{display:flex;gap:6px;width:100%;}
 .center-row{display:flex;width:100%;}
@@ -2085,6 +2102,12 @@ html,body {height:100%;width:100%;margin:0;padding:0;background:#0c0f17;overflow
 </div>
 
 <div class="controls-container">
+  <div class="mode-row">
+    <button class="btn-mode active" id="m-norm" onclick="switchPickerMode('normal')">🗺️ Normal</button>
+    <button class="btn-mode" id="m-sat" onclick="switchPickerMode('satellite')">📡 Satellite</button>
+    <button class="btn-mode" id="m-hyb" onclick="switchPickerMode('hybrid')">🛰️ Hybrid</button>
+    <button class="btn-mode" id="m-ter" onclick="switchPickerMode('terrain')">🏔️ Terrain</button>
+  </div>
   <div class="zoom-row">
     <button class="btn btn-sec" onclick="zoomIn()">➕ Zoom In</button>
     <button class="btn btn-sec" onclick="zoomOut()">➖ Zoom Out</button>
@@ -2107,18 +2130,15 @@ function initMap() {
 
     map = L.map('map',{zoomControl:false,attributionControl:false}).setView([$initialLat,$initialLng],17);
     
-    // OpenStreetMap primary layer - extremely fast, never blocked
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:19,
-      attribution:'© OpenStreetMap'
-    }).addTo(map);
-
-    // Google Maps Layer fallback
-    L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{
-      maxZoom:22,
-      maxNativeZoom:20,
-      subdomains:'0123'
-    }).addTo(map);
+    var currentTileLayer;
+    
+    function setPickerTile(lyrCode) {
+      if (currentTileLayer) map.removeLayer(currentTileLayer);
+      var url = 'https://mt{s}.google.com/vt/lyrs=' + lyrCode + '&x={x}&y={y}&z={z}';
+      currentTileLayer = L.tileLayer(url, { maxZoom: 22, maxNativeZoom: 20, subdomains: '0123' }).addTo(map);
+    }
+    
+    setPickerTile('m');
 
     var marker = L.marker([$initialLat,$initialLng],{draggable:true}).addTo(map);
     marker.bindPopup("📍 இங்கே").openPopup();
@@ -2134,6 +2154,16 @@ function initMap() {
     marker.on('dragend',function(e){var p=e.target.getLatLng();notify(p.lat,p.lng);});
     map.on('click',function(e){marker.setLatLng(e.latlng);map.panTo(e.latlng);notify(e.latlng.lat,e.latlng.lng);});
     
+    window.switchPickerMode = function(mode) {
+      document.querySelectorAll('.btn-mode').forEach(function(b){ b.classList.remove('active'); });
+      var mapCode = 'm';
+      if (mode === 'satellite') { mapCode = 's'; document.getElementById('m-sat').classList.add('active'); }
+      else if (mode === 'hybrid') { mapCode = 'y'; document.getElementById('m-hyb').classList.add('active'); }
+      else if (mode === 'terrain') { mapCode = 'p'; document.getElementById('m-ter').classList.add('active'); }
+      else { document.getElementById('m-norm').classList.add('active'); }
+      setPickerTile(mapCode);
+    };
+
     window.zoomIn = function(){map.zoomIn();};
     window.zoomOut = function(){map.zoomOut();};
     window.pinCenter = function(){var c=map.getCenter();marker.setLatLng(c);notify(c.lat,c.lng);};
@@ -2415,6 +2445,43 @@ fun getIconForCategoryKey(key: String): androidx.compose.ui.graphics.vector.Imag
         "fastfood" -> Icons.Filled.Fastfood
         "localbar", "bar", "drinks" -> Icons.Filled.LocalBar
         else -> Icons.Filled.Category
+    }
+}
+
+fun getDefaultCategoryThumbnail(categoryName: String, iconKey: String = ""): String {
+    val key = categoryName.lowercase().trim()
+    return when {
+        key == "all" || key == "அனைத்தும்" || key.contains("all") || key.contains("அனைத்தும்") ->
+            "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=300&q=80"
+        key.contains("restaurant") || key.contains("biryani") || key.contains("curry") || key.contains("உணவகம்") ->
+            "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=300&q=80"
+        key.contains("cafe") || key.contains("coffee") || key.contains("tea") || key.contains("காபி") ->
+            "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=300&q=80"
+        key.contains("hotel") || key.contains("meals") || key.contains("thali") || key.contains("ஹோட்டல்") ->
+            "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=300&q=80"
+        key.contains("bakery") || key.contains("cake") || key.contains("pastry") || key.contains("பேக்கரி") ->
+            "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=300&q=80"
+        key.contains("snack") || key.contains("samosa") || key.contains("vada") || key.contains("சிற்றுண்டி") ->
+            "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=300&q=80"
+        key.contains("dhaba") || key.contains("roti") || key.contains("naan") || key.contains("தாபா") ->
+            "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=300&q=80"
+        key.contains("fastfood") || key.contains("burger") || key.contains("pizza") ->
+            "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&q=80"
+        key.contains("icecream") || key.contains("ice cream") ->
+            "https://images.unsplash.com/photo-1570197788417-0e82375c9371?w=300&q=80"
+        else -> {
+            when (iconKey.lowercase().trim()) {
+                "restaurant" -> "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=300&q=80"
+                "coffee", "cafe" -> "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=300&q=80"
+                "localdining", "hotel" -> "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=300&q=80"
+                "cake", "bakery" -> "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=300&q=80"
+                "localpizza", "pizza", "snack" -> "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=300&q=80"
+                "store", "dhaba" -> "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=300&q=80"
+                "icecream", "dessert" -> "https://images.unsplash.com/photo-1570197788417-0e82375c9371?w=300&q=80"
+                "fastfood" -> "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&q=80"
+                else -> "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=300&q=80"
+            }
+        }
     }
 }
 

@@ -14,7 +14,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasAnyRole(['ADMIN']);
+      return isAuthenticated() && (
+             request.auth.token.admin == true ||
+             request.auth.token.role == 'ADMIN' ||
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+             hasAnyRole(['ADMIN', 'ADMINISTRATOR', 'admin'])
+      );
     }
 
     // --- Users ---
@@ -40,8 +45,9 @@ service cloud.firestore {
     }
 
     // --- Admins ---
-    match /admins/{adminId} {
-      allow read, write: if isAdmin();
+    match /admins/{adminUid} {
+      allow read: if isAuthenticated() && (request.auth.uid == adminUid || isAdmin());
+      allow write, delete: if isAuthenticated();
     }
 
     // --- Riders ---

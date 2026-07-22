@@ -598,7 +598,7 @@ fun ActiveOrderTrackingScreen(
                     riderPhone = riderPhone,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp)
+                        .height(380.dp)
                         .clip(RoundedCornerShape(16.dp))
                 )
 
@@ -808,74 +808,6 @@ fun ActiveOrderTrackingScreen(
                                     color = LyoColors.TextSecondary
                                 )
                             }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Premium, compact gradient OTP card (68dp height, 20dp rounded corners)
-                val contextForOtpToast = androidx.compose.ui.platform.LocalContext.current
-                val clipboardManagerOtp = androidx.compose.ui.platform.LocalClipboardManager.current
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xFF059669), // Emerald 600
-                                    Color(0xFF10B981)  // Emerald 500
-                                )
-                            )
-                        )
-                        .clickable {
-                            clipboardManagerOtp.setText(androidx.compose.ui.text.AnnotatedString(otp))
-                            android.widget.Toast.makeText(contextForOtpToast, "OTP Copied! ($otp)", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                        .testTag("otp_code_card"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "OTP: $otp",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                letterSpacing = 2.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Share OTP with Rider • விநியோகஸ்தரிடம் பகிரவும்",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.White.copy(alpha = 0.85f)
-                            )
-                        }
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.ContentCopy,
-                                contentDescription = "Copy OTP",
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
                         }
                     }
                 }

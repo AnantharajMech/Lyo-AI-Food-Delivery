@@ -1015,39 +1015,51 @@ fun StorefrontDashboardScreen(
                                             val isSelected = activeFilter == "All"
                                             val scale by animateFloatAsState(if (isSelected) 1.06f else 1.0f, label = "scaleAll")
                                             val cardColor = if (isSelected) LyoColors.AccentOrange else LyoColors.CardSlate
-                                            val tintColor = if (isSelected) Color.White else LyoColors.AmberYellow
-                                            val borderCol = if (isSelected) Color.White.copy(alpha = 0.8f) else LyoColors.GlassBorder.copy(alpha = 0.5f)
+                                            val borderCol = if (isSelected) Color.White.copy(alpha = 0.8f) else LyoColors.AccentOrange.copy(alpha = 0.3f)
                                             val elevation = if (isSelected) 4.dp else 1.dp
                                             
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
+                                                    .width(72.dp)
+                                                    .height(100.dp)
                                                     .graphicsLayer(scaleX = scale, scaleY = scale)
                                                     .clip(RoundedCornerShape(12.dp))
                                                     .clickable { viewModel.selectedCategoryFilter.value = "All" }
-                                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                    .padding(vertical = 2.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(46.dp)
-                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(14.dp), clip = false)
-                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .size(64.dp)
+                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(16.dp), clip = false)
+                                                        .clip(RoundedCornerShape(16.dp))
                                                         .background(cardColor)
                                                         .border(
-                                                            width = 1.dp,
+                                                            width = 0.5.dp,
                                                             color = borderCol,
-                                                            shape = RoundedCornerShape(14.dp)
-                                                        ),
+                                                            shape = RoundedCornerShape(16.dp)
+                                                        )
+                                                        .padding(2.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Storefront,
+                                                    val allImgUrl = remember { getDefaultCategoryThumbnail("All", "all") }
+                                                    androidx.compose.foundation.Image(
+                                                        painter = coil.compose.rememberAsyncImagePainter(
+                                                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                                                .data(allImgUrl)
+                                                                .crossfade(true)
+                                                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                                .build()
+                                                        ),
                                                         contentDescription = "All",
-                                                        tint = tintColor,
-                                                        modifier = Modifier.size(20.dp)
+                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(RoundedCornerShape(14.dp))
                                                     )
                                                 }
-                                                Spacer(modifier = Modifier.height(5.dp))
+                                                Spacer(modifier = Modifier.height(8.dp))
                                                 Text(
                                                     text = "All",
                                                     color = if (isSelected) LyoColors.AccentOrange else LyoColors.TextPrimary,
@@ -1079,32 +1091,59 @@ fun StorefrontDashboardScreen(
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
+                                                    .width(72.dp)
+                                                    .height(100.dp)
                                                     .graphicsLayer(scaleX = scale, scaleY = scale)
                                                     .clip(RoundedCornerShape(12.dp))
                                                     .clickable { viewModel.selectedCategoryFilter.value = cat.nameEn }
-                                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                    .padding(vertical = 2.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(46.dp)
-                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(14.dp), clip = false)
-                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .size(64.dp)
+                                                        .shadow(elevation = elevation, shape = RoundedCornerShape(16.dp), clip = false)
+                                                        .clip(RoundedCornerShape(16.dp))
                                                         .background(cardColor)
                                                         .border(
-                                                            width = 1.dp,
+                                                            width = 0.5.dp,
                                                             color = borderCol,
-                                                            shape = RoundedCornerShape(14.dp)
-                                                        ),
+                                                            shape = RoundedCornerShape(16.dp)
+                                                        )
+                                                        .padding(2.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Icon(
-                                                        imageVector = getIconForCategoryKey(cat.iconKey),
-                                                        contentDescription = cat.nameEn,
-                                                        tint = tintColor,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
+                                                    val imgUrl = remember(cat.iconImageUrl, cat.nameEn, cat.iconKey) {
+                                                        if (cat.iconImageUrl.isNotBlank()) cat.iconImageUrl else getDefaultCategoryThumbnail(cat.nameEn, cat.iconKey)
+                                                    }
+                                                    if (imgUrl.isNotBlank()) {
+                                                        val painterModel = remember(imgUrl) {
+                                                            if (imgUrl.startsWith("/")) java.io.File(imgUrl) else imgUrl
+                                                        }
+                                                        androidx.compose.foundation.Image(
+                                                            painter = coil.compose.rememberAsyncImagePainter(
+                                                                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                                                    .data(painterModel)
+                                                                    .crossfade(true)
+                                                                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                                    .build()
+                                                            ),
+                                                            contentDescription = cat.nameEn,
+                                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .clip(RoundedCornerShape(14.dp))
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = getIconForCategoryKey(cat.iconKey),
+                                                            contentDescription = cat.nameEn,
+                                                            tint = tintColor,
+                                                            modifier = Modifier.size(24.dp)
+                                                        )
+                                                    }
                                                 }
-                                                Spacer(modifier = Modifier.height(5.dp))
+                                                Spacer(modifier = Modifier.height(8.dp))
                                                 Text(
                                                     text = cat.nameEn,
                                                     color = if (isSelected) catColor else LyoColors.TextPrimary,
@@ -1566,12 +1605,12 @@ fun StorefrontDashboardScreen(
                         with(LyoGlassDesignTokens) {
                             Modifier.liquidGlass3D(
                                 cornerRadius = 24.dp,
-                                elevation = 12.dp,
-                                borderWidth = 1.2.dp,
+                                elevation = 4.dp,
+                                borderWidth = 0.5.dp,
                                 borderBrush = Brush.linearGradient(
                                     colors = listOf(
-                                        LyoColors.AmberYellow.copy(alpha = 0.5f), // subtle Electric Cyan top glow
-                                        LyoColors.AccentOrange.copy(alpha = 0.2f)  // elegant Deep Indigo bottom highlight
+                                        LyoColors.AmberYellow.copy(alpha = 0.25f), // subtle top glow
+                                        LyoColors.AccentOrange.copy(alpha = 0.10f)  // elegant bottom highlight
                                     )
                                 ),
                                 backgroundColor = LyoColors.CardSlate
@@ -1656,14 +1695,14 @@ fun StorefrontDashboardScreen(
                         modifier = Modifier
                             .offset(y = lyoOffset)
                             .shadow(
-                                elevation = 8.dp,
+                                elevation = 3.dp,
                                 shape = RoundedCornerShape(24.dp),
                                 clip = false
                             )
                             .background(lyoAiBrush, shape = RoundedCornerShape(24.dp))
                             .border(
-                                width = if (isLyoAiSelected) 1.5.dp else 1.dp,
-                                color = if (isLyoAiSelected) Color.White else Color(0x33FFFFFF),
+                                width = 0.5.dp,
+                                color = if (isLyoAiSelected) Color.White.copy(alpha = 0.4f) else Color(0x1AFFFFFF),
                                 shape = RoundedCornerShape(24.dp)
                             )
                             .clickable { viewModel.selectedTabState.value = "LYO_AI" }
@@ -3550,7 +3589,7 @@ fun SettingsScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(180.dp)
+                                        .height(280.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
                                 )
@@ -4864,8 +4903,9 @@ fun VendorProfileScreen(
     val vendors by viewModel.allVendors.collectAsState(initial = emptyList())
     val partner = vendors.find { it.id == vendorId } ?: return
 
-    LaunchedEffect(partner) {
+    LaunchedEffect(partner, vendorId) {
         viewModel.repository.currentVendor.value = partner
+        com.example.data.repository.LyoFirebaseHelper.fetchAndSyncCatalogForVendorFromFirestore(vendorId)
     }
 
     val categoriesFlow = remember(vendorId) { viewModel.getCategoriesForVendor(vendorId) }
@@ -8311,7 +8351,7 @@ fun LyoAiChatbotSection(
                                         val ticketMap = mapOf(
                                             "message" to msg,
                                             "timestamp" to System.currentTimeMillis(),
-                                            "userId" to (currentUser?.uid ?: "anonymous"),
+                                            "userId" to (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: currentUser?.uid ?: "anonymous"),
                                             "phone" to (currentUser?.phone ?: ""),
                                             "userName" to (currentUser?.name ?: "Anonymous"),
                                             "status" to "PENDING"

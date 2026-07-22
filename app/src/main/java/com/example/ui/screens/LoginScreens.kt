@@ -250,6 +250,8 @@ fun LoginScreen(
     initialMode: String = "CUSTOMER"
 ) {
     var loginMode by remember { mutableStateOf(initialMode) }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     if (loginMode != "CUSTOMER") {
         androidx.activity.compose.BackHandler {
@@ -282,6 +284,12 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     val errorMsg by viewModel.loginError.collectAsState()
     val rememberMe by viewModel.rememberMe.collectAsState()
+
+    var selectedAdmin by remember { mutableStateOf<User?>(null) }
+    var isAdminExpanded by remember { mutableStateOf(false) }
+    var selectedRider by remember { mutableStateOf<User?>(null) }
+    var searchText by remember { mutableStateOf("") }
+    var isExpanded by remember { mutableStateOf(false) }
 
     // Forgot Password Simulation States (Tamil localized)
     var showForgotDialog by remember { mutableStateOf(false) }
@@ -461,7 +469,25 @@ fun LoginScreen(
                             unfocusedBorderColor = Color(0x33F8FAFC)
                         ),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onDone = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                viewModel.loginWithPhoneAndPassword(phone, password) { detectedRole ->
+                                    if (detectedRole == "ADMIN") {
+                                        viewModel.setLoginError("Access Denied: Admin accounts cannot log in through this portal. Please use the Admin Console login.")
+                                    } else if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                        viewModel.setLoginError("Access Denied: Delivery Partner accounts cannot log in through this portal. Please use the Delivery Partner Login.")
+                                    } else {
+                                        onLoginSuccess(detectedRole, password)
+                                    }
+                                }
+                            }
+                        ),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().testTag("password_input")
                     )
@@ -522,6 +548,8 @@ fun LoginScreen(
                     LyoButton(
                         text = "Authorize Session",
                         onClick = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
                             viewModel.loginWithPhoneAndPassword(phone, password) { detectedRole ->
                                 if (detectedRole == "ADMIN") {
                                     viewModel.setLoginError("Access Denied: Admin accounts cannot log in through this portal. Please use the Admin Console login.")
@@ -615,8 +643,6 @@ fun LoginScreen(
                         }
                         baseList.distinctBy { it.phone }
                     }
-                    var selectedAdmin by remember { mutableStateOf<User?>(null) }
-                    var isAdminExpanded by remember { mutableStateOf(false) }
 
                     Text(
                         text = "🛡️ Lyo Admin Console Login",
@@ -740,7 +766,25 @@ fun LoginScreen(
                                 unfocusedBorderColor = Color(0x33F8FAFC)
                             ),
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onDone = {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                    val loginInput = if (selectedAdmin != null && selectedAdmin!!.email.isNotBlank() && selectedAdmin!!.email.contains("@")) selectedAdmin!!.email else selectedAdmin!!.phone
+                                    viewModel.loginWithPhoneAndPassword(loginInput, password, isPortalAdmin = true) { detectedRole ->
+                                        if (detectedRole == "ADMIN") {
+                                            onLoginSuccess("ADMIN", password)
+                                        } else {
+                                            viewModel.logout()
+                                            viewModel.setLoginError("Access Denied: Your account does not have Admin privileges.")
+                                        }
+                                    }
+                                }
+                            ),
                             modifier = Modifier.fillMaxWidth().testTag("admin_password_input")
                         )
 
@@ -772,8 +816,10 @@ fun LoginScreen(
                         LyoButton(
                             text = "Authenticate Admin Console",
                             onClick = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
                                 val loginInput = if (selectedAdmin != null && selectedAdmin!!.email.isNotBlank() && selectedAdmin!!.email.contains("@")) selectedAdmin!!.email else selectedAdmin!!.phone
-                                viewModel.loginWithPhoneAndPassword(loginInput, password) { detectedRole ->
+                                viewModel.loginWithPhoneAndPassword(loginInput, password, isPortalAdmin = true) { detectedRole ->
                                     if (detectedRole == "ADMIN") {
                                         onLoginSuccess("ADMIN", password)
                                     } else {
@@ -815,9 +861,7 @@ fun LoginScreen(
                     val activeRiders = remember(riders) {
                         riders.filter { (it.role == "DELIVERY" || it.role == "RIDER") && it.isActiveRider && !it.phone.startsWith("999991") && it.phone != "9000000002" && it.phone != "9000000003" }.distinctBy { it.phone }
                     }
-                    var selectedRider by remember { mutableStateOf<User?>(null) }
-                    var searchText by remember { mutableStateOf("") }
-                    var isExpanded by remember { mutableStateOf(false) }
+
 
                     val searchFiltered = remember(activeRiders, searchText) {
                         activeRiders.filter {
@@ -947,7 +991,24 @@ fun LoginScreen(
                                 unfocusedBorderColor = Color(0x33F8FAFC)
                             ),
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onDone = {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                    viewModel.loginWithPhoneAndPassword(selectedRider!!.phone, password) { detectedRole ->
+                                        if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
+                                            onLoginSuccess(detectedRole, password)
+                                        } else {
+                                            viewModel.logout()
+                                            viewModel.setLoginError("Access Denied: You do not have Rider privileges.")
+                                        }
+                                    }
+                                }
+                            ),
                             modifier = Modifier.fillMaxWidth().testTag("rider_password_input")
                         )
 
@@ -979,6 +1040,8 @@ fun LoginScreen(
                         LyoButton(
                             text = "Authenticate Rider Session",
                             onClick = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
                                 viewModel.loginWithPhoneAndPassword(selectedRider!!.phone, password) { detectedRole ->
                                     if (detectedRole == "DELIVERY" || detectedRole == "RIDER") {
                                         onLoginSuccess(detectedRole, password)
@@ -1924,7 +1987,7 @@ fun AdminLoginScreen(
                             if (loginInput.isBlank()) {
                                 viewModel.setLoginError("Please enter your Admin Email or Phone Number.")
                             } else {
-                                viewModel.loginWithPhoneAndPassword(loginInput, password) { detectedRole ->
+                                viewModel.loginWithPhoneAndPassword(loginInput, password, isPortalAdmin = true) { detectedRole ->
                                     if (detectedRole == "ADMIN") {
                                         onLoginSuccess("ADMIN", password)
                                     } else {

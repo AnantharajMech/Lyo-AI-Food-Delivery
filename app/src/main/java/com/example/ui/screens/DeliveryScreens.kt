@@ -334,9 +334,6 @@ fun DeliveryPartnerDashboardScreen(
     val earningsToday by viewModel.totalEarningsToday.collectAsState()
     val completedTrips by viewModel.completedRidesCount.collectAsState()
 
-    val otpInput by viewModel.otpInputVal.collectAsState()
-    val otpError by viewModel.otpErrorState.collectAsState()
-
     var showOtpDialogForRide by remember { mutableStateOf<DeliveryRide?>(null) }
 
     val currentUserState by viewModel.currentUser.collectAsState()
@@ -1030,7 +1027,7 @@ fun DeliveryPartnerDashboardScreen(
                         DeliveryJobCard(
                             ride = ride,
                             viewModel = viewModel,
-                            onShowOtpVerify = { showOtpDialogForRide = ride }
+                            onMarkDelivered = { showOtpDialogForRide = ride }
                         )
                     }
                 }
@@ -1206,7 +1203,7 @@ fun DeliveryPartnerDashboardScreen(
         }
     }
 
-        // OTP HANDOFF SECURITY INPUT POP-UP MODAL PANEL
+        // CONFIRM DELIVERY POP-UP MODAL PANEL
         if (showOtpDialogForRide != null) {
             val currRide = showOtpDialogForRide!!
             AlertDialog(
@@ -1214,66 +1211,34 @@ fun DeliveryPartnerDashboardScreen(
                 containerColor = Color(0xFF1E293B),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Security, contentDescription = "sec", tint = LyoColors.AccentOrange)
+                        Icon(Icons.Filled.CheckCircle, contentDescription = "confirm", tint = LyoColors.VegGreen)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Secure Receipt Verification", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text("டெலிவரி உறுதிப்படுத்தல்", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
-                    Column {
-                        Text(
-                            text = "To guarantee the parcel reaches the rightful client, please get the 4-digit security code printed on their in-app invoice.",
-                            color = LyoColors.TextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        if (otpError != null) {
-                            Text(
-                                text = otpError ?: "",
-                                color = LyoColors.NonVegRed,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-
-                        OutlinedTextField(
-                            value = otpInput,
-                            onValueChange = { viewModel.otpInputVal.value = it },
-                            label = { Text("Enter 4-Digit Handoff Code") },
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth().testTag("otp_input")
-                        )
-                        
-                        Text(
-                            text = "💡 HANDOFF SECURE GUIDE:\n" +
-                                    "Customer's invoice shows this security Code inside the track page. Obtain this code from the customer to finalize the transaction.",
-                            color = LyoColors.TextSecondary,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
+                    Text(
+                        text = "இந்த ஆர்டரை டெலிவரி செய்துவிட்டீர்களா?",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.verifyDeliveryOTP(currRide) {
+                            viewModel.markDeliveryComplete(currRide) {
                                 showOtpDialogForRide = null
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen)
                     ) {
-                        Text("VALIDATE SECURITY CODE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("YES, MARK DELIVERED", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showOtpDialogForRide = null }) {
-                        Text("BACK", color = Color.White)
+                        Text("CANCEL", color = Color.White)
                     }
                 }
             )
@@ -1291,7 +1256,7 @@ fun RiderPerformanceDashboardCard(
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
         shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.5.dp, Color(0x33F8FAFC)),
+        border = BorderStroke(0.5.dp, Color(0x1EF8FAFC)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
@@ -1690,7 +1655,7 @@ fun RiderPerformanceDashboardCard(
 fun DeliveryJobCard(
     ride: DeliveryRide,
     viewModel: DeliveryViewModel,
-    onShowOtpVerify: () -> Unit
+    onMarkDelivered: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentStep = viewModel.getStepForRide(ride.id, ride.status)
@@ -1859,7 +1824,7 @@ fun DeliveryJobCard(
                                         )
                                     )
                                 )
-                                .border(1.5.dp, LyoColors.AmberYellow.copy(alpha = pulseGlow), RoundedCornerShape(8.dp)),
+                                .border(0.5.dp, LyoColors.AmberYellow.copy(alpha = pulseGlow * 0.5f), RoundedCornerShape(8.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -2240,7 +2205,7 @@ fun DeliveryJobCard(
                         screenTag = "delivery_screens_map",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(260.dp)
+                            .height(340.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .padding(bottom = 8.dp)
                     )
@@ -2353,23 +2318,14 @@ fun DeliveryJobCard(
                     // Start Google Maps Navigation Button (Orange)
                     Button(
                         onClick = {
-                            try {
-                                val gmmIntentUri = android.net.Uri.parse("google.navigation:q=$customerLat,$customerLng")
-                                val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, gmmIntentUri).apply {
-                                    setPackage("com.google.android.apps.maps")
-                                }
-                                context.startActivity(mapIntent)
-                            } catch (e: Exception) {
-                                try {
-                                    val mapIntent = android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$customerLat,$customerLng")
-                                    )
-                                    context.startActivity(mapIntent)
-                                } catch (ex: Exception) {
-                                    android.widget.Toast.makeText(context, "No map application found", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            com.example.util.LyoMapHelper.openNavigationOnMap(
+                                context = context,
+                                destLat = customerLat,
+                                destLng = customerLng,
+                                destName = customer?.name ?: "Customer Address",
+                                startLat = ride.currentLat,
+                                startLng = ride.currentLng
+                            )
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
                         shape = RoundedCornerShape(10.dp),
@@ -2590,14 +2546,14 @@ fun DeliveryJobCard(
                             }
                         } else {
                             Button(
-                                onClick = onShowOtpVerify,
+                                onClick = onMarkDelivered,
                                 colors = ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.fillMaxWidth().height(44.dp)
                             ) {
-                                Icon(Icons.Filled.VpnKey, contentDescription = "otp", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.CheckCircle, contentDescription = "delivered", modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("பாதுகாப்பான OTP சரிபார்ப்பு • SECURE OTP VERIFY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("டெலிவரி செய்யப்பட்டது • MARK DELIVERED", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

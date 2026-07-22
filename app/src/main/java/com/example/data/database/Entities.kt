@@ -110,7 +110,8 @@ data class Category(
     val autoCloseTime: String = "",
     val iconKey: String = "Restaurant",
     val accentColor: String = "#16C7E8",
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val iconImageUrl: String = ""
 )
 
 @Entity(tableName = "menu_items", indices = [Index(value = ["vendorId"]), Index(value = ["categoryId"])])
@@ -152,7 +153,8 @@ data class Order(
     val paymentMethod: String = "COD",
     val paymentStatus: String = "PENDING",
     val upiTransactionId: String = "",
-    val rejectionReason: String = ""
+    val rejectionReason: String = "",
+    val gstAmount: Double = 0.0
 )
 
 @Entity(tableName = "order_items", indices = [Index(value = ["orderId"])])
@@ -471,11 +473,13 @@ object LyoDeliveryPricingEngine {
 }
 
 data class DeviceSession(
+    val sessionId: String = "",
     val deviceId: String = "",
     val deviceName: String = "",
     val osVersion: String = "",
     val loginTime: Long = 0L,
-    val lastActive: Long = 0L
+    val lastActive: Long = 0L,
+    val isActive: Boolean = true
 )
 
 @androidx.room.Entity(tableName = "missing_dictionary_words")

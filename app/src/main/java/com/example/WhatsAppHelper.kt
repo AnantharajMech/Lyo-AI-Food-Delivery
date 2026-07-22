@@ -180,6 +180,7 @@ $itemsStr
             "   ${i+1}. ${it.nameEn} × ${it.quantity}  —  ₹${(it.price * it.quantity).toInt()}"
         }.joinToString("\n")
         val discount = if (order.couponDiscount > 0) "\n🎁 தள்ளுபடி (Discount): -₹${order.couponDiscount.toInt()}" else ""
+        val gstText = if (order.gstAmount > 0.0) "\n   • ஜிஎஸ்டி (GST Tax): ₹${order.gstAmount.toInt()}" else ""
         return """
 ━━━━━━━━━━━━━━━━━━━━━━━
 🧾 *Lyo AI — INVOICE / பில்*
@@ -195,7 +196,7 @@ $itemsStr
 ━━━━━━━━━━━━━━━━━━━━━━━
 💵 *கட்டண விவரங்கள் (Payment Summary):*
    • உணவுத் தொகை (Subtotal): ₹${order.subtotal.toInt()}
-   • விநியோகக் கட்டணம் (Delivery Fee): ₹${order.deliveryFee.toInt()}$discount
+   • விநியோகக் கட்டணம் (Delivery Fee): ₹${order.deliveryFee.toInt()}$gstText$discount
 
 💰 *மொத்தத் தொகை (GRAND TOTAL):* *₹${order.totalAmount.toInt()}*
 💳 *கட்டண முறை (Payment Mode):* Cash on Delivery

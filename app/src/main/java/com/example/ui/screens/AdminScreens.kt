@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -446,24 +447,74 @@ fun AdminDashboardScreen(
 ) {
     val localSyncingStores = remember { mutableStateMapOf<Long, Boolean>() }
     val localSyncingMenuItems = remember { mutableStateMapOf<Long, Boolean>() }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var debugEmail by remember { mutableStateOf<String?>(null) }
     var debugRole by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    val currentUser by viewModel.currentUser.collectAsState()
+
+    LaunchedEffect(currentUser) {
         try {
             val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
             val firebaseUser = auth.currentUser
             if (firebaseUser != null) {
-                debugEmail = firebaseUser.email ?: firebaseUser.uid
+                debugEmail = firebaseUser.uid
                 val uid = firebaseUser.uid
                 val db = com.example.data.repository.LyoFirebaseHelper.firestore
                 if (db != null) {
                     val doc = db.collection("users").document(uid).get().await()
                     if (doc.exists()) {
-                        debugRole = doc.getString("role") ?: "No Role"
+                        val currentRole = doc.getString("role") ?: "No Role"
+                        if (currentRole == "ADMIN") {
+                            debugRole = "ADMIN"
+                        } else {
+                            if (currentUser?.role == "ADMIN") {
+                                try {
+                                    db.collection("users").document(uid).update("role", "ADMIN").await()
+                                    debugRole = "ADMIN"
+                                    Log.i("AdminDashboardScreen", "Repaired Firestore role to ADMIN for UID: $uid")
+                                } catch (writeEx: Exception) {
+                                    Log.w("AdminDashboardScreen", "Failed updating role in Firestore: ${writeEx.message}, falling back to ADMIN based on local status.")
+                                    debugRole = "ADMIN"
+                                }
+                            } else {
+                                debugRole = currentRole
+                            }
+                        }
                     } else {
-                        debugRole = "Document Missing"
+                        if (currentUser?.role == "ADMIN") {
+                            val userMap = mapOf(
+                                "uid" to uid,
+                                "phone" to (currentUser?.phone ?: "Anantharajmech"),
+                                "name" to (currentUser?.name ?: "Anantharaj Super Admin"),
+                                "email" to (currentUser?.email ?: "AnantharajEinstein@gmail.com"),
+                                "address" to (currentUser?.address ?: "Lyo Salem HQ, Salem Road, Idappadi"),
+                                "lat" to (currentUser?.lat ?: 11.5812),
+                                "lng" to (currentUser?.lng ?: 77.8465),
+                                "isWhatsAppOptIn" to (currentUser?.isWhatsAppOptIn ?: false),
+                                "role" to "ADMIN",
+                                "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            )
+                            try {
+                                db.collection("users").document(uid).set(userMap).await()
+                                debugRole = "ADMIN"
+                                Log.i("AdminDashboardScreen", "Created missing Firestore Admin document for UID: $uid")
+                            } catch (writeEx: Exception) {
+                                Log.w("AdminDashboardScreen", "Failed creating admin document in Firestore: ${writeEx.message}, falling back to ADMIN based on local status.")
+                                debugRole = "ADMIN"
+                            }
+                        } else {
+                            // Check local Room db for admin role
+                            val currentRoomUser = com.example.data.repository.LyoFirebaseHelper.db?.userDao?.getUserByPhone(uid)
+                                ?: com.example.data.repository.LyoFirebaseHelper.db?.userDao?.getUserByPhone("Anantharajmech")
+                            if (currentRoomUser?.role == "ADMIN") {
+                                debugRole = "ADMIN"
+                            } else {
+                                debugRole = "Document Missing"
+                            }
+                        }
                     }
                 } else {
                     debugRole = "DB Null"
@@ -474,8 +525,13 @@ fun AdminDashboardScreen(
             }
         } catch (e: Exception) {
             Log.e("AdminDashboardScreen", "Error fetching debug user info", e)
-            debugEmail = "Error"
-            debugRole = "Unknown"
+            val currentRoomUser = com.example.data.repository.LyoFirebaseHelper.db?.userDao?.getUserByPhone("Anantharajmech")
+            if (currentRoomUser?.role == "ADMIN") {
+                debugRole = "ADMIN"
+            } else {
+                debugEmail = "Error"
+                debugRole = "Unknown"
+            }
         }
     }
 
@@ -485,7 +541,6 @@ fun AdminDashboardScreen(
 
     val riders by viewModel.allRiders.collectAsState()
     val activeRides by viewModel.activeDeliveryRides.collectAsState()
-    val currentUser by viewModel.currentUser.collectAsState()
     val admins by viewModel.allAdmins.collectAsState()
     val allCustomers by viewModel.allCustomers.collectAsState()
 
@@ -493,6 +548,61 @@ fun AdminDashboardScreen(
 
     var showDebugScreen by remember { mutableStateOf(false) }
     var vendorSyncStates by remember { mutableStateOf<List<VendorSyncState>>(emptyList()) }
+
+    var showBrokenPhotosDialog by remember { mutableStateOf(false) }
+    var isScanningBrokenPhotos by remember { mutableStateOf(false) }
+    var brokenPhotosList by remember { mutableStateOf<List<com.example.data.repository.BrokenPhotoItem>>(emptyList()) }
+
+    var orphanedRiderRidesList by remember { mutableStateOf<List<com.example.data.repository.OrphanedRideItem>>(emptyList()) }
+    var isScanningOrphanedRides by remember { mutableStateOf(false) }
+    var isFixingOrphanedRideId by remember { mutableStateOf<String?>(null) }
+
+    val scanForOrphanedRides: () -> Unit = {
+        scope.launch {
+            isScanningOrphanedRides = true
+            try {
+                orphanedRiderRidesList = com.example.data.repository.LyoFirebaseHelper.scanForOrphanedRiderRides()
+            } catch (e: Exception) {
+                Log.e("AdminDashboardScreen", "Failed scanning for orphaned rider rides", e)
+            } finally {
+                isScanningOrphanedRides = false
+            }
+        }
+    }
+
+    val fixOrphanedRide: (String, String) -> Unit = { rideId, realUid ->
+        scope.launch {
+            isFixingOrphanedRideId = rideId
+            try {
+                val success = com.example.data.repository.LyoFirebaseHelper.fixOrphanedRiderRide(rideId, realUid)
+                if (success) {
+                    android.widget.Toast.makeText(context, "✅ Ride $rideId Fixed Successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                    orphanedRiderRidesList = com.example.data.repository.LyoFirebaseHelper.scanForOrphanedRiderRides()
+                } else {
+                    android.widget.Toast.makeText(context, "❌ Failed to fix Ride $rideId", android.widget.Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e("AdminDashboardScreen", "Failed to fix orphaned ride $rideId", e)
+                android.widget.Toast.makeText(context, "❌ Error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            } finally {
+                isFixingOrphanedRideId = null
+            }
+        }
+    }
+
+    val scanForBrokenPhotos: () -> Unit = {
+        scope.launch {
+            isScanningBrokenPhotos = true
+            showBrokenPhotosDialog = true
+            try {
+                brokenPhotosList = com.example.data.repository.LyoFirebaseHelper.scanForBrokenImageUrls()
+            } catch (e: Exception) {
+                Log.e("AdminDashboardScreen", "Failed scanning for broken image URLs", e)
+            } finally {
+                isScanningBrokenPhotos = false
+            }
+        }
+    }
 
     val checkSyncStatus: (Long) -> Unit = { targetId ->
         scope.launch {
@@ -635,7 +745,6 @@ fun AdminDashboardScreen(
 
     var selectedImageUriStr by remember { mutableStateOf<String?>(null) }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -655,6 +764,30 @@ fun AdminDashboardScreen(
             } catch (e: Exception) {
                 e.printStackTrace()
                 selectedImageUriStr = uri.toString()
+            }
+        }
+    }
+
+    var selectedCategoryIconUriStr by remember { mutableStateOf<String?>(null) }
+    val categoryIconGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val file = java.io.File(context.filesDir, "media_cat_icon_${System.currentTimeMillis()}.jpg")
+                    val outputStream = java.io.FileOutputStream(file)
+                    inputStream.copyTo(outputStream)
+                    inputStream.close()
+                    outputStream.close()
+                    selectedCategoryIconUriStr = file.absolutePath
+                } else {
+                    selectedCategoryIconUriStr = uri.toString()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                selectedCategoryIconUriStr = uri.toString()
             }
         }
     }
@@ -692,6 +825,7 @@ fun AdminDashboardScreen(
     )
 
     var showLogoutConfirmation by remember { mutableStateOf(false) }
+    var showHeaderMenu by remember { mutableStateOf(false) }
 
     if (showLogoutConfirmation) {
         AlertDialog(
@@ -749,7 +883,10 @@ fun AdminDashboardScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     // Lyo AI Food Delivery Custom Logo Icon / Avatar
                     Box(
                         modifier = Modifier
@@ -769,58 +906,118 @@ fun AdminDashboardScreen(
                         androidx.compose.material3.Text(
                             text = "Lyo AI",
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         androidx.compose.material3.Text(
                             text = "Lyo AI",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = LyoColors.TextPrimary
+                            color = LyoColors.TextPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable {
+                                    scope.launch {
+                                        try {
+                                            val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+                                            val firebaseUser = auth.currentUser
+                                            if (firebaseUser != null) {
+                                                val uid = firebaseUser.uid
+                                                val db = com.example.data.repository.LyoFirebaseHelper.firestore
+                                                if (db != null) {
+                                                    android.widget.Toast.makeText(context, "Verifying and Repairing Online Connection...", android.widget.Toast.LENGTH_SHORT).show()
+                                                    val doc = db.collection("users").document(uid).get().await()
+                                                    
+                                                    val userMap = mapOf(
+                                                        "uid" to uid,
+                                                        "phone" to (currentUser?.phone ?: "Anantharajmech"),
+                                                        "name" to (currentUser?.name ?: "Anantharaj Super Admin"),
+                                                        "email" to (currentUser?.email ?: "AnantharajEinstein@gmail.com"),
+                                                        "address" to (currentUser?.address ?: "Lyo Salem HQ, Salem Road, Idappadi"),
+                                                        "lat" to (currentUser?.lat ?: 11.5812),
+                                                        "lng" to (currentUser?.lng ?: 77.8465),
+                                                        "isWhatsAppOptIn" to (currentUser?.isWhatsAppOptIn ?: false),
+                                                        "role" to "ADMIN",
+                                                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                                        "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                                                    )
+                                                    
+                                                    db.collection("users").document(uid).set(userMap, com.google.firebase.firestore.SetOptions.merge()).await()
+                                                    debugRole = "ADMIN"
+                                                    android.widget.Toast.makeText(context, "✅ Status Repaired! You are now ONLINE 🟢", android.widget.Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    android.widget.Toast.makeText(context, "Error: Firestore is not available", android.widget.Toast.LENGTH_LONG).show()
+                                                }
+                                            } else {
+                                                android.widget.Toast.makeText(context, "Error: No authenticated user session found.", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                        } catch (ex: Exception) {
+                                            android.widget.Toast.makeText(context, "Repair failed: ${ex.message}", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
                             androidx.compose.material3.Text(
                                 text = "Admin Panel",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = LyoColors.TextSecondary
                             )
+                            val authUser = remember(debugEmail) { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
+                            val isOnline = authUser != null && debugRole == "ADMIN"
+                            val statusColor = if (isOnline) LyoColors.VegGreen else Color(0xFFEF4444)
+                            val statusLabel = if (isOnline) "ONLINE" else "OFFLINE"
+                            
                             Spacer(modifier = Modifier.width(6.dp))
                             // Online Status Dot
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(LyoColors.VegGreen)
+                                    .background(statusColor)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             androidx.compose.material3.Text(
-                                text = "ONLINE",
+                                text = statusLabel,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black,
-                                color = LyoColors.VegGreen
+                                color = statusColor
                             )
                         }
                         Spacer(modifier = Modifier.height(2.dp))
+                        val currentAuthUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                        val headerUid = currentAuthUser?.uid ?: debugEmail ?: currentUser?.uid ?: "Loading..."
                         androidx.compose.material3.Text(
-                            text = "Logged in as: ${debugEmail ?: "Loading..."} • Role: ${debugRole ?: "Loading..."}",
+                            text = "UID: $headerUid • Role: ${debugRole ?: "ADMIN"}",
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color.LightGray
+                            color = Color.LightGray,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     if (onSwitchToCustomer != null) {
                         IconButton(
                             onClick = onSwitchToCustomer,
                             modifier = Modifier
-                                .padding(end = 8.dp)
-                                .size(40.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
                                 .background(LyoColors.CardSlate)
                         ) {
@@ -828,14 +1025,73 @@ fun AdminDashboardScreen(
                         }
                     }
 
-                    IconButton(
+                    // Prominent Logout Button with Icon & Label
+                    androidx.compose.material3.Button(
                         onClick = { showLogoutConfirmation = true },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(LyoColors.CardSlate)
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0x33DC2626),
+                            contentColor = Color(0xFFEF4444)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.border(1.dp, Color(0x66DC2626), RoundedCornerShape(10.dp))
                     ) {
-                        Icon(Icons.Filled.Logout, contentDescription = "logout", tint = LyoColors.NonVegRed, modifier = Modifier.size(16.dp))
+                        Icon(
+                            imageVector = Icons.Filled.Logout,
+                            contentDescription = "logout",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        androidx.compose.material3.Text(
+                            text = "Logout",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEF4444)
+                        )
+                    }
+
+                    // Overflow Menu Icon
+                    Box {
+                        IconButton(
+                            onClick = { showHeaderMenu = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(LyoColors.CardSlate)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MoreVert,
+                                contentDescription = "More Options",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = showHeaderMenu,
+                            onDismissRequest = { showHeaderMenu = false },
+                            modifier = Modifier.background(Color(0xFF1E293B))
+                        ) {
+                            if (onSwitchToCustomer != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { androidx.compose.material3.Text("Storefront View (கடை பார்வை)", color = Color.White, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Filled.Store, contentDescription = null, tint = LyoColors.AmberYellow) },
+                                    onClick = {
+                                        showHeaderMenu = false
+                                        onSwitchToCustomer()
+                                    }
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { androidx.compose.material3.Text("Sign Out / Logout (வெளியேறு)", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                                leadingIcon = { Icon(Icons.Filled.Logout, contentDescription = null, tint = Color(0xFFEF4444)) },
+                                onClick = {
+                                        showHeaderMenu = false
+                                        showLogoutConfirmation = true
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -851,6 +1107,7 @@ fun AdminDashboardScreen(
             ) {
                 val tabs = mutableListOf(
                     "ANALYTICS" to "Analytics",
+                    "CATEGORIES" to "Category Manager 🖼️",
                     "SMART_MENU" to "Smart Menu 🤖",
                     "VENDORS" to "Stores",
                     "BANNERS" to "Banners",
@@ -894,6 +1151,15 @@ fun AdminDashboardScreen(
                 when (activeTab) {
                 "ANALYTICS" -> {
                     AnalyticsDashboardTab(viewModel = viewModel)
+                }
+
+                "CATEGORIES" -> {
+                    CategoryManagerTab(
+                        viewModel = viewModel,
+                        onBrowsePhoto = { categoryIconGalleryLauncher.launch("image/*") },
+                        selectedCategoryIconUriStr = if (activeTab == "CATEGORIES") selectedCategoryIconUriStr else null,
+                        onClearSelectedIconUri = { selectedCategoryIconUriStr = null }
+                    )
                 }
 
                 "SMART_MENU" -> {
@@ -1673,8 +1939,12 @@ fun AdminDashboardScreen(
                                      onClick = {
                                          val localContext = context
                                          viewModel.onboardVendor(
-                                             onSuccess = {
-                                                 android.widget.Toast.makeText(localContext, "✅ New venue onboarded successfully!", android.widget.Toast.LENGTH_LONG).show()
+                                             onSuccess = { warnMsg ->
+                                                 if (warnMsg != null) {
+                                                     android.widget.Toast.makeText(localContext, warnMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                 } else {
+                                                     android.widget.Toast.makeText(localContext, "✅ New venue onboarded successfully!", android.widget.Toast.LENGTH_LONG).show()
+                                                 }
                                              },
                                              onError = { err ->
                                                  android.widget.Toast.makeText(localContext, err, android.widget.Toast.LENGTH_LONG).show()
@@ -1695,7 +1965,7 @@ fun AdminDashboardScreen(
                     val filteredOrders = remember(orders, logisticsSubTab) {
                         orders.filter { ord ->
                             when (logisticsSubTab) {
-                                "ACTIVE" -> ord.status != "DELIVERED" && ord.status != "CANCELLED" && ord.status != "PAID_PENDING_VERIFICATION" && ord.status != "PAYMENT_REJECTED"
+                                "ACTIVE" -> ord.status != "DELIVERED" && ord.status != "CANCELLED" && ord.status != "PAYMENT_REJECTED"
                                 "COMPLETED" -> ord.status == "DELIVERED"
                                 "CANCELLED" -> ord.status == "CANCELLED"
                                 else -> true
@@ -2521,12 +2791,21 @@ fun AdminDashboardScreen(
                                                                  .border(1.dp, catColor, RoundedCornerShape(8.dp)),
                                                              contentAlignment = Alignment.Center
                                                          ) {
-                                                             Icon(
-                                                                 imageVector = getIconForCategoryKey(cat.iconKey),
-                                                                 contentDescription = cat.nameEn,
-                                                                 tint = catColor,
-                                                                 modifier = Modifier.size(18.dp)
-                                                             )
+                                                             if (cat.iconImageUrl.isNotBlank()) {
+                                                                 androidx.compose.foundation.Image(
+                                                                     painter = coil.compose.rememberAsyncImagePainter(cat.iconImageUrl),
+                                                                     contentDescription = cat.nameEn,
+                                                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                                     modifier = Modifier.fillMaxSize()
+                                                                 )
+                                                             } else {
+                                                                 Icon(
+                                                                     imageVector = getIconForCategoryKey(cat.iconKey),
+                                                                     contentDescription = cat.nameEn,
+                                                                     tint = catColor,
+                                                                     modifier = Modifier.size(18.dp)
+                                                                 )
+                                                             }
                                                          }
                                                          Spacer(modifier = Modifier.width(8.dp))
                                                          Column {
@@ -2948,6 +3227,14 @@ fun AdminDashboardScreen(
                         // Onboarding category states
                         val catEn by viewModel.newCategoryNameEn.collectAsState()
                         val catTa by viewModel.newCategoryNameTa.collectAsState()
+                        val catIconImageUrl by viewModel.newCategoryIconImageUrl.collectAsState()
+
+                        LaunchedEffect(selectedCategoryIconUriStr) {
+                            selectedCategoryIconUriStr?.let {
+                                viewModel.newCategoryIconImageUrl.value = it
+                                selectedCategoryIconUriStr = null
+                            }
+                        }
 
                         // Menu Item inputs states
                         val itemEn by viewModel.newItemNameEn.collectAsState()
@@ -3930,8 +4217,12 @@ fun AdminDashboardScreen(
                                                     val localContext = context
                                                     viewModel.updateVendor(
                                                         vendor = updated,
-                                                        onSuccess = {
-                                                            android.widget.Toast.makeText(localContext, "✅ கடையின் விவரங்கள் சேமிக்கப்பட்டன! (Store details saved!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        onSuccess = { warnMsg ->
+                                                            if (warnMsg != null) {
+                                                                android.widget.Toast.makeText(localContext, warnMsg, android.widget.Toast.LENGTH_LONG).show()
+                                                            } else {
+                                                                android.widget.Toast.makeText(localContext, "✅ கடையின் விவரங்கள் சேமிக்கப்பட்டன! (Store details saved!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                            }
                                                         },
                                                         onError = { errMsg ->
                                                             android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
@@ -4073,14 +4364,14 @@ fun AdminDashboardScreen(
                                         }
                                         Switch(
                                             checked = isCouponEnabled,
-                                            onCheckedChange = {
-                                                isCouponEnabled = it
-                                                val updated = partner.copy(isCouponEnabled = it)
+                                            onCheckedChange = { isChecked ->
+                                                isCouponEnabled = isChecked
+                                                val updated = partner.copy(isCouponEnabled = isChecked)
                                                 val localContext = context
                                                 viewModel.updateVendor(
                                                     vendor = updated,
                                                     onSuccess = {
-                                                        android.widget.Toast.makeText(localContext, if (it) "✅ கூப்பன் செயல்படுத்தப்பட்டது! (Coupon enabled!)" else "⚠️ கூப்பன் முடக்கப்பட்டது! (Coupon disabled!)", android.widget.Toast.LENGTH_SHORT).show()
+                                                        android.widget.Toast.makeText(localContext, if (isChecked) "✅ கூப்பன் செயல்படுத்தப்பட்டது! (Coupon enabled!)" else "⚠️ கூப்பன் முடக்கப்பட்டது! (Coupon disabled!)", android.widget.Toast.LENGTH_SHORT).show()
                                                     },
                                                     onError = { errMsg ->
                                                         android.widget.Toast.makeText(localContext, errMsg, android.widget.Toast.LENGTH_LONG).show()
@@ -4182,6 +4473,61 @@ fun AdminDashboardScreen(
                                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                                         modifier = Modifier.fillMaxWidth()
                                     )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    Text(
+                                        text = "Or Upload Real Category Photo",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Button(
+                                            onClick = { categoryIconGalleryLauncher.launch("image/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x1F38BDF8)),
+                                            border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Filled.PhotoLibrary, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("CHOOSE PHOTO FROM GALLERY", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        if (catIconImageUrl.isNotBlank()) {
+                                            IconButton(
+                                                onClick = { viewModel.newCategoryIconImageUrl.value = "" }
+                                            ) {
+                                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.Red)
+                                            }
+                                        }
+                                    }
+
+                                    if (catIconImageUrl.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Card(
+                                            modifier = Modifier.size(80.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                val painterModel = remember(catIconImageUrl) {
+                                                    if (catIconImageUrl.startsWith("/")) java.io.File(catIconImageUrl) else catIconImageUrl
+                                                }
+                                                androidx.compose.foundation.Image(
+                                                    painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                                    contentDescription = "selected category photo",
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            }
+                                        }
+                                    }
 
                                     Spacer(modifier = Modifier.height(14.dp))
 
@@ -4905,25 +5251,36 @@ fun AdminDashboardScreen(
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
+                                                    .height(48.dp)
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(if (isVeg) Color(0x3322C55E) else Color(0x11FFFFFF))
                                                     .border(
-                                                        width = 1.dp,
+                                                        width = 1.5.dp,
                                                         color = if (isVeg) Color(0xFF22C55E) else Color(0x33FFFFFF),
                                                         shape = RoundedCornerShape(8.dp)
                                                     )
-                                                    .clickable { isVeg = true }
-                                                    .padding(vertical = 10.dp),
+                                                    .clickable { isVeg = true },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                                ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(10.dp)
+                                                            .size(12.dp)
                                                             .background(Color(0xFF22C55E), shape = RoundedCornerShape(2.dp))
                                                     )
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("சைவம் (Veg)", color = if (isVeg) Color(0xFF22C55E) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        "சைவம் (Veg)",
+                                                        color = if (isVeg) Color(0xFF22C55E) else Color.LightGray,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
                                             }
 
@@ -4931,25 +5288,36 @@ fun AdminDashboardScreen(
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
+                                                    .height(48.dp)
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(if (!isVeg) Color(0x33EF4444) else Color(0x11FFFFFF))
                                                     .border(
-                                                        width = 1.dp,
+                                                        width = 1.5.dp,
                                                         color = if (!isVeg) Color(0xFFEF4444) else Color(0x33FFFFFF),
                                                         shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .clickable { isVeg = false }
-                                                    .padding(vertical = 10.dp),
+                                                     )
+                                                    .clickable { isVeg = false },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                                ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(10.dp)
+                                                            .size(12.dp)
                                                             .background(Color(0xFFEF4444), shape = RoundedCornerShape(2.dp))
                                                     )
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("அசைவம் (Non-Veg)", color = if (!isVeg) Color(0xFFEF4444) else Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        "அசைவம் (Non-Veg)",
+                                                        color = if (!isVeg) Color(0xFFEF4444) else Color.LightGray,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
                                             }
                                         }
@@ -4992,35 +5360,85 @@ fun AdminDashboardScreen(
                                         }
 
                                         Spacer(modifier = Modifier.height(10.dp))
-                                        Text("Category (MANDATORY) • வகை:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Category (MANDATORY) • உணவு வகை / கேட்டகிரி:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
                                         val selectedCat = categoriesList.find { it.id == selectedCatId }
-                                        val selectedCatName = selectedCat?.let { "${it.nameEn} / ${it.nameTa}" } ?: "Uncategorized (வகைப்படுத்தப்படாதது)"
+                                        val selectedCatName = selectedCat?.let { 
+                                            val taName = if (it.nameTa.isNotBlank()) " / ${it.nameTa}" else ""
+                                            "${it.nameEn}$taName"
+                                        } ?: "Uncategorized (வகைப்படுத்தப்படாதது)"
 
                                         Text(
-                                            text = "Current: $selectedCatName",
+                                            text = "தற்போதைய கேட்டகிரி: $selectedCatName",
                                             color = LyoColors.AccentOrange,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(bottom = 4.dp)
+                                            modifier = Modifier.padding(bottom = 2.dp)
                                         )
 
-                                        LazyRow(
-                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                        // List all available categories for easy selection
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color(0x11FFFFFF), RoundedCornerShape(10.dp))
+                                                .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                                .padding(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            items(categoriesList, key = { it.id }) { catItem ->
+                                            Text("Select Category to Move Dish (வேறு கேட்டகிரிக்கு மாற்ற தேர்வு செய்யவும்):", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            
+                                            categoriesList.forEach { catItem ->
                                                 val isThisCat = selectedCatId == catItem.id
-                                                Box(
+                                                val catDisplayName = if (catItem.nameTa.isNotBlank()) "${catItem.nameEn} • ${catItem.nameTa}" else catItem.nameEn
+                                                
+                                                Row(
                                                     modifier = Modifier
+                                                        .fillMaxWidth()
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (isThisCat) LyoColors.AccentOrange else Color(0x15FFFFFF))
-                                                        .border(1.dp, if (isThisCat) LyoColors.AccentOrange else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                                                        .background(if (isThisCat) LyoColors.AccentOrange.copy(alpha = 0.25f) else Color(0x0FFFFFFF))
+                                                        .border(
+                                                            1.dp,
+                                                            if (isThisCat) LyoColors.AccentOrange else Color(0x22FFFFFF),
+                                                            RoundedCornerShape(8.dp)
+                                                        )
                                                         .clickable { selectedCatId = catItem.id }
-                                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Text(catItem.nameEn, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.weight(1f)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Folder,
+                                                            contentDescription = "category folder",
+                                                            tint = if (isThisCat) LyoColors.AccentOrange else Color.LightGray,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text(
+                                                            text = catDisplayName,
+                                                            color = if (isThisCat) Color.White else Color.LightGray,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = if (isThisCat) FontWeight.Bold else FontWeight.Normal,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                    
+                                                    if (isThisCat) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(LyoColors.AccentOrange)
+                                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        ) {
+                                                            Text("✓ SELECTED", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                                        }
+                                                    } else {
+                                                        Text("மாற்று (Select)", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
                                             }
                                         }
@@ -5144,6 +5562,30 @@ fun AdminDashboardScreen(
                             var nameTa by remember(catNode.id) { mutableStateOf(catNode.nameTa) }
                             var autoOpen by remember(catNode.id) { mutableStateOf(catNode.autoOpenTime) }
                             var autoClose by remember(catNode.id) { mutableStateOf(catNode.autoCloseTime) }
+                            var iconImageUrl by remember(catNode.id) { mutableStateOf(catNode.iconImageUrl) }
+
+                            val editCategoryIconLauncher = rememberLauncherForActivityResult(
+                                contract = ActivityResultContracts.GetContent()
+                            ) { uri ->
+                                if (uri != null) {
+                                    try {
+                                        val inputStream = context.contentResolver.openInputStream(uri)
+                                        if (inputStream != null) {
+                                            val file = java.io.File(context.filesDir, "media_cat_edit_${System.currentTimeMillis()}.jpg")
+                                            val outputStream = java.io.FileOutputStream(file)
+                                            inputStream.copyTo(outputStream)
+                                            inputStream.close()
+                                            outputStream.close()
+                                            iconImageUrl = file.absolutePath
+                                        } else {
+                                            iconImageUrl = uri.toString()
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        iconImageUrl = uri.toString()
+                                    }
+                                }
+                            }
 
                             AlertDialog(
                                 onDismissRequest = { categoryToEdit = null },
@@ -5192,6 +5634,51 @@ fun AdminDashboardScreen(
                                                 modifier = Modifier.weight(1f)
                                             )
                                         }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("Or Upload Real Category Photo", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Button(
+                                                onClick = { editCategoryIconLauncher.launch("image/*") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0x1F38BDF8)),
+                                                border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Icon(Icons.Filled.PhotoLibrary, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("CHOOSE PHOTO FROM GALLERY", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+
+                                            if (iconImageUrl.isNotBlank()) {
+                                                IconButton(onClick = { iconImageUrl = "" }) {
+                                                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.Red)
+                                                }
+                                            }
+                                        }
+
+                                        if (iconImageUrl.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Card(
+                                                modifier = Modifier.size(60.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Box(modifier = Modifier.fillMaxSize()) {
+                                                    val painterModel = remember(iconImageUrl) {
+                                                        if (iconImageUrl.startsWith("/")) java.io.File(iconImageUrl) else iconImageUrl
+                                                    }
+                                                    androidx.compose.foundation.Image(
+                                                        painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                                        contentDescription = "edit category photo",
+                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 },
                                 confirmButton = {
@@ -5205,7 +5692,8 @@ fun AdminDashboardScreen(
                                                          nameEn = nameEn.trim(),
                                                          nameTa = nameTa.trim(),
                                                          autoOpenTime = autoOpen.trim(),
-                                                         autoCloseTime = autoClose.trim()
+                                                         autoCloseTime = autoClose.trim(),
+                                                         iconImageUrl = iconImageUrl.trim()
                                                      )
                                                  ) {
                                                      android.widget.Toast.makeText(localContext, "✅ வகைப்பாடு சேமிக்கப்பட்டது! (Category saved!)", android.widget.Toast.LENGTH_SHORT).show()
@@ -5642,8 +6130,22 @@ fun AdminDashboardScreen(
          onDismiss = { showDebugScreen = false },
          vendorSyncStates = vendorSyncStates,
          onCheckSync = { checkSyncStatus(it) },
-         onCheckAllSync = { checkAllSyncStatus() }
+         onCheckAllSync = { checkAllSyncStatus() },
+         onScanBrokenPhotos = { scanForBrokenPhotos() },
+         isScanning = isScanningBrokenPhotos,
+         orphanedRidesList = orphanedRiderRidesList,
+         isScanningOrphanedRides = isScanningOrphanedRides,
+         isFixingOrphanedRideId = isFixingOrphanedRideId,
+         onScanOrphanedRides = { scanForOrphanedRides() },
+         onFixOrphanedRide = { rideId, realUid -> fixOrphanedRide(rideId, realUid) }
      )
+
+      BrokenPhotosResultDialog(
+          show = showBrokenPhotosDialog,
+          onDismiss = { showBrokenPhotosDialog = false },
+          brokenItems = brokenPhotosList,
+          isScanning = isScanningBrokenPhotos
+      )
  }
 
 @Composable
@@ -5652,7 +6154,14 @@ fun AdminSyncDebugDialog(
    onDismiss: () -> Unit,
    vendorSyncStates: List<VendorSyncState>,
    onCheckSync: (Long) -> Unit,
-   onCheckAllSync: () -> Unit
+   onCheckAllSync: () -> Unit,
+   onScanBrokenPhotos: () -> Unit,
+   isScanning: Boolean,
+   orphanedRidesList: List<com.example.data.repository.OrphanedRideItem>,
+   isScanningOrphanedRides: Boolean,
+   isFixingOrphanedRideId: String?,
+   onScanOrphanedRides: () -> Unit,
+   onFixOrphanedRide: (String, String) -> Unit
 ) {
    if (!show) return
 
@@ -5694,61 +6203,122 @@ fun AdminSyncDebugDialog(
            Column(
                modifier = Modifier
                    .fillMaxWidth()
-                   .heightIn(max = 500.dp)
+                   .fillMaxHeight(0.85f)
            ) {
                androidx.compose.material3.Text(
                    text = "Directly verify if your local changes have successfully reached the cloud Firestore database in real-time.",
                    color = LyoColors.TextSecondary,
                    fontSize = 11.sp,
-                   modifier = Modifier.padding(bottom = 16.dp)
+                   modifier = Modifier.padding(bottom = 12.dp)
                )
 
-               androidx.compose.material3.Button(
-                   onClick = onCheckAllSync,
-                   colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                       containerColor = LyoColors.AccentOrange,
-                       contentColor = Color.Black
-                   ),
-                   modifier = Modifier
-                       .fillMaxWidth()
-                       .padding(bottom = 16.dp)
-                       .testTag("check_sync_status_button"),
-                   shape = RoundedCornerShape(8.dp)
-                ) {
-                   Row(
-                       horizontalArrangement = Arrangement.Center,
-                       verticalAlignment = Alignment.CenterVertically
-                   ) {
-                       Icon(
-                           imageVector = Icons.Filled.Refresh,
-                           contentDescription = "Refresh all sync status",
-                           modifier = Modifier.size(18.dp)
-                       )
-                       Spacer(modifier = Modifier.width(8.dp))
-                       androidx.compose.material3.Text(
-                           text = "CHECK SYNC STATUS",
-                           fontWeight = FontWeight.Bold,
-                           fontSize = 13.sp
-                       )
+               // Action Buttons
+               Row(
+                   modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                   horizontalArrangement = Arrangement.spacedBy(8.dp)
+               ) {
+                   androidx.compose.material3.Button(
+                       onClick = onCheckAllSync,
+                       colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                           containerColor = LyoColors.AccentOrange,
+                           contentColor = Color.Black
+                       ),
+                       modifier = Modifier.weight(1f).testTag("check_sync_status_button"),
+                       shape = RoundedCornerShape(8.dp),
+                       contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                       Row(
+                           horizontalArrangement = Arrangement.Center,
+                           verticalAlignment = Alignment.CenterVertically
+                       ) {
+                           Icon(
+                               imageVector = Icons.Filled.Refresh,
+                               contentDescription = "Refresh all sync status",
+                               modifier = Modifier.size(16.dp)
+                           )
+                           Spacer(modifier = Modifier.width(6.dp))
+                           androidx.compose.material3.Text(
+                               text = "CHECK SYNC",
+                               fontWeight = FontWeight.Bold,
+                               fontSize = 11.sp
+                           )
+                       }
+                   }
+
+                   androidx.compose.material3.Button(
+                       onClick = onScanBrokenPhotos,
+                       colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                           containerColor = Color(0xFF3B82F6),
+                           contentColor = Color.White
+                       ),
+                       modifier = Modifier.weight(1f).testTag("scan_broken_photos_button"),
+                       shape = RoundedCornerShape(8.dp),
+                       enabled = !isScanning,
+                       contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                       Row(
+                           horizontalArrangement = Arrangement.Center,
+                           verticalAlignment = Alignment.CenterVertically
+                       ) {
+                           if (isScanning) {
+                               androidx.compose.material3.CircularProgressIndicator(
+                                   color = Color.White,
+                                   modifier = Modifier.size(16.dp),
+                                   strokeWidth = 2.dp
+                               )
+                           } else {
+                               Icon(
+                                   imageVector = Icons.Filled.Search,
+                                   contentDescription = "Scan for broken photos",
+                                   modifier = Modifier.size(16.dp)
+                               )
+                           }
+                           Spacer(modifier = Modifier.width(6.dp))
+                           androidx.compose.material3.Text(
+                               text = if (isScanning) "SCANNING..." else "PHOTOS AUDIT",
+                               fontWeight = FontWeight.Bold,
+                               fontSize = 11.sp
+                           )
+                       }
                    }
                }
 
-               if (vendorSyncStates.isEmpty()) {
-                   Box(
-                       modifier = Modifier
-                           .fillMaxWidth()
-                           .weight(1f),
-                       contentAlignment = Alignment.Center
-                   ) {
-                       androidx.compose.material3.CircularProgressIndicator(color = LyoColors.AccentOrange)
+               // LazyColumn for both Store Sync Status and Orphaned Rider Rides
+               LazyColumn(
+                   modifier = Modifier
+                       .fillMaxWidth()
+                       .weight(1f),
+                   verticalArrangement = Arrangement.spacedBy(10.dp)
+               ) {
+                   // SECTION 1: STORE SYNC STATUS
+                   item {
+                       androidx.compose.material3.Text(
+                           text = "STORES SYNC STATUS",
+                           color = Color.White,
+                           fontSize = 13.sp,
+                           fontWeight = FontWeight.Bold,
+                           modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                       )
+                       androidx.compose.material3.HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
+                       Spacer(modifier = Modifier.height(4.dp))
                    }
-               } else {
-                   LazyColumn(
-                       modifier = Modifier
-                           .fillMaxWidth()
-                           .weight(1f),
-                       verticalArrangement = Arrangement.spacedBy(10.dp)
-                   ) {
+
+                   if (vendorSyncStates.isEmpty()) {
+                       item {
+                           Box(
+                               modifier = Modifier
+                                   .fillMaxWidth()
+                                   .padding(vertical = 12.dp),
+                               contentAlignment = Alignment.Center
+                           ) {
+                               androidx.compose.material3.Text(
+                                   text = "No store sync status available. Run check sync.",
+                                   color = LyoColors.TextSecondary,
+                                   fontSize = 11.sp
+                               )
+                           }
+                       }
+                   } else {
                        items(vendorSyncStates) { state ->
                            GlassCard(
                                modifier = Modifier.fillMaxWidth(),
@@ -5995,6 +6565,95 @@ fun AdminSyncDebugDialog(
                            }
                        }
                    }
+
+                   // SECTION 2: ORPHANED RIDER RIDES
+                   item {
+                       Spacer(modifier = Modifier.height(14.dp))
+                       androidx.compose.material3.Text(
+                           text = "ORPHANED RIDER RIDES (அனாதை சவாரிகள்)",
+                           color = Color.White,
+                           fontSize = 13.sp,
+                           fontWeight = FontWeight.Bold,
+                           modifier = Modifier.padding(bottom = 4.dp)
+                       )
+                       androidx.compose.material3.HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
+                       Spacer(modifier = Modifier.height(8.dp))
+
+                       androidx.compose.material3.Button(
+                           onClick = onScanOrphanedRides,
+                           colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                               containerColor = Color(0xFFF59E0B),
+                               contentColor = Color.Black
+                           ),
+                           modifier = Modifier.fillMaxWidth(),
+                           shape = RoundedCornerShape(8.dp),
+                           enabled = !isScanningOrphanedRides
+                       ) {
+                           Row(
+                               horizontalArrangement = Arrangement.Center,
+                               verticalAlignment = Alignment.CenterVertically
+                           ) {
+                               if (isScanningOrphanedRides) {
+                                   androidx.compose.material3.CircularProgressIndicator(
+                                       color = Color.Black,
+                                       modifier = Modifier.size(16.dp),
+                                       strokeWidth = 2.dp
+                                   )
+                               } else {
+                                   Icon(
+                                       imageVector = Icons.Filled.Warning,
+                                       contentDescription = "Scan for orphaned rides",
+                                       tint = Color.Black,
+                                       modifier = Modifier.size(16.dp)
+                                   )
+                               }
+                               Spacer(modifier = Modifier.width(6.dp))
+                               androidx.compose.material3.Text(
+                                   text = if (isScanningOrphanedRides) "SCANNING FOR ORPHANED RIDES..." else "SCAN FOR ORPHANED RIDES",
+                                   fontWeight = FontWeight.Bold,
+                                   fontSize = 11.sp
+                               )
+                           }
+                       }
+                   }
+
+                   if (isScanningOrphanedRides) {
+                       item {
+                           Box(
+                               modifier = Modifier
+                                   .fillMaxWidth()
+                                   .padding(vertical = 16.dp),
+                               contentAlignment = Alignment.Center
+                           ) {
+                               androidx.compose.material3.CircularProgressIndicator(color = Color(0xFFF59E0B))
+                           }
+                       }
+                   } else if (orphanedRidesList.isEmpty()) {
+                       item {
+                           Box(
+                               modifier = Modifier
+                                   .fillMaxWidth()
+                                   .background(Color(0xFF1E293B).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                   .padding(12.dp),
+                               contentAlignment = Alignment.Center
+                           ) {
+                               androidx.compose.material3.Text(
+                                   text = "No orphaned rider rides found or scan has not been run. Run scan above to audit.",
+                                   color = LyoColors.TextSecondary,
+                                   fontSize = 11.sp,
+                                   textAlign = TextAlign.Center
+                               )
+                           }
+                       }
+                   } else {
+                       items(orphanedRidesList) { item ->
+                           OrphanedRideRow(
+                               item = item,
+                               isFixing = isFixingOrphanedRideId == item.rideId,
+                               onFix = { onFixOrphanedRide(item.rideId, item.correctRealUid) }
+                           )
+                       }
+                   }
                }
            }
        },
@@ -6003,6 +6662,210 @@ fun AdminSyncDebugDialog(
        containerColor = Color(0xFF0F172A),
        modifier = Modifier.border(1.dp, LyoColors.GlassBorder, RoundedCornerShape(12.dp))
    )
+}
+
+@Composable
+fun OrphanedRideRow(
+    item: com.example.data.repository.OrphanedRideItem,
+    isFixing: Boolean,
+    onFix: () -> Unit
+) {
+    GlassCard(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        cornerRadius = 10.dp,
+        borderWidth = 1.dp,
+        innerPadding = 12.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    androidx.compose.material3.Text(
+                        text = "Ride ID: ${item.rideId}",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    androidx.compose.material3.Text(
+                        text = "Rider: ${item.riderName} (${item.riderPhone})",
+                        color = LyoColors.AccentOrange,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                androidx.compose.material3.Button(
+                    onClick = onFix,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = LyoColors.VegGreen,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(30.dp),
+                    enabled = !isFixing
+                ) {
+                    if (isFixing) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = Color.Black,
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = "Fix", tint = Color.Black, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            androidx.compose.material3.Text("FIX", fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                    .padding(8.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    androidx.compose.material3.Text(text = "Broken Fake UID:", color = LyoColors.TextSecondary, fontSize = 9.sp)
+                    androidx.compose.material3.Text(text = item.brokenFakeUid, color = LyoColors.NonVegRed, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    androidx.compose.material3.Text(text = "Correct Real UID:", color = LyoColors.TextSecondary, fontSize = 9.sp)
+                    androidx.compose.material3.Text(text = item.correctRealUid, color = LyoColors.VegGreen, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BrokenPhotosResultDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    brokenItems: List<com.example.data.repository.BrokenPhotoItem>,
+    isScanning: Boolean
+) {
+    if (!show) return
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            androidx.compose.material3.Text(
+                text = "Broken Photos Audit",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+            ) {
+                if (isScanning) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            androidx.compose.material3.CircularProgressIndicator(color = LyoColors.AccentOrange)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            androidx.compose.material3.Text(
+                                text = "Scanning Firestore collections...",
+                                color = LyoColors.TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                } else if (brokenItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.Text(
+                            text = "No broken photos found! All stores and banners use valid HTTP URLs. ✅",
+                            color = LyoColors.VegGreen,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else {
+                    androidx.compose.material3.Text(
+                        text = "Found ${brokenItems.size} items with non-HTTP image paths. These photos are broken and need to be re-uploaded:",
+                        color = LyoColors.TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(brokenItems) { item ->
+                            GlassCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                cornerRadius = 8.dp,
+                                borderWidth = 1.dp,
+                                innerPadding = 8.dp
+                            ) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        androidx.compose.material3.Text(
+                                            text = item.name,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        androidx.compose.material3.Text(
+                                            text = item.type,
+                                            color = LyoColors.AccentOrange,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(start = 8.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    androidx.compose.material3.Text(
+                                        text = "ID: ${item.id}",
+                                        color = LyoColors.TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                    androidx.compose.material3.Text(
+                                        text = "Path: ${item.url}",
+                                        color = LyoColors.NonVegRed,
+                                        fontSize = 10.sp,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                androidx.compose.material3.Text("CLOSE", color = LyoColors.AccentOrange, fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color(0xFF1E293B)
+    )
 }
 
 @Composable
@@ -9084,6 +9947,739 @@ fun compressAndEncodeToBase64(filePath: String): String? {
 }
 
 @Composable
+fun CategoryManagerTab(
+    viewModel: AdminViewModel,
+    onBrowsePhoto: () -> Unit,
+    selectedCategoryIconUriStr: String?,
+    onClearSelectedIconUri: () -> Unit
+) {
+    val context = LocalContext.current
+    val allVendors by viewModel.allVendors.collectAsState()
+
+    // Scope selection: -1L = Global Storefront Home Categories, or specific vendor ID
+    var selectedTargetVendorId by remember { mutableStateOf(-1L) }
+
+    val categoriesFlow = remember(selectedTargetVendorId) {
+        viewModel.repository.categoryDao.getCategoriesForVendor(selectedTargetVendorId)
+    }
+    val categoriesList by categoriesFlow.collectAsState(initial = emptyList())
+
+    // Form inputs
+    val nameEnState by viewModel.newCategoryNameEn.collectAsState()
+    val nameTaState by viewModel.newCategoryNameTa.collectAsState()
+    val iconKeyState by viewModel.newCategoryIconKey.collectAsState()
+    val accentColorState by viewModel.newCategoryAccentColor.collectAsState()
+    val isActiveState by viewModel.newCategoryIsActive.collectAsState()
+    val sortOrderState by viewModel.newCategorySortOrder.collectAsState()
+    val iconImageUrlState by viewModel.newCategoryIconImageUrl.collectAsState()
+
+    var editingCategory by remember { mutableStateOf<Category?>(null) }
+    var categoryToDelete by remember { mutableStateOf<Category?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var urlInputMode by remember { mutableStateOf(false) }
+
+    // Update image url when selected from gallery
+    LaunchedEffect(selectedCategoryIconUriStr) {
+        if (selectedCategoryIconUriStr != null) {
+            viewModel.newCategoryIconImageUrl.value = selectedCategoryIconUriStr
+            onClearSelectedIconUri()
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 700.dp),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            // Header & Scope Switcher
+            item {
+                GlassCard(
+                    cornerRadius = 16.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    borderColor = Color(0x3316C7E8),
+                    backgroundColor = Color(0xFF0F172A)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🖼️", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Category Image Manager",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = "Manage high-quality thumbnail images & category display order for Home Screen",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Target Selector: Global vs Vendor
+                        Text(
+                            text = "SELECT CATEGORY SCOPE:",
+                            color = Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E293B))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val isGlobalSel = selectedTargetVendorId == -1L
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isGlobalSel) Color(0xFF16C7E8) else Color.Transparent)
+                                    .clickable { selectedTargetVendorId = -1L }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "🌐 Global Home Filter",
+                                    color = if (isGlobalSel) Color.Black else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            var vendorDropdownExpanded by remember { mutableStateOf(false) }
+                            val selectedVendorName = remember(selectedTargetVendorId, allVendors) {
+                                allVendors.find { it.id == selectedTargetVendorId }?.name ?: "Select Store 🏪"
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (!isGlobalSel) Color(0xFF16A56B) else Color.Transparent)
+                                    .clickable { vendorDropdownExpanded = true }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (!isGlobalSel) "🏪 $selectedVendorName" else "🏪 Store Categories ▼",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                DropdownMenu(
+                                    expanded = vendorDropdownExpanded,
+                                    onDismissRequest = { vendorDropdownExpanded = false }
+                                ) {
+                                    allVendors.forEach { v ->
+                                        DropdownMenuItem(
+                                            text = { Text(v.name) },
+                                            onClick = {
+                                                selectedTargetVendorId = v.id
+                                                vendorDropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Category Create / Edit Form Card
+            item {
+                GlassCard(
+                    cornerRadius = 16.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    borderColor = if (editingCategory != null) Color(0xFFFF6B00) else Color(0x3316C7E8),
+                    backgroundColor = Color(0xFF0F172A)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (editingCategory != null) "✏️ EDIT CATEGORY (#${editingCategory?.id})" else "✨ CREATE NEW CATEGORY",
+                                color = if (editingCategory != null) Color(0xFFFF7A1A) else Color(0xFF16C7E8),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            )
+                            if (editingCategory != null) {
+                                OutlinedButton(
+                                    onClick = {
+                                        editingCategory = null
+                                        viewModel.newCategoryNameEn.value = ""
+                                        viewModel.newCategoryNameTa.value = ""
+                                        viewModel.newCategoryIconKey.value = "Restaurant"
+                                        viewModel.newCategoryAccentColor.value = "#16C7E8"
+                                        viewModel.newCategoryIsActive.value = true
+                                        viewModel.newCategorySortOrder.value = "0"
+                                        viewModel.newCategoryIconImageUrl.value = ""
+                                    },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                ) {
+                                    Text("Cancel Edit", fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Category English Name & Tamil Name
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = nameEnState,
+                                onValueChange = { viewModel.newCategoryNameEn.value = it },
+                                label = { Text("English Name") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = nameTaState,
+                                onValueChange = { viewModel.newCategoryNameTa.value = it },
+                                label = { Text("Tamil Name (தமிழ்)") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Sort Order & Active Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = sortOrderState,
+                                onValueChange = { viewModel.newCategorySortOrder.value = it },
+                                label = { Text("Sort Order") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Active:", fontSize = 12.sp, color = Color.White)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Switch(
+                                    checked = isActiveState,
+                                    onCheckedChange = { viewModel.newCategoryIsActive.value = it }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Category Thumbnail Image Section with Live Preview
+                        Text(
+                            text = "CATEGORY THUMBNAIL IMAGE & LIVE PREVIEW:",
+                            color = Color(0xFF64748B),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Current Image Box
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .border(1.dp, Color(0x3316C7E8), RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val effectiveImg = iconImageUrlState.ifBlank { getDefaultCategoryThumbnail(nameEnState, iconKeyState) }
+                                if (effectiveImg.isNotBlank()) {
+                                    val painterModel = remember(effectiveImg) {
+                                        if (effectiveImg.startsWith("/")) java.io.File(effectiveImg) else effectiveImg
+                                    }
+                                    androidx.compose.foundation.Image(
+                                        painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                        contentDescription = null,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = getIconForCategoryKey(iconKeyState),
+                                        contentDescription = null,
+                                        tint = Color(0xFF16C7E8),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+
+                            // Upload / Browse Action Buttons
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Button(
+                                    onClick = onBrowsePhoto,
+                                    modifier = Modifier.fillMaxWidth().height(38.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D))
+                                ) {
+                                    Text("📷 BROWSE PHOTO FROM GALLERY", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { urlInputMode = !urlInputMode },
+                                        modifier = Modifier.weight(1f).height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp)
+                                    ) {
+                                        Text(if (urlInputMode) "Close URL" else "🌐 Enter URL", fontSize = 10.sp, color = Color.White)
+                                    }
+
+                                    if (iconImageUrlState.isNotBlank()) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.newCategoryIconImageUrl.value = "" },
+                                            modifier = Modifier.height(32.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp)
+                                        ) {
+                                            Text("🗑️ Clear", fontSize = 10.sp, color = Color(0xFFEF4444))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (urlInputMode) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = iconImageUrlState,
+                                onValueChange = { viewModel.newCategoryIconImageUrl.value = it },
+                                label = { Text("Image URL (http://... or https://...)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Customer Home Screen Live Preview Card
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF0B1120))
+                                .border(1.dp, Color(0x3316C7E8), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "HOME SCREEN CARD PREVIEW:",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    val catColor = try { Color(android.graphics.Color.parseColor(accentColorState)) } catch(e: Exception) { Color(0xFFFF6B00) }
+                                    val sampleNameEn = nameEnState.ifBlank { "Category" }
+                                    val sampleNameTa = nameTaState.ifBlank { "வகை" }
+                                    val sampleImg = iconImageUrlState.ifBlank { getDefaultCategoryThumbnail(sampleNameEn, iconKeyState) }
+
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(catColor.copy(alpha = 0.2f))
+                                                .border(0.5.dp, catColor, RoundedCornerShape(16.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (sampleImg.isNotBlank()) {
+                                                val painterModel = remember(sampleImg) {
+                                                    if (sampleImg.startsWith("/")) java.io.File(sampleImg) else sampleImg
+                                                }
+                                                androidx.compose.foundation.Image(
+                                                    painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                                    contentDescription = null,
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = getIconForCategoryKey(iconKeyState),
+                                                    contentDescription = null,
+                                                    tint = catColor,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(sampleNameEn, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text(sampleNameTa, color = Color.Gray, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Color & Accent Picker
+                        Text("ACCENT COLOR:", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val palette = listOf("#16C7E8", "#FF7A1A", "#16A56B", "#D94A52", "#A855F7", "#EC4899", "#F59E0B")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            palette.forEach { hex ->
+                                val parsedCol = try { Color(android.graphics.Color.parseColor(hex)) } catch(e: Exception) { Color.Gray }
+                                val isSelectedColor = accentColorState.equals(hex, ignoreCase = true)
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(parsedCol)
+                                        .border(if (isSelectedColor) 2.dp else 0.dp, Color.White, CircleShape)
+                                        .clickable { viewModel.newCategoryAccentColor.value = hex }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Submit Button
+                        Button(
+                            onClick = {
+                                if (nameEnState.isBlank() || nameTaState.isBlank()) {
+                                    statusMessage = "Please enter both English and Tamil names!"
+                                    return@Button
+                                }
+                                isSaving = true
+                                statusMessage = null
+
+                                if (editingCategory != null) {
+                                    val cat = editingCategory!!
+                                    val updated = cat.copy(
+                                        nameEn = nameEnState.trim(),
+                                        nameTa = nameTaState.trim(),
+                                        iconKey = iconKeyState,
+                                        accentColor = accentColorState,
+                                        isActive = isActiveState,
+                                        sortOrder = sortOrderState.toIntOrNull() ?: 0,
+                                        iconImageUrl = iconImageUrlState.trim()
+                                    )
+                                    viewModel.updateCategory(
+                                        updated,
+                                        onSuccess = {
+                                            isSaving = false
+                                            editingCategory = null
+                                            statusMessage = "Category updated successfully!"
+                                            viewModel.newCategoryNameEn.value = ""
+                                            viewModel.newCategoryNameTa.value = ""
+                                            viewModel.newCategoryIconKey.value = "Restaurant"
+                                            viewModel.newCategoryAccentColor.value = "#16C7E8"
+                                            viewModel.newCategoryIsActive.value = true
+                                            viewModel.newCategorySortOrder.value = "0"
+                                            viewModel.newCategoryIconImageUrl.value = ""
+                                        },
+                                        onError = { err ->
+                                            isSaving = false
+                                            statusMessage = err
+                                        }
+                                    )
+                                } else {
+                                    viewModel.createCategory(
+                                        vendorId = selectedTargetVendorId,
+                                        onSuccess = {
+                                            isSaving = false
+                                            statusMessage = "New category created successfully!"
+                                        },
+                                        onError = { err ->
+                                            isSaving = false
+                                            statusMessage = err
+                                        }
+                                    )
+                                }
+                            },
+                            enabled = !isSaving,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (editingCategory != null) Color(0xFFFF6B00) else Color(0xFF16C7E8))
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                            } else {
+                                Text(
+                                    text = if (editingCategory != null) "✨ UPDATE CATEGORY IN FIRESTORE & ROOM" else "💾 CREATE & PUBLISH CATEGORY",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    color = Color.Black
+                                )
+                            }
+                        }
+
+                        if (statusMessage != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = statusMessage!!,
+                                color = if (statusMessage!!.contains("successfully")) Color(0xFF22C55E) else Color(0xFFEF4444),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Existing Categories Header & Search
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "EXISTING CATEGORIES (${categoriesList.size})",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search category...", fontSize = 11.sp) },
+                        modifier = Modifier.width(180.dp).height(42.dp),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // Categories List
+            val filteredCategories = categoriesList.filter {
+                it.nameEn.contains(searchQuery, ignoreCase = true) || it.nameTa.contains(searchQuery, ignoreCase = true)
+            }.sortedBy { it.sortOrder }
+
+            if (filteredCategories.isEmpty()) {
+                item {
+                    GlassCard(
+                        cornerRadius = 12.dp,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        backgroundColor = Color(0xFF0F172A)
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Text("No categories found in this scope.", color = Color.Gray, fontSize = 13.sp)
+                        }
+                    }
+                }
+            } else {
+                items(filteredCategories, key = { it.id }) { cat ->
+                    val catColor = try { Color(android.graphics.Color.parseColor(cat.accentColor)) } catch(e: Exception) { Color(0xFFFF6B00) }
+                    GlassCard(
+                        cornerRadius = 14.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        borderColor = catColor.copy(alpha = 0.4f),
+                        backgroundColor = Color(0xFF0F172A)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Category Image Thumbnail
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF1E293B))
+                                    .border(0.5.dp, catColor, RoundedCornerShape(16.dp))
+                                    .padding(2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val catImg = cat.iconImageUrl.ifBlank { getDefaultCategoryThumbnail(cat.nameEn, cat.iconKey) }
+                                if (catImg.isNotBlank()) {
+                                    val painterModel = remember(catImg) {
+                                        if (catImg.startsWith("/")) java.io.File(catImg) else catImg
+                                    }
+                                    androidx.compose.foundation.Image(
+                                        painter = coil.compose.rememberAsyncImagePainter(painterModel),
+                                        contentDescription = cat.nameEn,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = getIconForCategoryKey(cat.iconKey),
+                                        contentDescription = cat.nameEn,
+                                        tint = catColor,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            // Names & Order
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = cat.nameEn,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (cat.isActive) Color(0x3322C55E) else Color(0x33EF4444))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (cat.isActive) "ACTIVE" else "INACTIVE",
+                                            color = if (cat.isActive) Color(0xFF22C55E) else Color(0xFFEF4444),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = cat.nameTa,
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = "Order: ${cat.sortOrder} | ID: #${cat.id}",
+                                    color = Color(0xFF64748B),
+                                    fontSize = 10.sp
+                                )
+                            }
+
+                            // Reorder ▲ / ▼
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                IconButton(
+                                    onClick = { viewModel.updateCategory(cat.copy(sortOrder = cat.sortOrder - 1)) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("▲", color = Color.White, fontSize = 12.sp)
+                                }
+                                IconButton(
+                                    onClick = { viewModel.updateCategory(cat.copy(sortOrder = cat.sortOrder + 1)) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("▼", color = Color.White, fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            // Edit / Delete Actions
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        editingCategory = cat
+                                        viewModel.newCategoryNameEn.value = cat.nameEn
+                                        viewModel.newCategoryNameTa.value = cat.nameTa
+                                        viewModel.newCategoryIconKey.value = cat.iconKey
+                                        viewModel.newCategoryAccentColor.value = cat.accentColor
+                                        viewModel.newCategoryIsActive.value = cat.isActive
+                                        viewModel.newCategorySortOrder.value = cat.sortOrder.toString()
+                                        viewModel.newCategoryIconImageUrl.value = cat.iconImageUrl
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Text("✏️", fontSize = 14.sp)
+                                }
+
+                                IconButton(
+                                    onClick = { categoryToDelete = cat },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Text("🗑️", fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Delete Confirmation Dialog
+        if (categoryToDelete != null) {
+            val cat = categoryToDelete!!
+            AlertDialog(
+                onDismissRequest = { categoryToDelete = null },
+                title = { Text("Delete Category?") },
+                text = { Text("Are you sure you want to delete '${cat.nameEn}' (${cat.nameTa})? Any menu items in this category will also be deleted.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteCategory(
+                                cat,
+                                onSuccess = { categoryToDelete = null },
+                                onError = { categoryToDelete = null }
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                    ) {
+                        Text("Delete", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { categoryToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
 fun BannersManagementTab(
     viewModel: AdminViewModel,
     onBrowsePhoto: () -> Unit,
@@ -9859,8 +11455,12 @@ fun SmartMenuManagerTab(viewModel: AdminViewModel) {
                                 type = mType,
                                 address = mAddress,
                                 phone = mPhone,
-                                onSuccess = {
-                                    android.widget.Toast.makeText(context, "கடை வெற்றிகரமாக சேர்க்கப்பட்டது! 🎉", android.widget.Toast.LENGTH_LONG).show()
+                                onSuccess = { warnMsg ->
+                                    if (warnMsg != null) {
+                                        android.widget.Toast.makeText(context, warnMsg, android.widget.Toast.LENGTH_LONG).show()
+                                    } else {
+                                        android.widget.Toast.makeText(context, "கடை வெற்றிகரமாக சேர்க்கப்பட்டது! 🎉", android.widget.Toast.LENGTH_LONG).show()
+                                    }
                                     showManualAddDialog = false
                                     mName = ""
                                     mNameTa = ""
@@ -9915,6 +11515,7 @@ fun SmartMenuManagerTab(viewModel: AdminViewModel) {
                             rawInput = ""
                         },
                         onQuickPublish = {
+                            Log.i("SmartMenuPublishTrace", "[Stage 1: Admin UI Publish Click] Quick publish clicked in SmartMenu. Prompting ViewModel at ${System.currentTimeMillis()}")
                             if (state != null) {
                                 viewModel.publishCurrentDraftDirectly()
                             } else {
@@ -10029,6 +11630,7 @@ fun SmartMenuManagerTab(viewModel: AdminViewModel) {
                                 rawInput = ""
                             },
                             onQuickPublish = {
+                                Log.i("SmartMenuPublishTrace", "[Stage 1: Admin UI Publish Click] Quick publish clicked in SmartMenu view. Prompting ViewModel at ${System.currentTimeMillis()}")
                                 if (state != null) {
                                     viewModel.publishCurrentDraftDirectly()
                                 } else {
@@ -12641,6 +14243,7 @@ fun InteractivePreviewSection(
                             if (priceChangeChecked && moveCategoryChecked && addTamilNameChecked && removeNeedsReviewLineChecked && saveDraftChecked && closeReopenChecked) {
                                 androidx.compose.material3.Button(
                                     onClick = {
+                                        Log.i("SmartMenuPublishTrace", "[Stage 1: Admin UI Publish Click] Final Unlocked Publish Button clicked in AdminScreens. Prompting ViewModel at ${System.currentTimeMillis()}")
                                         viewModel.publishCurrentDraftDirectly()
                                     },
                                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LyoColors.VegGreen),

@@ -204,15 +204,18 @@ class LyoRepository(val db: AppDatabase) {
                     if (firebaseUser != null) {
                         val uid = firebaseUser.uid
                         val current = currentUser.value
-                        if (current == null || (current.uid != uid && current.role != "ADMIN" && current.uid != "anantharaj_superadmin_uid")) {
+                        if (current == null || current.uid != uid) {
                             CoroutineScope(Dispatchers.IO).launch {
-                                Log.d("LyoRepository", "AuthStateListener: Firebase user connected (UID: $uid). Restoring session...")
+                                Log.d("LyoRepository", "AuthStateListener: Firebase user connected (UID: $uid). Restoring/aligning session...")
                                 var recoveredUser = db.userDao.getUserByPhone(uid)
                                 if (recoveredUser == null) {
                                     val phone = firebaseUser.phoneNumber ?: firebaseUser.email ?: ""
                                     if (phone.isNotEmpty()) {
                                         recoveredUser = db.userDao.getUserByPhone(phone)
                                     }
+                                }
+                                if (recoveredUser == null && firebaseUser.email?.contains("Anantharaj", ignoreCase = true) == true) {
+                                    recoveredUser = db.userDao.getUserByPhone("Anantharajmech")
                                 }
                                 if (recoveredUser == null) {
                                     try {
@@ -256,10 +259,17 @@ class LyoRepository(val db: AppDatabase) {
                                     }
                                 }
                                 if (recoveredUser != null) {
-                                    currentUser.value = recoveredUser
-                                    Log.d("LyoRepository", "AuthStateListener: Session restored successfully for: ${recoveredUser.phone}")
+                                    val alignedUser = recoveredUser.copy(uid = uid)
+                                    db.userDao.insertUser(alignedUser)
+                                    currentUser.value = alignedUser
+                                    Log.d("LyoRepository", "AuthStateListener: Session restored & UID aligned successfully ($uid) for: ${alignedUser.phone}")
+                                } else if (current != null) {
+                                    val alignedUser = current.copy(uid = uid)
+                                    db.userDao.insertUser(alignedUser)
+                                    currentUser.value = alignedUser
+                                    Log.d("LyoRepository", "AuthStateListener: Updated current user UID to $uid")
                                 } else {
-                                    Log.e("LyoRepository", "AuthStateListener: Session recovery skipped/deferred (could be active login/registration in progress).")
+                                    Log.e("LyoRepository", "AuthStateListener: Session recovery skipped/deferred.")
                                 }
                             }
                         }
@@ -491,15 +501,16 @@ class LyoRepository(val db: AppDatabase) {
                 }
                 firebaseRegistered = true
                 
-                val finalUid = LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: finalUser.uid
-                var resolvedUid = finalUid
-                if (resolvedUid.isBlank()) {
-                    resolvedUid = db.userDao.getUserByPhone(user.phone)?.uid ?: ""
+                val dbUser = db.userDao.getUserByPhone(user.phone)
+                val resolvedUid = if (dbUser != null && dbUser.uid.isNotBlank() && !dbUser.uid.startsWith("uid_")) dbUser.uid else {
+                    LyoFirebaseHelper.getUidByPhone(LyoFirebaseHelper.normalizePhone(user.phone)) ?: finalUser.uid
                 }
-                if (resolvedUid.isBlank()) {
-                    resolvedUid = "uid_${LyoFirebaseHelper.normalizePhone(user.phone)}"
+                val finalResolvedUid = if (resolvedUid.isBlank()) {
+                    "uid_${LyoFirebaseHelper.normalizePhone(user.phone)}"
+                } else {
+                    resolvedUid
                 }
-                finalUser = finalUser.copy(uid = resolvedUid)
+                finalUser = finalUser.copy(uid = finalResolvedUid)
             } catch (e: Exception) {
                 Log.e("LyoRepository", "Firebase registration/sync failed, rejecting registration: ${e.message}")
                 throw e
@@ -535,23 +546,31 @@ class LyoRepository(val db: AppDatabase) {
     }
 
     suspend fun deleteCustomer(user: User) = withContext(Dispatchers.IO) {
-        db.userDao.deleteUserByPhone(user.phone)
         try {
-            LyoFirebaseHelper.deleteUserFromFirestore(user.phone)
+            if (!LyoFirebaseHelper.ensureFirebaseAdminAuth()) {
+                throw IllegalStateException("Your admin session has expired. Please log out and log in again.")
+            }
+            val success = LyoFirebaseHelper.deleteUserFromFirestore(user.phone)
+            if (!success) {
+                throw Exception("Failed to delete customer profile from Firestore.")
+            }
+            db.userDao.deleteUserByPhone(user.phone)
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteCustomer] SUCCESS for customer: ${user.phone}")
         } catch (e: Exception) {
-            Log.e("LyoRepository", "Firebase Firestore delete customer background deferred: ${e.message}")
+            Log.e("LyoRepository", "Firebase Firestore delete customer failed: ${e.message}")
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteCustomer] FAILED for customer: ${user.phone}: ${e.message}")
+            throw e
         }
     }
 
     suspend fun deleteRiderWithAuthCleanup(rider: User) = withContext(Dispatchers.IO) {
-        // 1. Delete from local Room database immediately so UI updates instantly
-        db.userDao.deleteUserByPhone(rider.phone)
-        
         val authInstance = com.google.firebase.auth.FirebaseAuth.getInstance()
         val firestoreInstance = com.google.firebase.firestore.FirebaseFirestore.getInstance()
         
-        // 2. Perform Firebase / Firestore cleanup
         try {
+            if (!LyoFirebaseHelper.ensureFirebaseAdminAuth()) {
+                throw IllegalStateException("Your admin session has expired. Please log out and log in again.")
+            }
             val riderUid = LyoFirebaseHelper.getUidByPhone(rider.phone) ?: rider.uid
             if (riderUid.isNotBlank()) {
                 // Fetch rider's doc to get passwordHash before deleting
@@ -570,21 +589,37 @@ class LyoRepository(val db: AppDatabase) {
                         // Delete rider's Firebase Auth account
                         authInstance.currentUser?.delete()?.await()
                         Log.d("LyoRepository", "Successfully deleted rider Firebase Auth account.")
-                    } catch (e: Exception) {
-                        Log.e("LyoRepository", "Failed deleting rider Firebase Auth account: ${e.message}")
-                    }
-                    
-                    // Re-authenticate Admin
-                    if (adminCreds != null && currentAdmin != null) {
-                        try {
-                            val adminEmail = "${adminCreds.first.trim()}@lyofoods.in"
-                            val adminPass = adminCreds.second
-                            val adminHash = LyoFirebaseHelper.hashPassword(adminPass)
-                            authInstance.signInWithEmailAndPassword(adminEmail, adminHash).await()
-                            currentUser.value = currentAdmin
-                            Log.d("LyoRepository", "Successfully re-authenticated Admin session.")
-                        } catch (e: Exception) {
-                            Log.e("LyoRepository", "Failed to re-authenticate Admin session: ${e.message}")
+                    } catch (authEx: Exception) {
+                        Log.e("LyoRepository", "Failed deleting rider Firebase Auth account: ${authEx.message}")
+                        throw Exception("Failed to delete delivery partner Auth account: ${authEx.message}", authEx)
+                    } finally {
+                        // ALWAYS re-authenticate Admin
+                        if (adminCreds != null && currentAdmin != null) {
+                            try {
+                                val rawInput = adminCreds.first.trim()
+                                val adminEmail = if (rawInput.equals("Anantharajmech", ignoreCase = true) || 
+                                                    rawInput.equals("8778148899", ignoreCase = true) || 
+                                                    rawInput.equals("AnanthEinstein", ignoreCase = true) || 
+                                                    rawInput.equals("AnantharajEinstein@gmail.com", ignoreCase = true) ||
+                                                    rawInput.equals("anantharajeinstein@gmail.com", ignoreCase = true)) {
+                                    "AnantharajEinstein@gmail.com"
+                                } else if (rawInput.contains("@")) {
+                                    rawInput
+                                } else {
+                                    "${rawInput}@lyofoods.in"
+                                }
+                                val adminPass = adminCreds.second
+                                val adminHash = LyoFirebaseHelper.hashPassword(adminPass)
+                                try {
+                                    authInstance.signInWithEmailAndPassword(adminEmail, adminPass).await()
+                                } catch (e: Exception) {
+                                    authInstance.signInWithEmailAndPassword(adminEmail, adminHash).await()
+                                }
+                                currentUser.value = currentAdmin
+                                Log.d("LyoRepository", "Successfully re-authenticated Admin session for $adminEmail.")
+                            } catch (reauthEx: Exception) {
+                                Log.e("LyoRepository", "Failed to re-authenticate Admin session: ${reauthEx.message}")
+                            }
                         }
                     }
                 }
@@ -594,18 +629,35 @@ class LyoRepository(val db: AppDatabase) {
                 firestoreInstance.collection("admins").document(riderUid).delete().await()
                 firestoreInstance.collection("riders").document(riderUid).delete().await()
                 Log.d("LyoRepository", "Deleted rider documents from Firestore.")
+            } else {
+                throw Exception("Could not resolve UID for delivery partner to delete from Firestore.")
             }
+            
+            // Delete from local Room database ONLY on success
+            db.userDao.deleteUserByPhone(rider.phone)
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteRiderWithAuthCleanup] SUCCESS for rider: ${rider.phone}")
         } catch (e: Exception) {
             Log.e("LyoRepository", "Error in deleteRiderWithAuthCleanup: ${e.message}")
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteRiderWithAuthCleanup] FAILED for rider: ${rider.phone}: ${e.message}")
+            throw e
         }
     }
 
     suspend fun deleteAdmin(user: User) = withContext(Dispatchers.IO) {
-        db.userDao.deleteUserByPhone(user.phone)
         try {
-            LyoFirebaseHelper.deleteUserFromFirestore(user.phone)
+            if (!LyoFirebaseHelper.ensureFirebaseAdminAuth()) {
+                throw IllegalStateException("Your admin session has expired. Please log out and log in again.")
+            }
+            val success = LyoFirebaseHelper.deleteUserFromFirestore(user.phone)
+            if (!success) {
+                throw Exception("Failed to delete admin profile from Firestore.")
+            }
+            db.userDao.deleteUserByPhone(user.phone)
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteAdmin] SUCCESS for admin: ${user.phone}")
         } catch (e: Exception) {
-            Log.e("LyoRepository", "Firebase Firestore delete admin background deferred: ${e.message}")
+            Log.e("LyoRepository", "Firebase Firestore delete admin failed: ${e.message}")
+            Log.i("FirestoreSyncAudit", "FirestoreSyncAudit: [deleteAdmin] FAILED for admin: ${user.phone}: ${e.message}")
+            throw e
         }
     }
 
@@ -733,7 +785,8 @@ class LyoRepository(val db: AppDatabase) {
             redeemedPoints = redeemedPoints,
             paymentMethod = LyoFirebaseHelper.transientPaymentMethod,
             paymentStatus = initialPaymentStatus,
-            upiTransactionId = initialUpiTxId
+            upiTransactionId = initialUpiTxId,
+            gstAmount = gst
         )
         
         db.orderDao.insertOrder(newOrder)
@@ -1167,12 +1220,12 @@ class LyoRepository(val db: AppDatabase) {
         val existingGlobalCategories = db.categoryDao.getCategoriesForVendorList(-1L)
         if (existingGlobalCategories.isEmpty()) {
             val defaultGlobals = listOf(
-                Category(vendorId = -1L, nameEn = "Restaurant", nameTa = "உணவகம்", sortOrder = 0, iconKey = "Restaurant", accentColor = "#16C7E8", isActive = true),
-                Category(vendorId = -1L, nameEn = "Cafe", nameTa = "காபி கடை", sortOrder = 1, iconKey = "Coffee", accentColor = "#FF7A1A", isActive = true),
-                Category(vendorId = -1L, nameEn = "Hotel", nameTa = "ஹோட்டல்", sortOrder = 2, iconKey = "LocalDining", accentColor = "#16A56B", isActive = true),
-                Category(vendorId = -1L, nameEn = "Bakery", nameTa = "பேக்கரி", sortOrder = 3, iconKey = "Cake", accentColor = "#D94A52", isActive = true),
-                Category(vendorId = -1L, nameEn = "Snack Shop", nameTa = "சிற்றுண்டி", sortOrder = 4, iconKey = "LocalPizza", accentColor = "#A855F7", isActive = true),
-                Category(vendorId = -1L, nameEn = "Dhaba", nameTa = "தாபா", sortOrder = 5, iconKey = "Store", accentColor = "#EC4899", isActive = true)
+                Category(vendorId = -1L, nameEn = "Restaurant", nameTa = "உணவகம்", sortOrder = 0, iconKey = "Restaurant", accentColor = "#16C7E8", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=300&q=80"),
+                Category(vendorId = -1L, nameEn = "Cafe", nameTa = "காபி கடை", sortOrder = 1, iconKey = "Coffee", accentColor = "#FF7A1A", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=300&q=80"),
+                Category(vendorId = -1L, nameEn = "Hotel", nameTa = "ஹோட்டல்", sortOrder = 2, iconKey = "LocalDining", accentColor = "#16A56B", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=300&q=80"),
+                Category(vendorId = -1L, nameEn = "Bakery", nameTa = "பேக்கரி", sortOrder = 3, iconKey = "Cake", accentColor = "#D94A52", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=300&q=80"),
+                Category(vendorId = -1L, nameEn = "Snack Shop", nameTa = "சிற்றுண்டி", sortOrder = 4, iconKey = "LocalPizza", accentColor = "#A855F7", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=300&q=80"),
+                Category(vendorId = -1L, nameEn = "Dhaba", nameTa = "தாபா", sortOrder = 5, iconKey = "Store", accentColor = "#EC4899", isActive = true, iconImageUrl = "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=300&q=80")
             )
             for (cat in defaultGlobals) {
                 db.categoryDao.insertCategory(cat)
@@ -1828,34 +1881,39 @@ class LyoRepository(val db: AppDatabase) {
 
     suspend fun deleteVendor(vendor: Vendor) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val dbInstance = LyoFirebaseHelper.firestore ?: throw Exception("Firebase Firestore not initialized")
-        LyoFirebaseHelper.ensureFirebaseAdminAuth()
+        if (!LyoFirebaseHelper.ensureFirebaseAdminAuth()) {
+            throw IllegalStateException("Your admin session has expired. Please log out and log in again.")
+        }
 
         // 1. Fetch vendor's categories and menu items
         val vendorItems = db.menuItemDao.getMenuItemsForVendorList(vendor.id)
         val vendorCategories = db.categoryDao.getCategoriesForVendorList(vendor.id)
 
-        // 2. Perform Firestore write batch deletions
-        val batch = dbInstance.batch()
+        // 2. Perform Firestore write batch deletions in safe chunked batches
+        val batchOps = mutableListOf<(com.google.firebase.firestore.WriteBatch) -> Unit>()
         
         // Vendor deletions
         val vendorIdStr = vendor.id.toString()
-        batch.delete(dbInstance.collection("vendors").document(vendorIdStr))
-        batch.delete(dbInstance.collection("stores").document(vendorIdStr))
+        batchOps.add { b -> b.delete(dbInstance.collection("vendors").document(vendorIdStr)) }
+        batchOps.add { b -> b.delete(dbInstance.collection("stores").document(vendorIdStr)) }
         
         // Category deletions
         vendorCategories.forEach { cat ->
-            batch.delete(dbInstance.collection("categories").document(cat.id.toString()))
+            batchOps.add { b -> b.delete(dbInstance.collection("categories").document(cat.id.toString())) }
         }
         
         // Menu item deletions
         vendorItems.forEach { item ->
             val itemIdStr = item.id.toString()
-            batch.delete(dbInstance.collection("menu_items").document(itemIdStr))
-            batch.delete(dbInstance.collection("vendors").document(vendorIdStr).collection("products").document(itemIdStr))
+            batchOps.add { b -> b.delete(dbInstance.collection("menu_items").document(itemIdStr)) }
+            batchOps.add { b -> b.delete(dbInstance.collection("vendors").document(vendorIdStr).collection("products").document(itemIdStr)) }
         }
 
-        // Commit batch and await result
-        batch.commit().await()
+        batchOps.chunked(400).forEach { chunk ->
+            val currentBatch = dbInstance.batch()
+            chunk.forEach { op -> op(currentBatch) }
+            currentBatch.commit().await()
+        }
 
         // 3. Delete from local Room database ONLY on success
         db.menuItemDao.deleteMenuItemsByVendor(vendor.id)

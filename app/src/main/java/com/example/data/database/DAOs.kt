@@ -40,6 +40,9 @@ interface UserDao {
 
     @Query("DELETE FROM users WHERE role = 'DELIVERY' OR role = 'RIDER'")
     suspend fun clearAllRiders()
+
+    @Query("DELETE FROM users")
+    suspend fun deleteAllUsers()
 }
 
 @Dao

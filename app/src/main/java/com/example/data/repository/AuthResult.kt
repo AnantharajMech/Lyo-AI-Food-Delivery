@@ -17,7 +17,13 @@ sealed class AuthResult {
             is Loading -> "Authenticating... Please wait. (சரிபார்க்கப்படுகிறது... தயவுசெய்து காத்திருக்கவும்.)"
             is Success -> ""
             is InvalidCredentials -> "Incorrect mobile number or password. (தவறான கைபேசி எண் அல்லது கடவுச்சொல்.)"
-            is AccountNotFound -> "Account not found. Please register first. (கணக்கு கண்டறியப்படவில்லை. தயவுசெய்து முதலில் பதிவு செய்யவும்.)"
+            is AccountNotFound -> {
+                if (portal == "ADMIN") {
+                    "Admin account not found. (அட்மின் கணக்கு கண்டறியப்படவில்லை.)"
+                } else {
+                    "Account not found. Please register first. (கணக்கு கண்டறியப்படவில்லை. தயவுசெய்து முதலில் பதிவு செய்யவும்.)"
+                }
+            }
             is WrongRole -> {
                 when (portal) {
                     "ADMIN" -> "This account does not have Admin access. (இந்த கணக்கிற்கு நிர்வாகி அனுமதி இல்லை.)"

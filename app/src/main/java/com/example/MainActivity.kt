@@ -91,13 +91,16 @@ class MainActivity : ComponentActivity() {
         var activeOrderId by remember { mutableLongStateOf(0L) }
 
         if (remoteLogout) {
+          LaunchedEffect(Unit) {
+              authViewModel.logout()
+          }
           androidx.compose.material3.AlertDialog(
               onDismissRequest = { /* Prevent dismissing */ },
               containerColor = LyoColors.CardSlate,
               title = { Text("Session Terminated 🚨", color = LyoColors.TextPrimary, fontWeight = FontWeight.Bold) },
               text = {
                   Text(
-                      "உங்கள் கணக்கு மற்றொரு சாதனத்திலிருந்து வெளியேற்றப்பட்டுள்ளது!\n\nThis device has been logged out of this account remotely because the session was terminated or revoked on another device.",
+                      "Your account has been signed in on another device.\n\nஉங்கள் கணக்கு மற்றொரு சாதனத்தில் உள்நுழையப்பட்டுள்ளது!",
                       color = LyoColors.TextSecondary,
                       fontSize = 13.sp
                   )
@@ -107,11 +110,10 @@ class MainActivity : ComponentActivity() {
                       colors = ButtonDefaults.buttonColors(containerColor = LyoColors.AccentOrange),
                       onClick = {
                           storefrontViewModel.repository.remoteLogoutTriggered.value = false
-                          authViewModel.logout()
                           currentRoute = "LOGIN"
                       }
                   ) {
-                      Text("சரி (OK)", color = LyoColors.DarkCyanBg)
+                      Text("OK / சரி", color = LyoColors.DarkCyanBg)
                   }
               }
           )
@@ -206,7 +208,7 @@ class MainActivity : ComponentActivity() {
                                       isActiveRider = doc.getBoolean("isActiveRider") ?: true,
                                       salaryType = doc.getString("salaryType") ?: "MONTHLY",
                                       salaryRate = doc.getDouble("salaryRate") ?: 0.0,
-                                      uid = doc.getString("uid") ?: uid,
+                                      uid = uid,
                                       updatedAt = firestoreTs
                                     )
                                   
